@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,14 +16,14 @@ type Store struct {
 
 // MetricsRow is a flat struct representing a single metrics sample for API use.
 type MetricsRow struct {
-	TS       int64   `json:"ts"`
-	CPU      float64 `json:"cpu"`
-	MemUsed  uint64  `json:"mem_used"`
-	MemTotal uint64  `json:"mem_total"`
-	DiskUsed uint64  `json:"disk_used"`
-	DiskTotal uint64 `json:"disk_total"`
-	NetRx    uint64  `json:"net_rx"`
-	NetTx    uint64  `json:"net_tx"`
+	TS        int64   `json:"ts"`
+	CPU       float64 `json:"cpu"`
+	MemUsed   uint64  `json:"mem_used"`
+	MemTotal  uint64  `json:"mem_total"`
+	DiskUsed  uint64  `json:"disk_used"`
+	DiskTotal uint64  `json:"disk_total"`
+	NetRx     uint64  `json:"net_rx"`
+	NetTx     uint64  `json:"net_tx"`
 }
 
 // New opens (or creates) the SQLite database at the given path, runs migrations,
@@ -60,41 +59,42 @@ CREATE TABLE IF NOT EXISTS nodes (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     token      TEXT NOT NULL UNIQUE,
-    ip         TEXT,
-    os         TEXT,
-    arch       TEXT,
+    ip         TEXT DEFAULT '',
+    os         TEXT DEFAULT '',
+    arch       TEXT DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT 0,
-    last_seen  INTEGER NOT NULL DEFAULT 0,
-    online     INTEGER NOT NULL DEFAULT 0
+    last_seen  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS metrics (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id    TEXT    NOT NULL,
-    ts         INTEGER NOT NULL,
-    cpu        REAL    NOT NULL DEFAULT 0,
-    mem_used   INTEGER NOT NULL DEFAULT 0,
-    mem_total  INTEGER NOT NULL DEFAULT 0,
-    disk_used  INTEGER NOT NULL DEFAULT 0,
-    disk_total INTEGER NOT NULL DEFAULT 0,
-    net_rx     INTEGER NOT NULL DEFAULT 0,
-    net_tx     INTEGER NOT NULL DEFAULT 0
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id     TEXT NOT NULL,
+    ts          INTEGER NOT NULL,
+    cpu_percent REAL DEFAULT 0,
+    mem_used    INTEGER DEFAULT 0,
+    mem_total   INTEGER DEFAULT 0,
+    disk_used   INTEGER DEFAULT 0,
+    disk_total  INTEGER DEFAULT 0,
+    net_rx      INTEGER DEFAULT 0,
+    net_tx      INTEGER DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_metrics_node_ts ON metrics (node_id, ts);
+CREATE INDEX IF NOT EXISTS idx_metrics_node_ts ON metrics(node_id, ts);
 
 CREATE TABLE IF NOT EXISTS processes (
-    node_id TEXT PRIMARY KEY,
-    data    TEXT NOT NULL DEFAULT '[]',
-    updated INTEGER NOT NULL DEFAULT 0
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL UNIQUE,
+    ts      INTEGER NOT NULL,
+    data    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS service_checks (
-    node_id TEXT    NOT NULL,
-    name    TEXT    NOT NULL,
-    status  TEXT    NOT NULL DEFAULT '',
-    checked INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (node_id, name)
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    status       TEXT DEFAULT 'unknown',
+    last_checked INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(node_id, name)
 );
 `)
 	return err
@@ -106,72 +106,69 @@ CREATE TABLE IF NOT EXISTS service_checks (
 
 // UpsertNode inserts or updates a node record.
 func (s *Store) UpsertNode(node *models.Node) error {
-	online := 0
-	if node.Online {
-		online = 1
-	}
 	_, err := s.db.Exec(`
-INSERT INTO nodes (id, name, token, ip, os, arch, created_at, last_seen, online)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO nodes (id, name, token, ip, os, arch, created_at, last_seen)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name       = excluded.name,
     token      = excluded.token,
     ip         = excluded.ip,
     os         = excluded.os,
     arch       = excluded.arch,
-    last_seen  = excluded.last_seen,
-    online     = excluded.online
+    last_seen  = excluded.last_seen
 `,
 		node.ID, node.Name, node.Token, node.IP, node.OS, node.Arch,
-		node.CreatedAt, node.LastSeen, online,
+		node.CreatedAt, node.LastSeen,
 	)
+	return err
+}
+
+// UpdateLastSeen updates the last_seen timestamp for the given node.
+func (s *Store) UpdateLastSeen(nodeID string) error {
+	_, err := s.db.Exec(`UPDATE nodes SET last_seen = ? WHERE id = ?`, time.Now().Unix(), nodeID)
 	return err
 }
 
 // GetNodeByToken returns the node with the given token, or (nil, nil) if not found.
 func (s *Store) GetNodeByToken(token string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, os, arch, created_at, last_seen, online
+SELECT id, name, token, ip, os, arch, created_at, last_seen
 FROM nodes WHERE token = ?`, token)
 
 	var n models.Node
-	var online int
 	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch,
-		&n.CreatedAt, &n.LastSeen, &online)
+		&n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	n.Online = online != 0
 	return &n, nil
 }
 
 // GetNodeByID returns the node with the given ID, or (nil, nil) if not found.
 func (s *Store) GetNodeByID(id string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, os, arch, created_at, last_seen, online
+SELECT id, name, token, ip, os, arch, created_at, last_seen
 FROM nodes WHERE id = ?`, id)
 
 	var n models.Node
-	var online int
 	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch,
-		&n.CreatedAt, &n.LastSeen, &online)
+		&n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	n.Online = online != 0
 	return &n, nil
 }
 
 // ListNodes returns all registered nodes.
 func (s *Store) ListNodes() ([]*models.Node, error) {
 	rows, err := s.db.Query(`
-SELECT id, name, token, ip, os, arch, created_at, last_seen, online
+SELECT id, name, token, ip, os, arch, created_at, last_seen
 FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -181,12 +178,10 @@ FROM nodes ORDER BY name`)
 	var nodes []*models.Node
 	for rows.Next() {
 		var n models.Node
-		var online int
 		if err := rows.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch,
-			&n.CreatedAt, &n.LastSeen, &online); err != nil {
+			&n.CreatedAt, &n.LastSeen); err != nil {
 			return nil, err
 		}
-		n.Online = online != 0
 		nodes = append(nodes, &n)
 	}
 	return nodes, rows.Err()
@@ -206,7 +201,7 @@ func (s *Store) InsertMetrics(nodeID string, m *models.MetricsPayload) error {
 	}
 
 	_, err := s.db.Exec(`
-INSERT INTO metrics (node_id, ts, cpu, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx)
+INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nodeID, m.TS, m.CPU,
 		m.Mem.Used, m.Mem.Total,
@@ -220,10 +215,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ordered by ascending timestamp.
 func (s *Store) QueryMetrics(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx
-FROM metrics
-WHERE node_id = ? AND ts >= ? AND ts <= ?
-ORDER BY ts ASC`,
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx
+FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
 	if err != nil {
@@ -254,18 +247,13 @@ func (s *Store) PruneOldMetrics(retentionDays int) error {
 // Process operations
 // -------------------------------------------------------------------------
 
-// UpsertProcesses stores the process list for a node as a JSON blob,
+// UpsertProcesses stores a pre-serialized JSON process list for a node,
 // overwriting any existing record.
-func (s *Store) UpsertProcesses(nodeID string, processes []models.Process) error {
-	data, err := json.Marshal(processes)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`
-INSERT INTO processes (node_id, data, updated) VALUES (?, ?, ?)
-ON CONFLICT(node_id) DO UPDATE SET data = excluded.data, updated = excluded.updated`,
-		nodeID, string(data), time.Now().Unix(),
-	)
+func (s *Store) UpsertProcesses(nodeID string, ts int64, data string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO processes (node_id, ts, data) VALUES (?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET ts=excluded.ts, data=excluded.data
+	`, nodeID, ts, data)
 	return err
 }
 
@@ -288,19 +276,18 @@ func (s *Store) GetProcesses(nodeID string) (string, error) {
 // -------------------------------------------------------------------------
 
 // UpsertServiceCheck inserts or updates a service check result for a node.
-func (s *Store) UpsertServiceCheck(nodeID string, svc models.Service) error {
+func (s *Store) UpsertServiceCheck(nodeID, name, status string) error {
 	_, err := s.db.Exec(`
-INSERT INTO service_checks (node_id, name, status, checked) VALUES (?, ?, ?, ?)
-ON CONFLICT(node_id, name) DO UPDATE SET status = excluded.status, checked = excluded.checked`,
-		nodeID, svc.Name, svc.Status, time.Now().Unix(),
-	)
+		INSERT INTO service_checks (node_id, name, status, last_checked) VALUES (?, ?, ?, ?)
+		ON CONFLICT(node_id, name) DO UPDATE SET status=excluded.status, last_checked=excluded.last_checked
+	`, nodeID, name, status, time.Now().Unix())
 	return err
 }
 
 // GetServiceChecks returns all service checks for a node as a slice of maps.
 func (s *Store) GetServiceChecks(nodeID string) ([]map[string]any, error) {
 	rows, err := s.db.Query(`
-SELECT name, status, checked FROM service_checks WHERE node_id = ? ORDER BY name`,
+SELECT name, status, last_checked FROM service_checks WHERE node_id = ? ORDER BY name`,
 		nodeID,
 	)
 	if err != nil {
@@ -311,14 +298,14 @@ SELECT name, status, checked FROM service_checks WHERE node_id = ? ORDER BY name
 	var result []map[string]any
 	for rows.Next() {
 		var name, status string
-		var checked int64
-		if err := rows.Scan(&name, &status, &checked); err != nil {
+		var lastChecked int64
+		if err := rows.Scan(&name, &status, &lastChecked); err != nil {
 			return nil, err
 		}
 		result = append(result, map[string]any{
-			"name":    name,
-			"status":  status,
-			"checked": checked,
+			"name":         name,
+			"status":       status,
+			"last_checked": lastChecked,
 		})
 	}
 	return result, rows.Err()
