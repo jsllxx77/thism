@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/thism-dev/thism/frontend"
 	"github.com/thism-dev/thism/internal/api"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/store"
@@ -29,7 +30,7 @@ func main() {
 	h := hub.New(s)
 	go h.Run()
 
-	router := api.NewRouter(s, h, *adminToken, nil)
+	router := api.NewRouter(s, h, *adminToken, frontend.Handler())
 	log.Printf("ThisM server listening on :%s", *port)
 	log.Fatal(http.ListenAndServe(":"+*port, router))
 }
