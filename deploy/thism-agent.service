@@ -1,0 +1,11 @@
+[Unit]
+Description=ThisM Agent
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/thism-agent --server ws://YOUR_SERVER_HOST:8080 --token YOUR_NODE_TOKEN --name YOUR_NODE_NAME
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

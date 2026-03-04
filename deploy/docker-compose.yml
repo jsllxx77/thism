@@ -1,0 +1,9 @@
+services:
+  thism-server:
+    image: thism-server:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    command: ["--port", "8080", "--db", "/data/thism.db", "--token", "${ADMIN_TOKEN}"]
+    restart: unless-stopped

@@ -1,0 +1,13 @@
+[Unit]
+Description=ThisM Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/thism-server --port 8080 --db /var/lib/thism/data.db --token YOUR_ADMIN_TOKEN
+Restart=always
+RestartSec=5
+User=thism
+WorkingDirectory=/var/lib/thism
+
+[Install]
+WantedBy=multi-user.target
