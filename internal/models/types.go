@@ -4,7 +4,7 @@ package models
 type Node struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Token     string `json:"token"`
+	Token     string `json:"-"` // never serialized to API responses
 	IP        string `json:"ip"`
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
