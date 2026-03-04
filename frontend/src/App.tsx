@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Layout } from "./components/Layout"
 import { Dashboard } from "./pages/Dashboard"
+import { NodeDetail } from "./pages/NodeDetail"
 
 export default function App() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
@@ -15,7 +16,7 @@ export default function App() {
           >
             ← Back to Dashboard
           </button>
-          <p className="text-white/50">Node detail for {selectedNode} — coming in Task 11</p>
+          <NodeDetail nodeId={selectedNode} />
         </div>
       ) : (
         <Dashboard onSelectNode={setSelectedNode} />
