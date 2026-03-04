@@ -72,6 +72,16 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 	})
 
 	// ---------------------------------------------------------------
+	// Unauthenticated endpoints for agent installation
+	// ---------------------------------------------------------------
+	r.Get("/install.sh", func(w http.ResponseWriter, req *http.Request) {
+		handleInstallScript(w, req)
+	})
+	r.Get("/dl/{filename}", func(w http.ResponseWriter, req *http.Request) {
+		handleDownload(w, req)
+	})
+
+	// ---------------------------------------------------------------
 	// Fallback
 	// ---------------------------------------------------------------
 	if frontendHandler != nil {
@@ -249,6 +259,90 @@ func handleGetServices(w http.ResponseWriter, r *http.Request, s *store.Store) {
 		checks = []map[string]any{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": checks})
+}
+
+// -----------------------------------------------------------------------
+// Agent installation handlers
+// -----------------------------------------------------------------------
+
+func handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	name := r.URL.Query().Get("name")
+	if token == "" || name == "" {
+		http.Error(w, "token and name query params required", http.StatusBadRequest)
+		return
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
+		scheme = fwd
+	}
+	host := r.Host
+	baseURL := scheme + "://" + host
+
+	script := "#!/bin/bash\nset -e\n\n" +
+		"TOKEN=\"" + token + "\"\n" +
+		"NAME=\"" + name + "\"\n" +
+		"BASE=\"" + baseURL + "\"\n\n" +
+		"ARCH=$(uname -m)\n" +
+		"case \"$ARCH\" in\n" +
+		"  x86_64|amd64) ARCH=\"amd64\" ;;\n" +
+		"  aarch64|arm64) ARCH=\"arm64\" ;;\n" +
+		"  *) echo \"Unsupported architecture: $ARCH\"; exit 1 ;;\n" +
+		"esac\n\n" +
+		"OS=$(uname -s | tr '[:upper:]' '[:lower:]')\n" +
+		"if [ \"$OS\" != \"linux\" ]; then\n" +
+		"  echo \"Unsupported OS: $OS (only linux is supported)\"\n" +
+		"  exit 1\n" +
+		"fi\n\n" +
+		"BINARY=\"thism-agent-${OS}-${ARCH}\"\n" +
+		"echo \"Downloading ${BINARY}...\"\n" +
+		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o /usr/local/bin/thism-agent\n" +
+		"chmod +x /usr/local/bin/thism-agent\n\n" +
+		"WS_SCHEME=\"ws\"\n" +
+		"case \"$BASE\" in\n" +
+		"  https://*) WS_SCHEME=\"wss\" ;;\n" +
+		"esac\n" +
+		"WS_HOST=$(echo \"$BASE\" | sed 's|^https\\?://||')\n\n" +
+		"cat > /etc/systemd/system/thism-agent.service <<UNIT\n" +
+		"[Unit]\n" +
+		"Description=ThisM Agent\n" +
+		"After=network-online.target\n" +
+		"Wants=network-online.target\n\n" +
+		"[Service]\n" +
+		"ExecStart=/usr/local/bin/thism-agent --server ${WS_SCHEME}://${WS_HOST} --token ${TOKEN} --name ${NAME}\n" +
+		"Restart=always\n" +
+		"RestartSec=5\n\n" +
+		"[Install]\n" +
+		"WantedBy=multi-user.target\n" +
+		"UNIT\n\n" +
+		"systemctl daemon-reload\n" +
+		"systemctl enable --now thism-agent\n" +
+		"echo \"thisM agent installed and started successfully.\"\n"
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(script))
+}
+
+func handleDownload(w http.ResponseWriter, r *http.Request) {
+	filename := chi.URLParam(r, "filename")
+
+	allowed := map[string]bool{
+		"thism-agent-linux-amd64": true,
+		"thism-agent-linux-arm64": true,
+	}
+	if !allowed[filename] {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	filepath := "dist/" + filename
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+	http.ServeFile(w, r, filepath)
 }
 
 // -----------------------------------------------------------------------
