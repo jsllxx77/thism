@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Layout } from "./components/Layout"
+import { Dashboard } from "./pages/Dashboard"
 
 export default function App() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
@@ -10,14 +11,14 @@ export default function App() {
         <div>
           <button
             onClick={() => setSelectedNode(null)}
-            className="text-xs text-white/40 hover:text-white mb-4 flex items-center gap-1"
+            className="text-xs text-white/40 hover:text-white mb-4 flex items-center gap-1 transition-colors"
           >
-            ← Back
+            ← Back to Dashboard
           </button>
-          <p className="text-white/50">Node: {selectedNode} (detail page coming in Task 11)</p>
+          <p className="text-white/50">Node detail for {selectedNode} — coming in Task 11</p>
         </div>
       ) : (
-        <p className="text-white/50">Dashboard coming in Task 10</p>
+        <Dashboard onSelectNode={setSelectedNode} />
       )}
     </Layout>
   )
