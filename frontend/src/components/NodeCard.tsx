@@ -1,7 +1,6 @@
-import type { Node } from "../lib/api"
-import { Badge } from "./ui/badge"
-import { cn } from "../lib/utils"
+import { Card, Progress, Tag } from "antd"
 import { Cpu, MemoryStick } from "lucide-react"
+import type { Node } from "../lib/api"
 
 type Props = {
   node: Node
@@ -11,92 +10,80 @@ type Props = {
   onClick?: () => void
 }
 
-function ProgressBar({ value, max, colorClass }: { value: number; max: number; colorClass: string }) {
-  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0
-  return (
-    <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-      <div
-        className={cn("h-full rounded-full transition-all duration-500", colorClass)}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  )
-}
-
-function cpuColor(cpu: number) {
-  if (cpu > 80) return "bg-red-500"
-  if (cpu > 60) return "bg-amber-500"
-  return "bg-emerald-500"
-}
-
-function memColor(pct: number) {
-  if (pct > 80) return "bg-red-500"
-  if (pct > 60) return "bg-amber-500"
-  return "bg-blue-500"
+function metricColor(value: number): string {
+  if (value > 80) return "#f43f5e"
+  if (value > 60) return "#f59e0b"
+  return "#34d399"
 }
 
 export function NodeCard({ node, cpu = 0, memUsed = 0, memTotal = 0, onClick }: Props) {
-  const memPct = memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0
+  const memPct = memTotal > 0 ? (memUsed / memTotal) * 100 : 0
 
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      className={cn(
-        "relative overflow-hidden cursor-pointer rounded-xl p-4",
-        "bg-white/[0.03] border border-white/10",
-        "hover:border-white/20 hover:bg-white/[0.05] transition-all duration-200",
-        !node.online && "opacity-50 grayscale"
-      )}
+      aria-label={node.name}
+      className={`w-full text-left rounded-xl border-0 p-0 bg-transparent transition-transform hover:-translate-y-0.5 ${
+        !node.online ? "opacity-70" : ""
+      }`}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="min-w-0 flex-1 pr-2">
-          <h3 className="font-medium text-sm truncate">{node.name}</h3>
-          <p className="text-xs text-white/40 mt-0.5 truncate">
-            {node.ip || "—"} · {node.os}/{node.arch}
+      <Card className="glass-panel glass-panel-hover !border-white/15 !rounded-xl [&_.ant-card-body]:p-4">
+        <div className="flex items-start justify-between mb-4 gap-3">
+          <div className="min-w-0">
+            <h3 className="font-medium text-sm text-white truncate">{node.name}</h3>
+            <p className="text-xs text-white/45 mt-0.5 truncate">
+              {node.ip || "—"} · {node.os}/{node.arch}
+            </p>
+          </div>
+          <Tag
+            color={node.online ? "green" : "default"}
+            className="!m-0 !font-medium !text-[11px] !px-2 !py-0.5"
+          >
+            {node.online ? "Online" : "Offline"}
+          </Tag>
+        </div>
+
+        <div className="space-y-3 text-xs">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="flex items-center gap-1.5 text-white/55">
+                <Cpu className="w-3 h-3" /> CPU
+              </span>
+              <span className="text-white/85">{cpu.toFixed(1)}%</span>
+            </div>
+            <Progress
+              percent={Number(cpu.toFixed(1))}
+              showInfo={false}
+              size={["100%", 6]}
+              strokeColor={metricColor(cpu)}
+              trailColor="rgba(255,255,255,0.12)"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="flex items-center gap-1.5 text-white/55">
+                <MemoryStick className="w-3 h-3" /> MEM
+              </span>
+              <span className="text-white/85">{memPct.toFixed(1)}%</span>
+            </div>
+            <Progress
+              percent={Number(memPct.toFixed(1))}
+              showInfo={false}
+              size={["100%", 6]}
+              strokeColor={metricColor(memPct)}
+              trailColor="rgba(255,255,255,0.12)"
+            />
+          </div>
+        </div>
+
+        {!node.online && (
+          <p className="mt-3 text-[11px] text-white/45">
+            Last seen {new Date(node.last_seen * 1000).toLocaleString()}
           </p>
-        </div>
-        {node.online ? (
-          <Badge className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 shrink-0 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-            Online
-          </Badge>
-        ) : (
-          <Badge className="bg-white/5 text-white/30 border border-white/10 text-[10px] px-2 py-0.5 shrink-0">
-            Offline
-          </Badge>
         )}
-      </div>
-
-      {/* Metrics */}
-      <div className="space-y-2.5 text-xs">
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="flex items-center gap-1.5 text-white/50">
-              <Cpu className="w-3 h-3" /> CPU
-            </span>
-            <span className={cpu > 80 ? "text-red-400" : "text-white/70"}>{cpu.toFixed(1)}%</span>
-          </div>
-          <ProgressBar value={cpu} max={100} colorClass={cpuColor(cpu)} />
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="flex items-center gap-1.5 text-white/50">
-              <MemoryStick className="w-3 h-3" /> MEM
-            </span>
-            <span className={memPct > 80 ? "text-red-400" : "text-white/70"}>{memPct}%</span>
-          </div>
-          <ProgressBar value={memUsed} max={memTotal} colorClass={memColor(memPct)} />
-        </div>
-      </div>
-
-      {/* Last seen for offline nodes */}
-      {!node.online && (
-        <p className="absolute bottom-2 right-3 text-[10px] text-white/20">
-          {new Date(node.last_seen * 1000).toLocaleDateString()}
-        </p>
-      )}
-    </div>
+      </Card>
+    </button>
   )
 }

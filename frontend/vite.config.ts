@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
@@ -16,5 +16,10 @@ export default defineConfig({
       '/install.sh': 'http://localhost:12026',
       '/dl': 'http://localhost:12026',
     },
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
+    passWithNoTests: true,
   },
 })

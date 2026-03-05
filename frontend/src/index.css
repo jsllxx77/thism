@@ -28,7 +28,8 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.5rem
+    --radius: 0.5rem;
+    --app-font-family: "Sora", "Manrope", "Segoe UI", sans-serif
   }
   .dark {
     --background: 0 0% 3.9%;
@@ -56,4 +57,41 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%
   }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--app-font-family);
+  background-color: #05070f;
+  color: #f5f7ff;
+}
+
+.app-gradient-bg {
+  background:
+    radial-gradient(1100px circle at 12% -10%, rgba(52, 211, 153, 0.2), transparent 55%),
+    radial-gradient(850px circle at 95% 8%, rgba(59, 130, 246, 0.18), transparent 60%),
+    linear-gradient(160deg, #05070f 0%, #0b1020 45%, #0f172a 100%);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
+}
+
+.glass-panel-hover {
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+}
+
+.glass-panel-hover:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
 }

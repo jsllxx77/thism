@@ -7,7 +7,7 @@ import {
   ResponsiveContainer,
 } from "recharts"
 
-type DataPoint = { ts: number; value: number }
+export type DataPoint = { ts: number; value: number }
 
 type Props = {
   data: DataPoint[]

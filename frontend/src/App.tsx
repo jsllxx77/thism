@@ -1,39 +1,34 @@
-import { useState } from "react"
-import { Layout } from "./components/Layout"
+import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom"
+import { AppShell } from "./layout/AppShell"
 import { Dashboard } from "./pages/Dashboard"
 import { NodeDetail } from "./pages/NodeDetail"
 import { Settings } from "./pages/Settings"
 
-type Page = { type: "dashboard" } | { type: "node"; id: string } | { type: "settings" }
+function DashboardRoute() {
+  const navigate = useNavigate()
+
+  return <Dashboard onSelectNode={(id) => navigate(`/nodes/${id}`)} />
+}
+
+function NodeDetailRoute() {
+  const { nodeId } = useParams<{ nodeId: string }>()
+
+  if (!nodeId) {
+    return <Navigate to="/" replace />
+  }
+
+  return <NodeDetail nodeId={nodeId} />
+}
 
 export default function App() {
-  const [page, setPage] = useState<Page>({ type: "dashboard" })
-
   return (
-    <Layout onSettings={() => setPage({ type: "settings" })}>
-      {page.type === "settings" ? (
-        <div>
-          <button
-            onClick={() => setPage({ type: "dashboard" })}
-            className="text-xs text-white/40 hover:text-white mb-4 flex items-center gap-1 transition-colors"
-          >
-            ← Back to Dashboard
-          </button>
-          <Settings />
-        </div>
-      ) : page.type === "node" ? (
-        <div>
-          <button
-            onClick={() => setPage({ type: "dashboard" })}
-            className="text-xs text-white/40 hover:text-white mb-4 flex items-center gap-1 transition-colors"
-          >
-            ← Back to Dashboard
-          </button>
-          <NodeDetail nodeId={page.id} />
-        </div>
-      ) : (
-        <Dashboard onSelectNode={(id) => setPage({ type: "node", id })} />
-      )}
-    </Layout>
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<DashboardRoute />} />
+        <Route path="/nodes/:nodeId" element={<NodeDetailRoute />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }

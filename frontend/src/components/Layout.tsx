@@ -7,7 +7,7 @@ type Props = {
 
 export function Layout({ children, onSettings }: Props) {
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
+    <div className="min-h-screen app-gradient-bg text-white flex flex-col">
       {/* Header */}
       <header className="border-b border-white/10 px-6 py-3 flex items-center gap-3 backdrop-blur-sm sticky top-0 z-10 bg-[#0a0a0f]/80">
         <Monitor className="w-5 h-5 text-emerald-400" />
