@@ -1,5 +1,7 @@
 # ThisM
 
+English | [简体中文](README.zh-CN.md)
+
 Lightweight self-hosted server monitoring. One binary, zero external dependencies.
 
 ## Highlights
