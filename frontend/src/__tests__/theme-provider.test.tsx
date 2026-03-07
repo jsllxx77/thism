@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { theme } from "antd"
 import App from "../App"
 import { AppThemeProvider } from "../theme/theme"
+import { ThemeModeProvider } from "../theme/mode"
+
+const sessionMock = vi.fn().mockResolvedValue({ role: "admin" })
+
+vi.mock("../lib/api", () => ({
+  api: {
+    session: (...args: unknown[]) => sessionMock(...args),
+  },
+}))
 
 vi.mock("../pages/Dashboard", () => ({
   Dashboard: () => <div>Dashboard</div>,
@@ -17,29 +25,32 @@ vi.mock("../pages/NodeDetail", () => ({
   NodeDetail: ({ nodeId }: { nodeId: string }) => <div>{nodeId}</div>,
 }))
 
-function TokenProbe() {
-  const { token } = theme.useToken()
-  return <span data-testid="color-primary">{token.colorPrimary}</span>
+function Probe() {
+  return <span data-testid="theme-probe">theme-probe</span>
 }
 
 describe("theme provider", () => {
-  it("provides custom antd token values", () => {
+  it("renders children unchanged", () => {
     render(
-      <AppThemeProvider>
-        <TokenProbe />
-      </AppThemeProvider>
+      <ThemeModeProvider>
+        <AppThemeProvider>
+          <Probe />
+        </AppThemeProvider>
+      </ThemeModeProvider>,
     )
 
-    expect(screen.getByTestId("color-primary")).toHaveTextContent("#34d399")
+    expect(screen.getByTestId("theme-probe")).toHaveTextContent("theme-probe")
   })
 
-  it("applies app gradient class at shell root", () => {
+  it("applies app surface class at shell root", () => {
     render(
-      <MemoryRouter initialEntries={["/"]}>
-        <App />
-      </MemoryRouter>
+      <ThemeModeProvider>
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>
+      </ThemeModeProvider>,
     )
 
-    expect(document.querySelector(".app-gradient-bg")).toBeInTheDocument()
+    expect(document.querySelector(".app-surface-bg")).toBeInTheDocument()
   })
 })

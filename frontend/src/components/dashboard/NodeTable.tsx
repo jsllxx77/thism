@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { useLanguage } from "../../i18n/language"
 import type { Node } from "../../lib/api"
 
 type SortKey = "name" | "status"
@@ -9,6 +10,7 @@ type Props = {
 }
 
 export function NodeTable({ nodes, onSelectNode }: Props) {
+  const { t } = useLanguage()
   const [sortKey, setSortKey] = useState<SortKey>("status")
   const [sortAsc, setSortAsc] = useState(true)
 
@@ -36,20 +38,20 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
   }
 
   return (
-    <div className="glass-panel rounded-xl p-4 overflow-x-auto">
-      <p className="text-sm text-white/70 mb-3">Node table view</p>
+    <div className="panel-card enterprise-surface overflow-x-auto rounded-[24px] p-4">
+      <p className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("dashboard.table.title")}</p>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-white/45 border-b border-white/15">
+          <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:text-slate-400">
             <th className="pb-2 pr-3 font-medium">
-              <button onClick={() => toggleSort("name")} className="text-left hover:text-white/85">
-                Name
+              <button type="button" onClick={() => toggleSort("name")} className="text-left hover:text-slate-900 dark:hover:text-slate-200">
+                {t("dashboard.table.nodeName")}
               </button>
             </th>
-            <th className="pb-2 pr-3 font-medium">IP</th>
+            <th className="pb-2 pr-3 font-medium">{t("dashboard.table.ip")}</th>
             <th className="pb-2 pr-3 font-medium">
-              <button onClick={() => toggleSort("status")} className="text-left hover:text-white/85">
-                Status
+              <button type="button" onClick={() => toggleSort("status")} className="text-left hover:text-slate-900 dark:hover:text-slate-200">
+                {t("dashboard.table.status")}
               </button>
             </th>
           </tr>
@@ -58,12 +60,20 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
           {sorted.map((node) => (
             <tr
               key={node.id}
-              className="border-b border-white/10 hover:bg-white/5 cursor-pointer"
-              onClick={() => onSelectNode(node.id)}
+              className="border-b border-slate-100 hover:bg-white/80 dark:border-slate-800 dark:hover:bg-white/[0.02]"
             >
-              <td className="py-2 pr-3 text-white">{node.name}</td>
-              <td className="py-2 pr-3 text-white/70">{node.ip || "—"}</td>
-              <td className="py-2 pr-3 text-white/70">{node.online ? "Online" : "Offline"}</td>
+              <td className="py-2.5 pr-3 text-slate-900 dark:text-slate-100">
+                <button
+                  type="button"
+                  onClick={() => onSelectNode(node.id)}
+                  aria-label={t("dashboard.openNodeAria", { name: node.name })}
+                  className="rounded-sm text-left font-medium text-slate-900 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:text-slate-100 dark:hover:text-slate-200 dark:focus-visible:ring-offset-slate-950"
+                >
+                  {node.name}
+                </button>
+              </td>
+              <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.ip || t("common.unavailable")}</td>
+              <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.online ? t("common.online") : t("common.offline")}</td>
             </tr>
           ))}
         </tbody>

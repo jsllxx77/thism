@@ -9,21 +9,18 @@ class DashboardWS {
   private ws: WebSocket | null = null
   private handlers: Handler[] = []
   private reconnectDelay = 1000
-  private token: string
-
-  constructor(token: string) {
-    this.token = token
-  }
-
   connect() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const url = `${protocol}//${window.location.host}/ws/dashboard?token=${this.token}`
+    const url = `${protocol}//${window.location.host}/ws/dashboard`
     this.ws = new WebSocket(url)
     this.ws.onmessage = (e) => {
       try {
         const msg: WSMessage = JSON.parse(e.data)
         this.handlers.forEach((h) => h(msg))
-      } catch {}
+      } catch {
+        // Ignore malformed message payloads and keep the socket alive.
+        return
+      }
     }
     this.ws.onclose = () => {
       setTimeout(() => {
@@ -47,9 +44,9 @@ class DashboardWS {
 
 let instance: DashboardWS | null = null
 
-export function getDashboardWS(token: string): DashboardWS {
+export function getDashboardWS(): DashboardWS {
   if (!instance) {
-    instance = new DashboardWS(token)
+    instance = new DashboardWS()
     instance.connect()
   }
   return instance

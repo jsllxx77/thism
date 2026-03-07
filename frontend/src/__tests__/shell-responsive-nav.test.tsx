@@ -1,7 +1,19 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import App from "../App"
+import { AppThemeProvider } from "../theme/theme"
+import { ThemeModeProvider } from "../theme/mode"
+import { LanguageProvider } from "../i18n/language"
+
+const sessionMock = vi.fn()
+
+vi.mock("../lib/api", () => ({
+  api: {
+    session: (...args: unknown[]) => sessionMock(...args),
+  },
+}))
 
 vi.mock("../pages/Dashboard", () => ({
   Dashboard: () => <div>Dashboard page</div>,
@@ -16,26 +28,64 @@ vi.mock("../pages/NodeDetail", () => ({
 }))
 
 describe("responsive shell nav", () => {
-  it("renders desktop navigation items and mobile trigger", () => {
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <App />
-      </MemoryRouter>
-    )
-
-    expect(screen.getByRole("navigation", { name: "Primary Navigation" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Dashboard" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument()
+  beforeEach(() => {
+    sessionMock.mockReset()
+    sessionMock.mockResolvedValue({ role: "admin" })
+    window.localStorage.clear()
+    document.cookie = "thism-lang=; Path=/; Max-Age=0; SameSite=Lax"
   })
 
-  it("marks active route in navigation", () => {
+  function renderApp(route = "/") {
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <App />
-      </MemoryRouter>
+      <LanguageProvider>
+        <ThemeModeProvider>
+          <AppThemeProvider>
+            <MemoryRouter initialEntries={[route]}>
+              <App />
+            </MemoryRouter>
+          </AppThemeProvider>
+        </ThemeModeProvider>
+      </LanguageProvider>
     )
+  }
 
-    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current", "page")
+  it("renders top-toolbar actions without sidebar navigation", async () => {
+    renderApp("/")
+
+    expect(screen.queryByRole("navigation", { name: "Primary Navigation" })).not.toBeInTheDocument()
+    expect(await screen.findByText("ThisM Console")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "中文" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Refresh data" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Open settings" })).toBeInTheDocument()
+  })
+
+  it("shows a guest mode badge linking back to login", async () => {
+    sessionMock.mockResolvedValue({ role: "guest" })
+    renderApp("/")
+
+    const guestLink = await screen.findByRole("link", { name: "Return to login" })
+    expect(guestLink).toHaveAttribute("href", "/login")
+    expect(guestLink).toHaveTextContent("Guest mode")
+    expect(screen.queryByRole("button", { name: "Open settings" })).not.toBeInTheDocument()
+  })
+
+  it("toggles header labels to Chinese", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("button", { name: "中文" }))
+
+    expect(await screen.findByRole("button", { name: "刷新数据" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "切换深色模式" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "打开设置" })).toBeInTheDocument()
+  })
+
+  it("navigates to settings from the header shortcut", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("button", { name: "Open settings" }))
+    expect(await screen.findByText("Settings page")).toBeInTheDocument()
   })
 })

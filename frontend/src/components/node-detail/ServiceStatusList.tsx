@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
-import { Collapse } from "antd"
+import { ChevronDown } from "lucide-react"
 import type { ServiceCheck } from "../../lib/api"
+import { useLanguage } from "../../i18n/language"
+import { Card, CardContent } from "../ui/card"
 
 type Props = {
   services: ServiceCheck[]
@@ -8,22 +10,17 @@ type Props = {
 }
 
 function serviceClass(status: string): string {
-  if (status === "running") return "bg-emerald-500/15 border-emerald-400/30 text-emerald-300"
-  if (status === "failed" || status === "dead") return "bg-red-500/15 border-red-400/30 text-red-300"
-  return "bg-white/10 border-white/20 text-white/70"
-}
-
-const PANEL_KEY = "services"
-
-function normalizeActiveKey(key: string | string[]): string[] {
-  return Array.isArray(key) ? key : [key]
+  if (status === "running") return "border-emerald-200 bg-emerald-50/90 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+  if (status === "failed" || status === "dead") return "border-red-200 bg-red-50/90 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300"
+  return "border-slate-300 bg-slate-50/90 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
 }
 
 export function ServiceStatusList({ services, defaultOpen = false }: Props) {
-  const [activeKey, setActiveKey] = useState<string[]>(defaultOpen ? [PANEL_KEY] : [])
+  const { t, translateServiceStatus } = useLanguage()
+  const [open, setOpen] = useState(defaultOpen)
 
   useEffect(() => {
-    setActiveKey(defaultOpen ? [PANEL_KEY] : [])
+    setOpen(defaultOpen)
   }, [defaultOpen])
 
   if (services.length === 0) {
@@ -31,30 +28,24 @@ export function ServiceStatusList({ services, defaultOpen = false }: Props) {
   }
 
   return (
-    <Collapse
-      activeKey={activeKey}
-      destroyOnHidden
-      onChange={(key) => setActiveKey(normalizeActiveKey(key))}
-      className="glass-panel !border-white/15 !bg-transparent"
-      items={[
-        {
-          key: PANEL_KEY,
-          label: "Services",
-          children: (
-            <div className="flex flex-wrap gap-2">
-              {services.map((service) => (
-                <div
-                  key={service.name}
-                  className={`text-xs px-3 py-1.5 rounded-md border ${serviceClass(service.status)}`}
-                >
-                  <span className="mr-2">{service.name}</span>
-                  <span data-status={service.status}>{service.status}</span>
-                </div>
-              ))}
-            </div>
-          ),
-        },
-      ]}
-    />
+    <Card className="panel-card enterprise-surface rounded-[24px]">
+      <CardContent className="p-4">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-between text-left">
+          <span className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("nodeDetail.serviceHealth")}</span>
+          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        {open && (
+          <div className="enterprise-inner-surface mt-3 flex flex-wrap gap-2 rounded-2xl p-3">
+            {services.map((service) => (
+              <div key={service.name} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${serviceClass(service.status)}`}>
+                <span className="mr-2">{service.name}</span>
+                <span data-status={service.status}>{translateServiceStatus(service.status)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

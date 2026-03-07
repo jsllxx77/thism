@@ -27,16 +27,36 @@ describe("add node modal steps", () => {
     const user = userEvent.setup()
 
     render(<AddNodeModal onClose={() => {}} onCreated={() => {}} />)
+    expect(screen.getByText("Add Node")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: /generate install command/i }))
+    await user.click(screen.getByRole("button", { name: /get install command/i }))
     expect(screen.getByText("Node name is required")).toBeInTheDocument()
 
     await user.type(screen.getByLabelText("Node Name"), "prod-node")
-    await user.click(screen.getByRole("button", { name: /generate install command/i }))
+    await user.click(screen.getByRole("button", { name: /get install command/i }))
 
     expect(await screen.findByText("Install Command")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Copy command" }))
     expect(await screen.findByText("Copied")).toBeInTheDocument()
+  })
+
+  it("shows an inline error when clipboard copy is denied", async () => {
+    const user = userEvent.setup()
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: vi.fn().mockRejectedValue(new Error("permission denied")),
+      },
+      configurable: true,
+    })
+
+    render(<AddNodeModal onClose={() => {}} onCreated={() => {}} />)
+
+    await user.type(screen.getByLabelText("Node Name"), "prod-node")
+    await user.click(screen.getByRole("button", { name: /get install command/i }))
+    expect(await screen.findByText("Install Command")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Copy command" }))
+    expect(await screen.findByText("Clipboard access was denied. Please copy the command manually.")).toBeInTheDocument()
   })
 })

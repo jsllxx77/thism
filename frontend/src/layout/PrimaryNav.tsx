@@ -1,4 +1,5 @@
 import { Button } from "antd"
+import { useLanguage } from "../i18n/language"
 
 export type NavItem = {
   key: string
@@ -14,8 +15,10 @@ type Props = {
 }
 
 export function PrimaryNav({ items, activeKey, onNavigate }: Props) {
+  const { messages } = useLanguage()
+
   return (
-    <nav aria-label="Primary Navigation" className="flex flex-col gap-2">
+    <nav aria-label={messages.navigation.primaryNavigation} className="flex flex-col gap-2">
       {items.map((item) => {
         const isActive = item.key === activeKey
         return (

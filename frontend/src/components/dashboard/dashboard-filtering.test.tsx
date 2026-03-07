@@ -25,12 +25,28 @@ describe("dashboard filtering", () => {
   it("filters by status, searches, toggles view mode, and resets", async () => {
     const user = userEvent.setup()
 
-    render(<Dashboard onSelectNode={() => {}} />)
+    const { container } = render(<Dashboard onSelectNode={() => {}} />)
 
     await waitFor(() => {
       expect(screen.getByText("alpha")).toBeInTheDocument()
       expect(screen.getByText("beta")).toBeInTheDocument()
     })
+    expect(screen.getByText("Nodes")).toBeInTheDocument()
+
+    expect(screen.getByLabelText("Status filter")).toHaveClass("h-11")
+    expect(screen.getByLabelText("Search nodes")).toHaveClass("h-11")
+    expect(screen.getByRole("button", { name: "Reset filters" })).toHaveClass("h-11")
+
+    const filterShell = container.querySelector("section.panel-card") as HTMLElement | null
+    expect(filterShell?.className).toContain("enterprise-surface")
+    expect(screen.getByLabelText("Status filter").className).toContain("shadow-none")
+    expect(screen.getByLabelText("Search nodes").className).toContain("shadow-none")
+
+    const toggleShell = screen.getByRole("button", { name: "Cards View" }).parentElement as HTMLElement | null
+    expect(toggleShell?.className).toContain("enterprise-inner-surface")
+    expect(screen.getByRole("button", { name: "Cards View" }).className).toContain("bg-slate-50/90")
+    expect(screen.getByRole("button", { name: "Cards View" }).className).toContain("dark:border-white/10")
+    expect(screen.getByRole("button", { name: "Cards View" }).className).toContain("dark:ring-white/10")
 
     await user.selectOptions(screen.getByLabelText("Status filter"), "online")
     expect(screen.getByText("alpha")).toBeInTheDocument()
@@ -40,11 +56,28 @@ describe("dashboard filtering", () => {
     await user.type(screen.getByLabelText("Search nodes"), "alp")
     expect(screen.getByText("alpha")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Table" }))
-    expect(screen.getByText("Node table view")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Table View" }))
+    expect(screen.getByRole("button", { name: "Table View" }).className).toContain("bg-slate-50/90")
+    expect(screen.getByRole("button", { name: "Table View" }).className).toContain("dark:border-white/10")
+    expect(await screen.findByText("Node Inventory")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Reset filters" }))
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("shows an empty state when no node matches active filters", async () => {
+    const user = userEvent.setup()
+
+    render(<Dashboard onSelectNode={() => {}} />)
+
+    await waitFor(() => {
+      expect(screen.getByText("alpha")).toBeInTheDocument()
+      expect(screen.getByText("beta")).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByLabelText("Search nodes"), "zzz")
+
+    expect(screen.getByText("No nodes match these filters")).toBeInTheDocument()
   })
 })

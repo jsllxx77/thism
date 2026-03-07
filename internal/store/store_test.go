@@ -75,6 +75,158 @@ func TestStoreMetrics(t *testing.T) {
 	}
 }
 
+func TestStoreNodeHardwareMetadata(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{
+		ID:    "n1",
+		Token: "t1",
+		Name:  "node-1",
+		Hardware: &models.NodeHardware{
+			CPUModel:             "AMD EPYC 7B13",
+			CPUCores:             8,
+			CPUThreads:           16,
+			MemoryTotal:          34359738368,
+			DiskTotal:            322122547200,
+			VirtualizationSystem: "kvm",
+			VirtualizationRole:   "guest",
+		},
+	}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	node, err := s.GetNodeByID("n1")
+	if err != nil {
+		t.Fatalf("GetNodeByID: %v", err)
+	}
+	if node == nil || node.Hardware == nil {
+		t.Fatal("expected node hardware to be persisted")
+	}
+	if node.Hardware.CPUModel != "AMD EPYC 7B13" {
+		t.Fatalf("expected cpu model to round-trip, got %q", node.Hardware.CPUModel)
+	}
+	if node.Hardware.DiskTotal != 322122547200 {
+		t.Fatalf("expected disk total to round-trip, got %d", node.Hardware.DiskTotal)
+	}
+}
+
+func TestStoreAdminAuthCRUD(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	_, _, found, err := s.GetAdminAuth()
+	if err != nil {
+		t.Fatalf("GetAdminAuth initial: %v", err)
+	}
+	if found {
+		t.Fatal("expected no persisted admin auth initially")
+	}
+
+	if err := s.UpsertAdminAuth("admin", "secret-pass"); err != nil {
+		t.Fatalf("UpsertAdminAuth: %v", err)
+	}
+
+	username, password, found, err := s.GetAdminAuth()
+	if err != nil {
+		t.Fatalf("GetAdminAuth after insert: %v", err)
+	}
+	if !found {
+		t.Fatal("expected persisted admin auth after insert")
+	}
+	if username != "admin" || password != "secret-pass" {
+		t.Fatalf("unexpected admin auth values: username=%q password=%q", username, password)
+	}
+
+	if err := s.UpsertAdminAuth("admin", "new-pass"); err != nil {
+		t.Fatalf("UpsertAdminAuth update: %v", err)
+	}
+	_, password, found, err = s.GetAdminAuth()
+	if err != nil {
+		t.Fatalf("GetAdminAuth after update: %v", err)
+	}
+	if !found {
+		t.Fatal("expected persisted admin auth after update")
+	}
+	if password != "new-pass" {
+		t.Fatalf("expected updated password, got %q", password)
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
+}
+
+func TestStoreUpdateJobLifecycle(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	job := &models.UpdateJob{
+		ID:            "job-1",
+		Kind:          "self_update",
+		TargetVersion: "1.2.3",
+		DownloadURL:   "https://example.com/agent",
+		SHA256:        "abc123",
+		CreatedAt:     time.Now().Unix(),
+		CreatedBy:     "admin",
+		Status:        models.UpdateJobStatusPending,
+	}
+	if err := s.CreateUpdateJob(job); err != nil {
+		t.Fatalf("CreateUpdateJob: %v", err)
+	}
+	if err := s.CreateUpdateJobTargets(job.ID, []string{"node-1", "node-2"}); err != nil {
+		t.Fatalf("CreateUpdateJobTargets: %v", err)
+	}
+
+	storedJob, err := s.GetUpdateJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetUpdateJob: %v", err)
+	}
+	if storedJob == nil || storedJob.Status != models.UpdateJobStatusPending {
+		t.Fatalf("expected pending job, got %#v", storedJob)
+	}
+
+	if err := s.UpdateUpdateJobTargetStatus(job.ID, "node-1", models.UpdateJobTargetStatusAccepted, "accepted", ""); err != nil {
+		t.Fatalf("UpdateUpdateJobTargetStatus accepted: %v", err)
+	}
+	storedJob, err = s.GetUpdateJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetUpdateJob running: %v", err)
+	}
+	if storedJob.Status != models.UpdateJobStatusRunning {
+		t.Fatalf("expected running job after active target, got %q", storedJob.Status)
+	}
+
+	if err := s.UpdateUpdateJobTargetStatus(job.ID, "node-1", models.UpdateJobTargetStatusSucceeded, "", "1.2.3"); err != nil {
+		t.Fatalf("UpdateUpdateJobTargetStatus success: %v", err)
+	}
+	if err := s.UpdateUpdateJobTargetStatus(job.ID, "node-2", models.UpdateJobTargetStatusFailed, "checksum mismatch", ""); err != nil {
+		t.Fatalf("UpdateUpdateJobTargetStatus failed: %v", err)
+	}
+	storedJob, err = s.GetUpdateJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetUpdateJob partial_failed: %v", err)
+	}
+	if storedJob.Status != models.UpdateJobStatusPartialFailed {
+		t.Fatalf("expected partial_failed, got %q", storedJob.Status)
+	}
+	targets, err := s.ListUpdateJobTargets(job.ID)
+	if err != nil {
+		t.Fatalf("ListUpdateJobTargets: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(targets))
+	}
+	if targets[0].ReportedVersion == "" && targets[1].ReportedVersion == "" {
+		t.Fatalf("expected one target to store reported version")
+	}
 }

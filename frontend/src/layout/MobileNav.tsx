@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Button, Drawer } from "antd"
 import { MenuOutlined } from "@ant-design/icons"
 import { PrimaryNav, type NavItem } from "./PrimaryNav"
+import { useLanguage } from "../i18n/language"
 
 type Props = {
   items: NavItem[]
@@ -10,6 +11,7 @@ type Props = {
 }
 
 export function MobileNav({ items, activeKey, onNavigate }: Props) {
+  const { messages } = useLanguage()
   const [open, setOpen] = useState(false)
 
   const handleNavigate = (path: string) => {
@@ -22,11 +24,11 @@ export function MobileNav({ items, activeKey, onNavigate }: Props) {
       <Button
         icon={<MenuOutlined />}
         onClick={() => setOpen(true)}
-        aria-label="Open navigation"
+        aria-label={messages.navigation.openNavigation}
         className="md:!hidden !bg-white/5 !border-white/20 !text-white/85"
       />
       <Drawer
-        title="Navigate"
+        title={messages.navigation.navigate}
         open={open}
         onClose={() => setOpen(false)}
         className="md:!hidden"

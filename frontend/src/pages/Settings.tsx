@@ -1,56 +1,225 @@
-import { useEffect, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent } from "react"
+import { Plus } from "lucide-react"
+import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
+import { NodesTable } from "../components/settings/NodesTable"
+import { Button } from "../components/ui/button"
+import { Input } from "../components/ui/input"
+import { useLanguage } from "../i18n/language"
 import { api } from "../lib/api"
 import type { Node } from "../lib/api"
-import { AddNodeModal } from "../components/AddNodeModal"
-import { Plus } from "lucide-react"
-import { NodesTable } from "../components/settings/NodesTable"
 import { MotionSection } from "../motion/transitions"
 
-export function Settings() {
+type Props = {
+  refreshNonce?: number
+}
+
+const AddNodeModal = lazy(async () => ({ default: (await import("../components/AddNodeModal")).AddNodeModal }))
+
+export function Settings({ refreshNonce = 0 }: Props) {
+  const { t, translateApiError } = useLanguage()
   const [nodes, setNodes] = useState<Node[]>([])
   const [showModal, setShowModal] = useState(false)
+  const [loadingNodes, setLoadingNodes] = useState(true)
+  const [nodesError, setNodesError] = useState<string | null>(null)
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
 
-  const fetchNodes = () => {
-    api.nodes().then((r) => setNodes(r.nodes ?? []))
-  }
+  const fetchNodes = useCallback(async () => {
+    setLoadingNodes(true)
+    setNodesError(null)
+
+    try {
+      const response = await api.nodes()
+      setNodes(response.nodes ?? [])
+    } catch {
+      setNodesError(t("We couldn't load settings data. Please try again."))
+    } finally {
+      setLoadingNodes(false)
+    }
+  }, [t])
 
   useEffect(() => {
-    fetchNodes()
-  }, [])
+    void fetchNodes()
+  }, [fetchNodes])
+
+  useEffect(() => {
+    if (refreshNonce === 0) return
+    void fetchNodes()
+  }, [fetchNodes, refreshNonce])
+
+  const handleChangePassword = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPasswordError(null)
+    setPasswordSuccess(null)
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError(t("All password fields are required."))
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError(t("New password and confirmation do not match."))
+      return
+    }
+    if (newPassword === currentPassword) {
+      setPasswordError(t("New password must be different from the current password."))
+      return
+    }
+
+    setChangingPassword(true)
+    try {
+      await api.changePassword(currentPassword, newPassword)
+      setCurrentPassword("")
+      setNewPassword("")
+      setConfirmPassword("")
+      setPasswordSuccess(t("Password updated successfully."))
+    } catch (error) {
+      const message = error instanceof Error ? translateApiError(error.message) : t("Failed to update password.")
+      setPasswordError(message)
+    } finally {
+      setChangingPassword(false)
+    }
+  }, [confirmPassword, currentPassword, newPassword, t, translateApiError])
 
   return (
-    <MotionSection className="space-y-6 max-w-4xl mx-auto" delay={0.03}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Settings</h2>
-      </div>
+    <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.03}>
+      <section className="panel-card enterprise-hero rounded-[28px] px-5 py-5 sm:px-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="enterprise-kicker text-[11px] font-semibold uppercase tracking-[0.24em]">{t("Control Plane")}</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-[2rem]">{t("Settings")}</h2>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
+              {t("Manage node enrollment, registry actions, and administrator credentials from the same engineering-passport shell used across the dashboard.")}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Node registry")}</span>
+            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Provisioning")}</span>
+            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Security")}</span>
+          </div>
+        </div>
+      </section>
 
-      {/* Node Management */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm text-white/60 font-medium">Node Management</h3>
-          <button
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Node Management")}</h3>
+          <Button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-1.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-emerald-500/30 transition-colors"
+            className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium"
           >
-            <Plus className="w-3.5 h-3.5" />
-            Add Node
-          </button>
+            <Plus className="h-3.5 w-3.5" />
+            {t("Add Node")}
+          </Button>
         </div>
 
-        {nodes.length === 0 ? (
-          <div className="glass-panel rounded-xl px-4 py-8 text-center text-white/30 text-sm">
-            No nodes registered yet
+        {loadingNodes ? (
+          <div className="panel-card rounded-2xl border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("Loading node registry...")}
+          </div>
+        ) : nodesError ? (
+          <div
+            role="alert"
+            className="panel-card rounded-2xl border border-red-200 bg-red-50/80 px-4 py-5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+          >
+            <p>{nodesError}</p>
+            <button
+              type="button"
+              onClick={() => void fetchNodes()}
+              className="mt-3 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200 dark:hover:bg-red-900/40"
+            >
+              {t("Retry")}
+            </button>
+          </div>
+        ) : nodes.length === 0 ? (
+          <div className="panel-card rounded-2xl border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("No nodes registered yet")}
           </div>
         ) : (
-          <NodesTable nodes={nodes} />
+          <NodesTable nodes={nodes} onUpdated={fetchNodes} />
         )}
       </div>
 
+      <AgentAutoUpdateCard />
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Security")}</h3>
+        <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
+          <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("Change Password")}</h4>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {t("Update the administrator password used on the login page.")}
+          </p>
+
+          <form className="mt-4 space-y-3" onSubmit={handleChangePassword}>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              {t("Current password")}
+              <Input
+                type="password"
+                autoComplete="current-password"
+                aria-label={t("Current password")}
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+              />
+            </label>
+
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              {t("New password")}
+              <Input
+                type="password"
+                autoComplete="new-password"
+                aria-label={t("New password")}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+              />
+            </label>
+
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              {t("Confirm new password")}
+              <Input
+                type="password"
+                autoComplete="new-password"
+                aria-label={t("Confirm new password")}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+              />
+            </label>
+
+            <Button
+              type="submit"
+              disabled={changingPassword}
+              className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium"
+            >
+              {changingPassword ? t("Updating...") : t("Update Password")}
+            </Button>
+
+            {passwordError && (
+              <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">{passwordError}</p>
+            )}
+            {passwordSuccess && (
+              <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{passwordSuccess}</p>
+            )}
+          </form>
+        </section>
+      </div>
+
       {showModal && (
-        <AddNodeModal
-          onClose={() => setShowModal(false)}
-          onCreated={fetchNodes}
-        />
+        <Suspense
+          fallback={
+            <div className="panel-card rounded-2xl border border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              {t("Loading")}...
+            </div>
+          }
+        >
+          <AddNodeModal
+            onClose={() => setShowModal(false)}
+            onCreated={fetchNodes}
+          />
+        </Suspense>
       )}
     </MotionSection>
   )

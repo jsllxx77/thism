@@ -7,7 +7,7 @@ import (
 )
 
 func TestCollectMetrics(t *testing.T) {
-	c := collector.New("ws://localhost:9999", "token", "test")
+	c := collector.New("ws://localhost:9999", "token", "test", "")
 	m, err := c.Collect()
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -20,5 +20,16 @@ func TestCollectMetrics(t *testing.T) {
 	}
 	if len(m.Disk) == 0 {
 		t.Error("expected at least one disk partition")
+	}
+}
+
+func TestCollectMetricsWithExplicitIP(t *testing.T) {
+	c := collector.New("ws://localhost:9999", "token", "test", "203.0.113.10")
+	m, err := c.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if m.IP != "203.0.113.10" {
+		t.Fatalf("expected explicit ip override, got %s", m.IP)
 	}
 }

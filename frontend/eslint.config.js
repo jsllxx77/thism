@@ -15,6 +15,15 @@ export default defineConfig([
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    rules: {
+      'react-refresh/only-export-components': [
+        'error',
+        {
+          allowConstantExport: true,
+          allowExportNames: ['useThemeMode', 'buttonVariants', 'badgeVariants', 'getPreferredLanguage', 'useLanguage'],
+        },
+      ],
+    },
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,

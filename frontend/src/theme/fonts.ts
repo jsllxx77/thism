@@ -1,1 +1,1 @@
-export const appFontStack = `"Sora", "Manrope", "Segoe UI", sans-serif`
+export const appFontStack = `"Outfit", "Geist", "Segoe UI", "Helvetica Neue", sans-serif`

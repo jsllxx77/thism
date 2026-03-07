@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import type { Node } from "../lib/api"
 import { NodeTable } from "../components/dashboard/NodeTable"
@@ -24,5 +24,27 @@ describe("mobile layout smoke", () => {
 
     render(<NodesTable nodes={nodes} />)
     expect(screen.getAllByText("alpha").length).toBeGreaterThan(0)
+  })
+
+  it("uses card layout for settings node list on narrow viewports", () => {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    })
+
+    const { container } = render(<NodesTable nodes={nodes} />)
+    expect(container.querySelector("table")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Get Script" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 })

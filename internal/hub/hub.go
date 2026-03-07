@@ -1,16 +1,22 @@
 package hub
 
 import (
+	"fmt"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/store"
 )
 
+type agentSocket interface {
+	WriteJSON(v any) error
+	Close() error
+}
+
 type agentConn struct {
-	nodeID string
-	conn   *websocket.Conn
+	nodeID  string
+	conn    agentSocket
+	writeMu sync.Mutex
 }
 
 // Hub manages all agent WebSocket connections and dashboard subscribers.
@@ -79,13 +85,27 @@ func (h *Hub) Run() {
 }
 
 // Register adds an agent connection to the hub.
-func (h *Hub) Register(nodeID string, conn *websocket.Conn) {
+func (h *Hub) Register(nodeID string, conn agentSocket) {
 	h.register <- &agentConn{nodeID: nodeID, conn: conn}
 }
 
 // Unregister removes an agent connection from the hub.
 func (h *Hub) Unregister(nodeID string) {
 	h.unregister <- nodeID
+}
+
+// SendToAgent writes a typed JSON message to a specific online agent.
+func (h *Hub) SendToAgent(nodeID string, msg models.WSMessage) error {
+	h.mu.RLock()
+	agent := h.agents[nodeID]
+	h.mu.RUnlock()
+	if agent == nil || agent.conn == nil {
+		return fmt.Errorf("agent %s is offline", nodeID)
+	}
+
+	agent.writeMu.Lock()
+	defer agent.writeMu.Unlock()
+	return agent.conn.WriteJSON(msg)
 }
 
 // IsOnline reports whether a node is currently connected.

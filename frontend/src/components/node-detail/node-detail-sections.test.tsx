@@ -25,8 +25,11 @@ describe("node detail collapsible sections", () => {
   })
 
   it("shows process rows by default when configured open", () => {
-    render(<ProcessTable processes={processes} defaultOpen />)
+    const { container } = render(<ProcessTable processes={processes} defaultOpen />)
     expect(screen.getByText("nginx")).toBeInTheDocument()
+
+    const processCard = container.firstElementChild as HTMLElement | null
+    expect(processCard?.className).toContain("enterprise-surface")
   })
 
   it("expands services panel and renders status semantics", async () => {
@@ -40,7 +43,10 @@ describe("node detail collapsible sections", () => {
   })
 
   it("shows services by default when configured open", () => {
-    render(<ServiceStatusList services={services} defaultOpen />)
+    const { container } = render(<ServiceStatusList services={services} defaultOpen />)
     expect(screen.getByText("nginx.service")).toBeInTheDocument()
+
+    const servicesCard = container.firstElementChild as HTMLElement | null
+    expect(servicesCard?.className).toContain("enterprise-surface")
   })
 })

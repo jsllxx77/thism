@@ -1,12 +1,22 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"html/template"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,10 +30,147 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+const adminSessionCookieName = "thism_admin"
+const guestSessionCookieName = "thism_guest"
+const uiLanguageCookieName = "thism-lang"
+
+type accessRole string
+
+const (
+	accessRoleNone  accessRole = ""
+	accessRoleGuest accessRole = "guest"
+	accessRoleAdmin accessRole = "admin"
+)
+
+type accessRoleContextKey struct{}
+
+type AuthConfig struct {
+	AdminToken string
+	Username   string
+	Password   string
+}
+
+func (c AuthConfig) PasswordLoginEnabled() bool {
+	return strings.TrimSpace(c.Username) != "" && c.Password != ""
+}
+
+func (c AuthConfig) ValidPasswordLogin(username, password string) bool {
+	if !c.PasswordLoginEnabled() {
+		return false
+	}
+	userMatch := constantTimeStringEqual(username, c.Username)
+	passMatch := constantTimeStringEqual(password, c.Password)
+	return userMatch && passMatch
+}
+
+type authManager struct {
+	mu         sync.RWMutex
+	adminToken string
+	username   string
+	password   string
+}
+
+var (
+	errPasswordLoginDisabled = errors.New("password login is not configured")
+	errInvalidCurrentPass    = errors.New("invalid current password")
+)
+
+func newAuthManager(cfg AuthConfig) *authManager {
+	return &authManager{
+		adminToken: cfg.AdminToken,
+		username:   strings.TrimSpace(cfg.Username),
+		password:   cfg.Password,
+	}
+}
+
+func (m *authManager) AdminToken() string {
+	return m.adminToken
+}
+
+func (m *authManager) SetCredentials(username, password string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.username = strings.TrimSpace(username)
+	m.password = password
+}
+
+func (m *authManager) Credentials() (username, password string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.username, m.password
+}
+
+func (m *authManager) PasswordLoginEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.username != "" && m.password != ""
+}
+
+func (m *authManager) ValidPasswordLogin(username, password string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.username == "" || m.password == "" {
+		return false
+	}
+	userMatch := constantTimeStringEqual(username, m.username)
+	passMatch := constantTimeStringEqual(password, m.password)
+	return userMatch && passMatch
+}
+
+func (m *authManager) ChangePassword(currentPassword, newPassword string, persistFn func(username, password string) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.username == "" || m.password == "" {
+		return errPasswordLoginDisabled
+	}
+	if !constantTimeStringEqual(currentPassword, m.password) {
+		return errInvalidCurrentPass
+	}
+
+	if persistFn != nil {
+		if err := persistFn(m.username, newPassword); err != nil {
+			return err
+		}
+	}
+
+	m.password = newPassword
+	return nil
+}
+
+func constantTimeStringEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
 // NewRouter builds and returns the HTTP router.
 // If frontendHandler is non-nil it is used as a fallback for unmatched routes;
 // otherwise unmatched routes return 404.
 func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler http.Handler) http.Handler {
+	return NewRouterWithAuth(s, h, AuthConfig{AdminToken: adminToken}, frontendHandler)
+}
+
+// NewRouterWithAuth builds and returns the HTTP router with configurable
+// admin login credentials.
+func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler) http.Handler {
+	authState := newAuthManager(auth)
+	adminToken := authState.AdminToken()
+
+	// Load persisted credentials if present, otherwise bootstrap from startup
+	// configuration when password login is enabled.
+	if s != nil {
+		if username, password, found, err := s.GetAdminAuth(); err == nil {
+			if found {
+				authState.SetCredentials(username, password)
+			} else if authState.PasswordLoginEnabled() {
+				username, password := authState.Credentials()
+				_ = s.UpsertAdminAuth(username, password)
+			}
+		}
+	}
+
 	r := chi.NewRouter()
 
 	// ---------------------------------------------------------------
@@ -35,27 +182,58 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 		handleAgentWS(w, req, s, h)
 	})
 
-	// Dashboard WebSocket: requires admin token
+	// Dashboard WebSocket: requires admin or guest access
 	r.Get("/ws/dashboard", func(w http.ResponseWriter, req *http.Request) {
-		if !checkToken(req, adminToken) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		role := resolveAccessRole(req, adminToken)
+		if role == accessRoleNone {
+			http.Error(w, uiMessage(resolveUILanguage(req), "unauthorized"), http.StatusUnauthorized)
 			return
 		}
-		handleDashboardWS(w, req, h)
+		if role == accessRoleAdmin {
+			bootstrapSessionCookie(w, req, adminToken)
+		}
+		handleDashboardWS(w, req, s, h)
 	})
 
 	// ---------------------------------------------------------------
-	// REST API (all require admin token)
+	// Viewer API (admin + guest)
 	// ---------------------------------------------------------------
 	r.Group(func(r chi.Router) {
-		r.Use(adminAuth(adminToken))
+		r.Use(viewerAuth(authState))
+
+		r.Get("/api/auth/session", func(w http.ResponseWriter, req *http.Request) {
+			handleSession(w, req)
+		})
 
 		r.Get("/api/nodes", func(w http.ResponseWriter, req *http.Request) {
 			handleListNodes(w, req, s, h)
 		})
+	})
+
+	// ---------------------------------------------------------------
+	// Admin API
+	// ---------------------------------------------------------------
+	r.Group(func(r chi.Router) {
+		r.Use(adminAuth(adminToken))
+
+		r.Post("/api/auth/change-password", func(w http.ResponseWriter, req *http.Request) {
+			handleChangePassword(w, req, s, authState)
+		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
 			handleRegisterNode(w, req, s)
+		})
+
+		r.Patch("/api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateNode(w, req, s)
+		})
+
+		r.Delete("/api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleDeleteNode(w, req, s)
+		})
+
+		r.Get("/api/nodes/{id}/install-command", func(w http.ResponseWriter, req *http.Request) {
+			handleGetInstallCommand(w, req, s)
 		})
 
 		r.Get("/api/nodes/{id}/metrics", func(w http.ResponseWriter, req *http.Request) {
@@ -69,6 +247,14 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 		r.Get("/api/nodes/{id}/services", func(w http.ResponseWriter, req *http.Request) {
 			handleGetServices(w, req, s)
 		})
+
+		r.Post("/api/agent-updates", func(w http.ResponseWriter, req *http.Request) {
+			handleCreateAgentUpdateJob(w, req, s, h)
+		})
+
+		r.Get("/api/agent-updates/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleGetAgentUpdateJob(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -80,12 +266,30 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 	r.Get("/dl/{filename}", func(w http.ResponseWriter, req *http.Request) {
 		handleDownload(w, req)
 	})
+	r.Get("/api/agent-release", func(w http.ResponseWriter, req *http.Request) {
+		handleAgentRelease(w, req)
+	})
+	r.Get("/login", func(w http.ResponseWriter, req *http.Request) {
+		handleLoginPage(w, req, authState)
+	})
+	r.Post("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
+		handlePasswordLogin(w, req, authState)
+	})
+	r.Post("/api/auth/guest", func(w http.ResponseWriter, req *http.Request) {
+		handleGuestLogin(w, req)
+	})
+	r.Post("/api/auth/logout", func(w http.ResponseWriter, req *http.Request) {
+		handleLogout(w, req)
+	})
 
 	// ---------------------------------------------------------------
 	// Fallback
 	// ---------------------------------------------------------------
 	if frontendHandler != nil {
-		r.Handle("/*", frontendHandler)
+		r.Group(func(r chi.Router) {
+			r.Use(frontendAuth(authState))
+			r.Handle("/*", frontendHandler)
+		})
 	} else {
 		r.Handle("/*", http.NotFoundHandler())
 	}
@@ -97,17 +301,139 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 // Auth helpers
 // -----------------------------------------------------------------------
 
-// checkToken validates the bearer token from the Authorization header or
-// the ?token= query parameter.
+// checkToken validates the admin token from bearer header, session cookie,
+// or ?token= query parameter.
 func checkToken(r *http.Request, expected string) bool {
-	// Check Authorization header first.
-	if auth := r.Header.Get("Authorization"); auth != "" {
-		if strings.HasPrefix(auth, "Bearer ") {
-			return strings.TrimPrefix(auth, "Bearer ") == expected
-		}
+	if expected == "" {
+		return false
 	}
-	// Fall back to query parameter.
+
+	if bearerToken(r) == expected {
+		return true
+	}
+	if sessionToken(r) == expected {
+		return true
+	}
 	return r.URL.Query().Get("token") == expected
+}
+
+func bearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+}
+
+func sessionToken(r *http.Request) string {
+	cookie, err := r.Cookie(adminSessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+func setSessionCookie(w http.ResponseWriter, r *http.Request, adminToken string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    adminToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func guestSessionActive(r *http.Request) bool {
+	cookie, err := r.Cookie(guestSessionCookieName)
+	return err == nil && cookie.Value == "1"
+}
+
+func setGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     guestSessionCookieName,
+		Value:    "1",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+	})
+}
+
+func clearGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     guestSessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func withAccessRole(r *http.Request, role accessRole) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), accessRoleContextKey{}, role))
+}
+
+func accessRoleFromRequest(r *http.Request) accessRole {
+	if r == nil {
+		return accessRoleNone
+	}
+	role, _ := r.Context().Value(accessRoleContextKey{}).(accessRole)
+	return role
+}
+
+func resolveAccessRole(r *http.Request, adminToken string) accessRole {
+	if checkToken(r, adminToken) {
+		return accessRoleAdmin
+	}
+	if guestSessionActive(r) {
+		return accessRoleGuest
+	}
+	return accessRoleNone
+}
+
+func bootstrapSessionCookie(w http.ResponseWriter, r *http.Request, adminToken string) {
+	if sessionToken(r) == adminToken {
+		return
+	}
+
+	queryToken := r.URL.Query().Get("token")
+	if queryToken == adminToken || bearerToken(r) == adminToken {
+		setSessionCookie(w, r, adminToken)
+	}
+}
+
+func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
+	cleanURL := *r.URL
+	query := cleanURL.Query()
+	query.Del("token")
+	cleanURL.RawQuery = query.Encode()
+
+	target := cleanURL.Path
+	if target == "" {
+		target = "/"
+	}
+	if cleanURL.RawQuery != "" {
+		target += "?" + cleanURL.RawQuery
+	}
+
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // adminAuth returns a middleware that enforces the admin token.
@@ -115,12 +441,755 @@ func adminAuth(adminToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !checkToken(r, adminToken) {
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "unauthorized")})
 				return
 			}
+			bootstrapSessionCookie(w, r, adminToken)
+			next.ServeHTTP(w, withAccessRole(r, accessRoleAdmin))
+		})
+	}
+}
+
+func viewerAuth(auth *authManager) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role := resolveAccessRole(r, auth.AdminToken())
+			if role == accessRoleNone {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "unauthorized")})
+				return
+			}
+			if role == accessRoleAdmin {
+				bootstrapSessionCookie(w, r, auth.AdminToken())
+			}
+			next.ServeHTTP(w, withAccessRole(r, role))
+		})
+	}
+}
+
+// frontendAuth enforces authenticated access for the SPA and bootstraps an
+// admin session cookie so subsequent static assets and API calls do not require query tokens.
+func frontendAuth(auth *authManager) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			adminToken := auth.AdminToken()
+			role := resolveAccessRole(r, adminToken)
+			if role == accessRoleNone {
+				if shouldRedirectToLogin(r, auth) {
+					http.Redirect(w, r, "/login", http.StatusFound)
+					return
+				}
+				http.Error(w, uiMessage(resolveUILanguage(r), "unauthorized"), http.StatusUnauthorized)
+				return
+			}
+
+			if role == accessRoleAdmin {
+				bootstrapSessionCookie(w, r, adminToken)
+
+				if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Query().Get("token") == adminToken {
+					redirectWithoutToken(w, r)
+					return
+				}
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func shouldRedirectToLogin(r *http.Request, auth *authManager) bool {
+	if !auth.PasswordLoginEnabled() {
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "text/html")
+}
+
+type uiLanguage string
+
+const (
+	uiLanguageEnglish uiLanguage = "en"
+	uiLanguageChinese uiLanguage = "zh-CN"
+)
+
+type loginPageData struct {
+	Language             uiLanguage
+	PageTitle            string
+	BrandKicker          string
+	BrandTitle           string
+	ToggleLabel          string
+	ToggleTarget         uiLanguage
+	AccessEyebrow        string
+	LoginTitle           string
+	LoginDescription     string
+	UsernameLabel        string
+	PasswordLabel        string
+	SubmitLabel          string
+	GuestLabel           string
+	GuestDescription     string
+	MetaLabel            string
+	InvalidCredentials   string
+	LoginFailedMessage   string
+	RequestFailedMessage string
+	GuestFailedMessage   string
+}
+
+var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctype html>
+<html lang="{{.Language}}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{.PageTitle}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg:
+        radial-gradient(860px circle at 0% 0%, rgba(37, 99, 235, 0.1), transparent 50%),
+        radial-gradient(820px circle at 100% 10%, rgba(51, 65, 85, 0.07), transparent 58%),
+        linear-gradient(180deg, #f8f9fb 0%, #f3f4f6 100%);
+      --panel-bg: rgba(255, 255, 255, 0.96);
+      --panel-border: #e5e7eb;
+      --panel-shadow: 0 8px 24px rgba(30, 64, 175, 0.05);
+      --text-strong: #0f172a;
+      --text-muted: #475569;
+      --text-soft: #64748b;
+      --input-bg: #ffffff;
+      --input-border: #cbd5e1;
+      --input-focus: rgba(37, 99, 235, 0.18);
+      --button-bg: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      --button-shadow: 0 14px 30px rgba(37, 99, 235, 0.18);
+      --button-text: #ffffff;
+      --badge-bg: rgba(37, 99, 235, 0.08);
+      --badge-border: rgba(148, 163, 184, 0.22);
+      --badge-text: #1e3a8a;
+      --surface-line: rgba(148, 163, 184, 0.16);
+      --error: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page-bg:
+          radial-gradient(920px circle at 10% -5%, rgba(59, 130, 246, 0.2), transparent 50%),
+          radial-gradient(880px circle at 90% 10%, rgba(56, 189, 248, 0.12), transparent 56%),
+          linear-gradient(180deg, #020617 0%, #0b1220 100%);
+        --panel-bg: rgba(15, 23, 42, 0.88);
+        --panel-border: rgba(71, 85, 105, 0.45);
+        --panel-shadow: 0 12px 28px rgba(2, 6, 23, 0.62);
+        --text-strong: #e2e8f0;
+        --text-muted: #cbd5e1;
+        --text-soft: #94a3b8;
+        --input-bg: rgba(15, 23, 42, 0.78);
+        --input-border: #334155;
+        --input-focus: rgba(59, 130, 246, 0.25);
+        --button-bg: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        --button-shadow: 0 16px 30px rgba(37, 99, 235, 0.28);
+        --badge-bg: rgba(37, 99, 235, 0.14);
+        --badge-border: rgba(96, 165, 250, 0.18);
+        --badge-text: #bfdbfe;
+        --surface-line: rgba(148, 163, 184, 0.18);
+        --error: #fca5a5;
+      }
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 24px 16px;
+      background: var(--page-bg);
+      color: var(--text-strong);
+      font-family: "Outfit", "Geist", "Segoe UI", "Helvetica Neue", sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .shell {
+      width: min(100%, 432px);
+    }
+    .page-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 12px;
+    }
+    .toolbar-button {
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.84);
+      color: var(--text-muted);
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(14px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .brand-mark {
+      display: inline-flex;
+      height: 44px;
+      width: 44px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 14px;
+      border: 1px solid var(--panel-border);
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(14px);
+    }
+    .brand-copy {
+      min-width: 0;
+    }
+    .brand-kicker {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+    .brand-title {
+      display: block;
+      margin-top: 2px;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-strong);
+    }
+    .card {
+      width: min(100%, 432px);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      background: var(--panel-bg);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 24px 24px 18px;
+      border-bottom: 1px solid var(--surface-line);
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--badge-border);
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 14px 0 6px;
+      font-size: clamp(1.7rem, 3vw, 2rem);
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+    p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 0.96rem;
+    }
+    .form {
+      padding: 22px 24px 24px;
+    }
+    label {
+      display: block;
+      margin: 14px 0 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text-muted);
+    }
+    input {
+      width: 100%;
+      border: 1px solid var(--input-border);
+      border-radius: 14px;
+      background: var(--input-bg);
+      color: var(--text-strong);
+      padding: 13px 14px;
+      font: inherit;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    }
+    input::placeholder {
+      color: var(--text-soft);
+    }
+    input:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 4px var(--input-focus);
+    }
+    .submit-button {
+      width: 100%;
+      margin-top: 18px;
+      border: none;
+      border-radius: 14px;
+      padding: 13px 16px;
+      font: inherit;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--button-text);
+      background: var(--button-bg);
+      box-shadow: var(--button-shadow);
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    }
+    .submit-button:hover {
+      transform: translateY(-1px);
+    }
+    .submit-button:active {
+      transform: translateY(0);
+    }
+    .submit-button:focus-visible,
+    .toolbar-button:focus-visible {
+      outline: none;
+      box-shadow: var(--button-shadow), 0 0 0 4px var(--input-focus);
+    }
+    .submit-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .secondary-button {
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      background: transparent;
+      color: var(--text-strong);
+      padding: 13px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+    .secondary-button:hover,
+    .secondary-button:focus-visible {
+      border-color: #94a3b8;
+      background: rgba(148, 163, 184, 0.08);
+      outline: none;
+    }
+    .secondary-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    .meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      font-size: 0.82rem;
+      color: var(--text-soft);
+    }
+    .meta strong {
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .error {
+      min-height: 20px;
+      margin-top: 12px;
+      color: var(--error);
+      font-size: 0.84rem;
+    }
+    @media (max-width: 480px) {
+      .card-header,
+      .form {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+      .meta {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body data-language="{{.Language}}" data-login-failed-message="{{.LoginFailedMessage}}" data-request-failed-message="{{.RequestFailedMessage}}" data-guest-failed-message="{{.GuestFailedMessage}}">
+  <main class="shell">
+    <div class="page-toolbar">
+      <button id="lang-switch" class="toolbar-button" type="button" data-language-target="{{.ToggleTarget}}">{{.ToggleLabel}}</button>
+    </div>
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 17.5V11.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+          <path d="M12 17.5V6.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+          <path d="M19 17.5V9.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <span class="brand-kicker">{{.BrandKicker}}</span>
+        <span class="brand-title">{{.BrandTitle}}</span>
+      </div>
+    </div>
+    <section class="card" aria-labelledby="login-title">
+      <div class="card-header">
+        <span class="eyebrow">{{.AccessEyebrow}}</span>
+        <h1 id="login-title">{{.LoginTitle}}</h1>
+        <p>{{.LoginDescription}}</p>
+      </div>
+      <form id="login-form" class="form">
+        <label for="username">{{.UsernameLabel}}</label>
+        <input id="username" name="username" type="text" autocomplete="username" required />
+        <label for="password">{{.PasswordLabel}}</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button id="submit-btn" class="submit-button" type="submit">{{.SubmitLabel}}</button>
+        <button id="guest-btn" class="secondary-button" type="button" data-endpoint="/api/auth/guest">{{.GuestLabel}}</button>
+        <p>{{.GuestDescription}}</p>
+        <div class="meta" aria-hidden="true">
+          <span>{{.MetaLabel}}</span>
+          <strong>ThisM</strong>
+        </div>
+        <div class="error" id="error-msg" role="alert" aria-live="polite"></div>
+      </form>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById("login-form");
+    const errorMsg = document.getElementById("error-msg");
+    const submitBtn = document.getElementById("submit-btn");
+    const guestBtn = document.getElementById("guest-btn");
+    const langSwitch = document.getElementById("lang-switch");
+    const body = document.body;
+    const currentLanguage = body.dataset.language || "en";
+    const loginFailedMessage = body.dataset.loginFailedMessage || "Login failed. Please check credentials.";
+    const requestFailedMessage = body.dataset.requestFailedMessage || "Request failed. Please retry.";
+    const guestFailedMessage = body.dataset.guestFailedMessage || requestFailedMessage;
+
+    function persistLanguage(language) {
+      document.cookie = "thism-lang=" + encodeURIComponent(language) + "; Path=/; Max-Age=31536000; SameSite=Lax";
+      try {
+        window.localStorage.setItem("thism-language", language);
+      } catch (error) {
+      }
+    }
+
+    persistLanguage(currentLanguage);
+
+    if (langSwitch) {
+      langSwitch.addEventListener("click", () => {
+        const nextLanguage = langSwitch.dataset.languageTarget;
+        if (!nextLanguage) {
+          return;
+        }
+        persistLanguage(nextLanguage);
+        window.location.reload();
+      });
+    }
+
+    if (guestBtn) {
+      guestBtn.addEventListener("click", async () => {
+        errorMsg.textContent = "";
+        submitBtn.disabled = true;
+        guestBtn.disabled = true;
+        try {
+          const endpoint = guestBtn.dataset.endpoint || "/api/auth/guest";
+          const response = await fetch(endpoint, { method: "POST" });
+          if (response.ok) {
+            window.location.assign("/");
+            return;
+          }
+          const data = await response.json().catch(() => ({}));
+          errorMsg.textContent = data.error || guestFailedMessage;
+        } catch (error) {
+          errorMsg.textContent = requestFailedMessage;
+        } finally {
+          submitBtn.disabled = false;
+          guestBtn.disabled = false;
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorMsg.textContent = "";
+      submitBtn.disabled = true;
+      if (guestBtn) {
+        guestBtn.disabled = true;
+      }
+      const payload = {
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value
+      };
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          window.location.assign("/");
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        errorMsg.textContent = data.error || loginFailedMessage;
+      } catch (error) {
+        errorMsg.textContent = requestFailedMessage;
+      } finally {
+        submitBtn.disabled = false;
+        if (guestBtn) {
+          guestBtn.disabled = false;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
+`))
+
+func normalizeUILanguage(value string) uiLanguage {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	switch {
+	case strings.HasPrefix(trimmed, "zh"):
+		return uiLanguageChinese
+	case strings.HasPrefix(trimmed, "en"):
+		return uiLanguageEnglish
+	default:
+		return ""
+	}
+}
+
+func resolveUILanguage(r *http.Request) uiLanguage {
+	if r == nil {
+		return uiLanguageEnglish
+	}
+	if cookie, err := r.Cookie(uiLanguageCookieName); err == nil {
+		if lang := normalizeUILanguage(cookie.Value); lang != "" {
+			return lang
+		}
+	}
+	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		langTag := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if lang := normalizeUILanguage(langTag); lang != "" {
+			return lang
+		}
+	}
+	return uiLanguageEnglish
+}
+
+func uiMessage(language uiLanguage, key string) string {
+	if language == uiLanguageChinese {
+		switch key {
+		case "unauthorized":
+			return "未授权"
+		case "tokenRequired":
+			return "缺少令牌"
+		case "invalidToken":
+			return "令牌无效"
+		case "passwordLoginDisabled":
+			return "未配置密码登录"
+		case "invalidRequestBody":
+			return "请求体无效"
+		case "invalidCredentials":
+			return "登录凭证错误"
+		case "invalidCurrentPassword":
+			return "当前密码错误"
+		case "passwordChangeRequired":
+			return "当前密码和新密码均为必填"
+		case "newPasswordMustDiffer":
+			return "新密码必须与当前密码不同"
+		}
+	}
+	switch key {
+	case "unauthorized":
+		return "unauthorized"
+	case "tokenRequired":
+		return "token required"
+	case "invalidToken":
+		return "invalid token"
+	case "passwordLoginDisabled":
+		return "password login is not configured"
+	case "invalidRequestBody":
+		return "invalid request body"
+	case "invalidCredentials":
+		return "invalid credentials"
+	case "invalidCurrentPassword":
+		return "invalid current password"
+	case "passwordChangeRequired":
+		return "current_password and new_password are required"
+	case "newPasswordMustDiffer":
+		return "new password must be different"
+	default:
+		return key
+	}
+}
+
+func loginPageDataForLanguage(language uiLanguage) loginPageData {
+	if language == uiLanguageChinese {
+		return loginPageData{
+			Language:             uiLanguageChinese,
+			PageTitle:            "ThisM 登录",
+			BrandKicker:          "安全访问",
+			BrandTitle:           "ThisM 控制台",
+			ToggleLabel:          "English",
+			ToggleTarget:         uiLanguageEnglish,
+			AccessEyebrow:        "管理员访问",
+			LoginTitle:           "登录",
+			LoginDescription:     "使用管理员凭据访问仪表盘与节点控制。",
+			UsernameLabel:        "用户名",
+			PasswordLabel:        "密码",
+			SubmitLabel:          "登录",
+			GuestLabel:           "游客模式",
+			GuestDescription:     "以只读访客身份进入，仅查看展示卡片与节点基础信息。",
+			MetaLabel:            "平台管理的受保护会话",
+			InvalidCredentials:   uiMessage(uiLanguageChinese, "invalidCredentials"),
+			LoginFailedMessage:   "登录失败，请检查凭据。",
+			RequestFailedMessage: "请求失败，请重试。",
+			GuestFailedMessage:   "进入游客模式失败，请重试。",
+		}
+	}
+	return loginPageData{
+		Language:             uiLanguageEnglish,
+		PageTitle:            "ThisM Login",
+		BrandKicker:          "Secure Access",
+		BrandTitle:           "ThisM Console",
+		ToggleLabel:          "中文",
+		ToggleTarget:         uiLanguageChinese,
+		AccessEyebrow:        "Administrator Access",
+		LoginTitle:           "Sign in",
+		LoginDescription:     "Use your administrator credentials to access the dashboard and node controls.",
+		UsernameLabel:        "Username",
+		PasswordLabel:        "Password",
+		SubmitLabel:          "Sign in",
+		GuestLabel:           "Continue as guest",
+		GuestDescription:     "Enter a read-only guest view with dashboard cards and basic node details only.",
+		MetaLabel:            "Protected session for platform administration",
+		InvalidCredentials:   uiMessage(uiLanguageEnglish, "invalidCredentials"),
+		LoginFailedMessage:   "Login failed. Please check credentials.",
+		RequestFailedMessage: "Request failed. Please retry.",
+		GuestFailedMessage:   "Guest access failed. Please retry.",
+	}
+}
+
+func renderLoginPageHTML(language uiLanguage) string {
+	var buf bytes.Buffer
+	if err := loginPageTemplate.Execute(&buf, loginPageDataForLanguage(language)); err != nil {
+		return ""
+	}
+	return buf.String()
+}
+
+func handleLoginPage(w http.ResponseWriter, r *http.Request, auth *authManager) {
+	if resolveAccessRole(r, auth.AdminToken()) == accessRoleAdmin {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	if !auth.PasswordLoginEnabled() {
+		http.Error(w, uiMessage(resolveUILanguage(r), "passwordLoginDisabled"), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(renderLoginPageHTML(resolveUILanguage(r))))
+}
+
+func handlePasswordLogin(w http.ResponseWriter, r *http.Request, auth *authManager) {
+	if !auth.PasswordLoginEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": uiMessage(resolveUILanguage(r), "passwordLoginDisabled")})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+
+	if !auth.ValidPasswordLogin(req.Username, req.Password) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidCredentials")})
+		return
+	}
+
+	clearGuestSessionCookie(w, r)
+	setSessionCookie(w, r, auth.AdminToken())
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleGuestLogin(w http.ResponseWriter, r *http.Request) {
+	clearSessionCookie(w, r)
+	setGuestSessionCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleSession(w http.ResponseWriter, r *http.Request) {
+	role := accessRoleFromRequest(r)
+	if role == accessRoleNone {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "unauthorized")})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"role": string(role)})
+}
+
+func handleChangePassword(w http.ResponseWriter, r *http.Request, s *store.Store, auth *authManager) {
+	if !auth.PasswordLoginEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": uiMessage(resolveUILanguage(r), "passwordLoginDisabled")})
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "passwordChangeRequired")})
+		return
+	}
+	if req.CurrentPassword == req.NewPassword {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "newPasswordMustDiffer")})
+		return
+	}
+
+	err := auth.ChangePassword(req.CurrentPassword, req.NewPassword, func(username, password string) error {
+		if s == nil {
+			return nil
+		}
+		return s.UpsertAdminAuth(username, password)
+	})
+	if err != nil {
+		if errors.Is(err, errPasswordLoginDisabled) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": uiMessage(resolveUILanguage(r), "passwordLoginDisabled")})
+			return
+		}
+		if errors.Is(err, errInvalidCurrentPass) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidCurrentPassword")})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	clearSessionCookie(w, r)
+	clearGuestSessionCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // -----------------------------------------------------------------------
@@ -157,17 +1226,32 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 		return
 	}
 
-	// Build a set of online node IDs for O(1) lookup.
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		nodeIDs = append(nodeIDs, n.ID)
+	}
+
+	latestMetrics, err := s.LatestMetricsByNodeIDs(nodeIDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
 	onlineSet := make(map[string]struct{})
 	for _, id := range h.OnlineNodeIDs() {
 		onlineSet[id] = struct{}{}
 	}
 
-	// Ensure we never serialise null for an empty list.
+	role := accessRoleFromRequest(r)
 	result := make([]*models.Node, 0, len(nodes))
 	for _, n := range nodes {
-		_, n.Online = onlineSet[n.ID]
-		result = append(result, n)
+		current := *n
+		_, current.Online = onlineSet[current.ID]
+		current.LatestMetrics = latestMetrics[current.ID]
+		if role == accessRoleGuest {
+			current.IP = ""
+		}
+		result = append(result, &current)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": result})
@@ -205,6 +1289,309 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "token": token})
+}
+
+func handleUpdateNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+
+	existing, err := s.GetNodeByID(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+
+	if err := s.RenameNode(nodeID, req.Name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	updated, err := s.GetNodeByID(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if updated == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "node not found after update"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func handleDeleteNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+	existing, err := s.GetNodeByID(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+		return
+	}
+
+	if err := s.DeleteNode(nodeID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleGetInstallCommand(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+	node, err := s.GetNodeByID(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if node == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"command": buildInstallCommand(r, node.Token, node.Name),
+	})
+}
+
+type createAgentUpdateJobRequest struct {
+	NodeIDs       []string `json:"node_ids"`
+	TargetVersion string   `json:"target_version"`
+	DownloadURL   string   `json:"download_url"`
+	SHA256        string   `json:"sha256"`
+}
+
+type updateJobResponse struct {
+	Job     *models.UpdateJob         `json:"job"`
+	Targets []*models.UpdateJobTarget `json:"targets"`
+}
+
+func decodeWSPayload[T any](payload any) (T, error) {
+	var out T
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return out, err
+	}
+	err = json.Unmarshal(raw, &out)
+	return out, err
+}
+
+func handleAgentCommandStatus(nodeID string, payload models.AgentCommandStatusPayload, s *store.Store, h *hub.Hub) {
+	if s == nil || strings.TrimSpace(payload.JobID) == "" {
+		return
+	}
+	_ = s.UpdateUpdateJobTargetStatus(payload.JobID, nodeID, payload.Status, payload.Message, payload.ReportedVersion)
+	h.Broadcast(models.WSMessage{
+		Type: "agent_update_status",
+		Payload: map[string]any{
+			"job_id":           payload.JobID,
+			"node_id":          nodeID,
+			"status":           payload.Status,
+			"message":          payload.Message,
+			"reported_version": payload.ReportedVersion,
+		},
+	})
+}
+
+func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	var req createAgentUpdateJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if s == nil || len(req.NodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	for _, nodeID := range req.NodeIDs {
+		node, err := s.GetNodeByID(nodeID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+			return
+		}
+	}
+	jobID, err := generateHex()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	now := time.Now().Unix()
+	job := &models.UpdateJob{
+		ID:            jobID,
+		Kind:          models.AgentCommandKindSelfUpdate,
+		TargetVersion: req.TargetVersion,
+		DownloadURL:   req.DownloadURL,
+		SHA256:        req.SHA256,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		CreatedBy:     "admin",
+		Status:        models.UpdateJobStatusPending,
+	}
+	if err := s.CreateUpdateJob(job); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.CreateUpdateJobTargets(job.ID, req.NodeIDs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, nodeID := range req.NodeIDs {
+		if !h.IsOnline(nodeID) {
+			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, "agent offline", "")
+			continue
+		}
+		cmd := models.AgentCommandPayload{
+			JobID:         job.ID,
+			Kind:          models.AgentCommandKindSelfUpdate,
+			TargetVersion: req.TargetVersion,
+			DownloadURL:   req.DownloadURL,
+			SHA256:        req.SHA256,
+		}
+		if err := h.SendToAgent(nodeID, models.WSMessage{Type: "agent_command", Payload: cmd}); err != nil {
+			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusFailed, err.Error(), "")
+			continue
+		}
+		_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusDispatched, "command dispatched", "")
+	}
+	storedJob, err := s.GetUpdateJob(job.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	targets, err := s.ListUpdateJobTargets(job.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, updateJobResponse{Job: storedJob, Targets: targets})
+}
+
+func handleGetAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	jobID := chi.URLParam(r, "id")
+	job, err := s.GetUpdateJob(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if job == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+		return
+	}
+	targets, err := s.ListUpdateJobTargets(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, updateJobResponse{Job: job, Targets: targets})
+}
+
+func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	if s == nil || h == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	var req struct {
+		NodeIDs       []string `json:"node_ids"`
+		TargetVersion string   `json:"target_version"`
+		DownloadURL   string   `json:"download_url"`
+		SHA256        string   `json:"sha256"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	nodeIDs := make([]string, 0, len(req.NodeIDs))
+	seen := map[string]struct{}{}
+	for _, nodeID := range req.NodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	if len(nodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	jobID, err := generateHex()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	now := time.Now().Unix()
+	job := &models.UpdateJob{ID: jobID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: strings.TrimSpace(req.TargetVersion), DownloadURL: strings.TrimSpace(req.DownloadURL), SHA256: strings.TrimSpace(req.SHA256), CreatedAt: now, UpdatedAt: now, CreatedBy: "admin", Status: models.UpdateJobStatusPending}
+	if err := s.CreateUpdateJob(job); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.CreateUpdateJobTargets(job.ID, nodeIDs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, nodeID := range nodeIDs {
+		node, err := s.GetNodeByID(nodeID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if node == nil || !h.IsOnline(nodeID) {
+			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, "node offline", "")
+			continue
+		}
+		msg := models.WSMessage{Type: "agent_command", Payload: models.AgentCommandPayload{JobID: job.ID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: job.TargetVersion, DownloadURL: job.DownloadURL, SHA256: job.SHA256}}
+		if err := h.SendToAgent(nodeID, msg); err != nil {
+			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, err.Error(), "")
+			continue
+		}
+		_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusDispatched, "sent", "")
+	}
+	storedJob, _ := s.GetUpdateJob(job.ID)
+	targets, _ := s.ListUpdateJobTargets(job.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"job": storedJob, "targets": targets})
+}
+
+func handleGetAgentUpdate(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	jobID := chi.URLParam(r, "id")
+	job, err := s.GetUpdateJob(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if job == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+	targets, err := s.ListUpdateJobTargets(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": job, "targets": targets})
 }
 
 func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
@@ -261,6 +1648,23 @@ func handleGetServices(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": checks})
 }
 
+func buildInstallCommand(r *http.Request, token, name string) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
+		scheme = fwd
+	}
+	baseURL := scheme + "://" + r.Host
+
+	query := url.Values{}
+	query.Set("token", token)
+	query.Set("name", name)
+	scriptURL := baseURL + "/install.sh?" + query.Encode()
+	return `curl -fsSL "` + scriptURL + `" | bash`
+}
+
 // -----------------------------------------------------------------------
 // Agent installation handlers
 // -----------------------------------------------------------------------
@@ -287,6 +1691,9 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"TOKEN=\"" + token + "\"\n" +
 		"NAME=\"" + name + "\"\n" +
 		"BASE=\"" + baseURL + "\"\n\n" +
+		"TARGET_BIN=\"/usr/local/bin/thism-agent\"\n" +
+		"TMP_BIN=\"/usr/local/bin/.thism-agent.$$\"\n" +
+		"trap 'rm -f \"${TMP_BIN}\"' EXIT\n\n" +
 		"ARCH=$(uname -m)\n" +
 		"case \"$ARCH\" in\n" +
 		"  x86_64|amd64) ARCH=\"amd64\" ;;\n" +
@@ -300,8 +1707,10 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"fi\n\n" +
 		"BINARY=\"thism-agent-${OS}-${ARCH}\"\n" +
 		"echo \"Downloading ${BINARY}...\"\n" +
-		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o /usr/local/bin/thism-agent\n" +
-		"chmod +x /usr/local/bin/thism-agent\n\n" +
+		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o \"${TMP_BIN}\"\n" +
+		"chmod +x \"${TMP_BIN}\"\n" +
+		"mv -f \"${TMP_BIN}\" \"${TARGET_BIN}\"\n" +
+		"trap - EXIT\n\n" +
 		"WS_SCHEME=\"ws\"\n" +
 		"case \"$BASE\" in\n" +
 		"  https://*) WS_SCHEME=\"wss\" ;;\n" +
@@ -320,21 +1729,92 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"WantedBy=multi-user.target\n" +
 		"UNIT\n\n" +
 		"systemctl daemon-reload\n" +
-		"systemctl enable --now thism-agent\n" +
+		"systemctl enable thism-agent\n" +
+		"systemctl restart thism-agent\n" +
 		"echo \"thisM agent installed and started successfully.\"\n"
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(script))
 }
 
+func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
+	osName := strings.TrimSpace(r.URL.Query().Get("os"))
+	arch := strings.TrimSpace(r.URL.Query().Get("arch"))
+	filename, ok := resolveAgentBinaryFilename(osName, arch)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	filePath, err := resolveAgentBinaryPath(filename)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	digest := sha256.Sum256(raw)
+	checksum := strings.ToLower(hex.EncodeToString(digest[:]))
+	targetVersion := checksum
+	if len(targetVersion) > 12 {
+		targetVersion = targetVersion[:12]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"target_version":         targetVersion,
+		"download_url":           buildDownloadURL(r, filename),
+		"sha256":                 checksum,
+		"check_interval_seconds": int((30 * time.Minute).Seconds()),
+	})
+}
+
+func resolveAgentBinaryFilename(osName, arch string) (string, bool) {
+	if osName != "linux" {
+		return "", false
+	}
+	switch arch {
+	case "amd64":
+		return "thism-agent-linux-amd64", true
+	case "arm64":
+		return "thism-agent-linux-arm64", true
+	default:
+		return "", false
+	}
+}
+
+func resolveAgentBinaryPath(filename string) (string, error) {
+	candidates := []string{
+		"dist/" + filename,
+		"../dist/" + filename,
+		"../../dist/" + filename,
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func buildBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
+		scheme = fwd
+	}
+	return scheme + "://" + r.Host
+}
+
+func buildDownloadURL(r *http.Request, filename string) string {
+	return buildBaseURL(r) + "/dl/" + filename
+}
+
 func handleDownload(w http.ResponseWriter, r *http.Request) {
 	filename := chi.URLParam(r, "filename")
-
-	allowed := map[string]bool{
-		"thism-agent-linux-amd64": true,
-		"thism-agent-linux-arm64": true,
-	}
-	if !allowed[filename] {
+	if _, ok := resolveAgentBinaryFilename("linux", strings.TrimPrefix(filename, "thism-agent-linux-")); !ok {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -358,13 +1838,13 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		}
 	}
 	if token == "" {
-		http.Error(w, "token required", http.StatusUnauthorized)
+		http.Error(w, uiMessage(resolveUILanguage(r), "tokenRequired"), http.StatusUnauthorized)
 		return
 	}
 
 	node, err := s.GetNodeByToken(token)
 	if err != nil || node == nil {
-		http.Error(w, "invalid token", http.StatusUnauthorized)
+		http.Error(w, uiMessage(resolveUILanguage(r), "invalidToken"), http.StatusUnauthorized)
 		return
 	}
 
@@ -379,11 +1859,25 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		h.Unregister(node.ID)
 	}()
 
-	// Read loop: parse incoming MetricsPayload messages and persist them.
+	// Read loop: parse incoming agent messages and persist them.
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			break
+		}
+
+		var envelope models.WSMessage
+		if err := json.Unmarshal(msg, &envelope); err != nil {
+			continue
+		}
+
+		if envelope.Type == "agent_command_status" {
+			statusPayload, err := decodeWSPayload[models.AgentCommandStatusPayload](envelope.Payload)
+			if err != nil {
+				continue
+			}
+			handleAgentCommandStatus(node.ID, statusPayload, s, h)
+			continue
 		}
 
 		var payload models.MetricsPayload
@@ -391,9 +1885,14 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			continue
 		}
 
+		lastSeen := time.Now().Unix()
+
 		// Persist metrics.
 		_ = s.InsertMetrics(node.ID, &payload)
-		_ = s.UpdateLastSeen(node.ID)
+		_ = s.UpdateNodeMetadata(node.ID, resolveNodeIP(r, payload.IP), payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen)
+		if strings.TrimSpace(payload.AgentVersion) != "" {
+			_ = s.FinalizeUpdateJobsForNodeVersion(node.ID, payload.AgentVersion)
+		}
 
 		// Persist processes as a JSON string.
 		if len(payload.Processes) > 0 {
@@ -408,15 +1907,125 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			_ = s.UpsertServiceCheck(node.ID, svc.Name, svc.Status)
 		}
 
-		// Broadcast the raw metrics to dashboard subscribers.
+		// Broadcast metrics to dashboard subscribers, wrapped with node_id.
 		h.Broadcast(models.WSMessage{
-			Type:    "metrics",
-			Payload: payload,
+			Type: "metrics",
+			Payload: map[string]any{
+				"node_id":   node.ID,
+				"last_seen": lastSeen,
+				"data":      payload,
+			},
 		})
 	}
 }
 
-func handleDashboardWS(w http.ResponseWriter, r *http.Request, h *hub.Hub) {
+func resolveNodeIP(r *http.Request, payloadIP string) string {
+	payload := strings.TrimSpace(payloadIP)
+	forwarded := forwardedForIP(r.Header.Get("X-Forwarded-For"))
+	remote := remoteAddrIP(r.RemoteAddr)
+
+	publicIPv4 := []string{payload, forwarded, remote}
+	for _, candidate := range publicIPv4 {
+		if isPublicIPv4(candidate) {
+			return candidate
+		}
+	}
+
+	usableIPv4 := []string{payload, forwarded, remote}
+	for _, candidate := range usableIPv4 {
+		if isUsableIPv4(candidate) {
+			return candidate
+		}
+	}
+
+	publicAny := []string{forwarded, remote, payload}
+	for _, candidate := range publicAny {
+		if isPublicIP(candidate) {
+			return candidate
+		}
+	}
+
+	usableAny := []string{payload, forwarded, remote}
+	for _, candidate := range usableAny {
+		if isUsableIP(candidate) {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
+func forwardedForIP(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func remoteAddrIP(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(trimmed)
+	if err == nil && host != "" {
+		return host
+	}
+	return trimmed
+}
+
+func isPublicIP(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil {
+		return false
+	}
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || isCarrierGradeNAT(ip) {
+		return false
+	}
+	return true
+}
+
+func isPublicIPv4(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	return ip != nil && ip.To4() != nil && isPublicIP(value)
+}
+
+func isUsableIP(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil {
+		return false
+	}
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() {
+		return false
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+	return true
+}
+
+func isUsableIPv4(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	return ip != nil && ip.To4() != nil && isUsableIP(value)
+}
+
+func isCarrierGradeNAT(ip net.IP) bool {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return false
+	}
+	// RFC 6598: 100.64.0.0/10
+	return ipv4[0] == 100 && ipv4[1] >= 64 && ipv4[1] <= 127
+}
+
+func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -427,6 +2036,21 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, h *hub.Hub) {
 	h.Subscribe(ch)
 	defer h.Unsubscribe(ch)
 
+	initialMessages, err := dashboardInitialMessages(s, h)
+	if err != nil {
+		return
+	}
+
+	for _, msg := range initialMessages {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			continue
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			return
+		}
+	}
+
 	for msg := range ch {
 		data, err := json.Marshal(msg)
 		if err != nil {
@@ -436,4 +2060,67 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, h *hub.Hub) {
 			break
 		}
 	}
+}
+
+func dashboardInitialMessages(s *store.Store, h *hub.Hub) ([]models.WSMessage, error) {
+	nodes, err := s.ListNodes()
+	if err != nil {
+		return nil, err
+	}
+
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		nodeIDs = append(nodeIDs, n.ID)
+	}
+
+	latestMetrics, err := s.LatestMetricsByNodeIDs(nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	onlineSet := make(map[string]struct{}, len(h.OnlineNodeIDs()))
+	for _, id := range h.OnlineNodeIDs() {
+		onlineSet[id] = struct{}{}
+	}
+
+	messages := make([]models.WSMessage, 0, len(nodes)*2)
+	for _, node := range nodes {
+		_, online := onlineSet[node.ID]
+		messages = append(messages, models.WSMessage{
+			Type: "node_status",
+			Payload: map[string]any{
+				"node_id": node.ID,
+				"online":  online,
+			},
+		})
+
+		snapshot := latestMetrics[node.ID]
+		if snapshot == nil {
+			continue
+		}
+
+		messages = append(messages, models.WSMessage{
+			Type: "metrics",
+			Payload: map[string]any{
+				"node_id":   node.ID,
+				"last_seen": node.LastSeen,
+				"data": map[string]any{
+					"ts":  snapshot.TS,
+					"cpu": snapshot.CPU,
+					"mem": map[string]any{
+						"used":  snapshot.MemUsed,
+						"total": snapshot.MemTotal,
+					},
+					"net": map[string]any{
+						"rx_bytes": snapshot.NetRx,
+						"tx_bytes": snapshot.NetTx,
+					},
+					"disk_used":  snapshot.DiskUsed,
+					"disk_total": snapshot.DiskTotal,
+				},
+			},
+		})
+	}
+
+	return messages, nil
 }
