@@ -2,17 +2,59 @@
 
 Lightweight self-hosted server monitoring. One binary, zero external dependencies.
 
+## Highlights
+
+- Single Go server binary with embedded React frontend
+- Lightweight Linux agents for monitored nodes
+- SQLite storage with no external database requirement
+- Server-hosted agent install script and release manifest
+- Prebuilt GHCR image plus Docker Compose deployment path
+
 ## Quick Start
 
-### 1. Start the server
+### One-command Docker Compose install
 
 ```bash
-./thism-server --port 8080 --db ./data.db --token your-admin-token
+bash <(curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/install-compose.sh)
 ```
 
-Open http://localhost:8080 in your browser.
+The installer will:
 
-### 2. Register a node
+1. Create a deployment directory
+2. Download `compose.yaml` and `.env.example`
+3. Generate a random admin password and API token on first run
+4. Start `thism-server` from `ghcr.io/thism-dev/thism:latest`
+
+When it finishes, open `http://localhost:8080` and log in with the credentials printed by the installer.
+
+### Manual Docker Compose deployment
+
+```bash
+mkdir -p ~/thism-deploy
+cd ~/thism-deploy
+curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/docker-compose.yml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/.env.example -o .env
+
+# edit .env before first start
+docker compose up -d
+```
+
+The default compose deployment stores application data in a named Docker volume and publishes the web UI on port `8080`.
+
+### Build from source
+
+```bash
+make build
+
+./bin/thism-server --port 8080 --db ./thism.db --token your-admin-token \
+  --admin-user admin --admin-pass strong-password
+```
+
+Open `http://localhost:8080` in your browser. You will be redirected to `/login` and authenticate with the configured username and password.
+
+## Register and Install an Agent
+
+### 1. Register a node
 
 ```bash
 curl -X POST http://localhost:8080/api/nodes/register \
@@ -22,21 +64,76 @@ curl -X POST http://localhost:8080/api/nodes/register \
 # Returns: {"id":"...","token":"..."}
 ```
 
-### 3. Start the agent on the monitored server
+### 2. Start the agent manually
 
 ```bash
-./thism-agent --server ws://your-host:8080 --token NODE_TOKEN --name web-1
+./bin/thism-agent --server ws://your-host:8080 --token NODE_TOKEN --name web-1
 ```
 
-## Build from Source
+### 3. Or install the agent from the server-hosted script
 
 ```bash
-# Build everything (frontend + server + agent)
-make build
+curl -fsSL "http://your-host:8080/install.sh?token=NODE_TOKEN&name=web-1" | bash
+```
 
-# Binaries will be in bin/
-./bin/thism-server --token mytoken
-./bin/thism-agent --server ws://localhost:8080 --token NODE_TOKEN --name myserver
+The install script detects `linux/amd64` and `linux/arm64`, installs `thism-agent` to `/usr/local/bin/thism-agent`, and writes a `systemd` unit that reconnects to the server after restart.
+
+## Docker Image
+
+Published runtime image:
+
+```bash
+ghcr.io/thism-dev/thism:latest
+```
+
+You can also run it directly without Compose:
+
+```bash
+docker run --name thism-server -p 8080:8080 \
+  -v thism-data:/data \
+  ghcr.io/thism-dev/thism:latest \
+  --port 8080 --db /data/thism.db --token your-admin-token \
+  --admin-user admin --admin-pass strong-password
+```
+
+## Development Workflow
+
+### Fast local loop
+
+Use two terminals for everyday frontend work:
+
+```bash
+# Terminal 1: backend API/ws
+make dev-server TOKEN=mytoken PORT=12026 ADMIN_USER=admin ADMIN_PASS=dev-pass
+
+# Terminal 2: Vite with HMR
+make dev-ui
+```
+
+Open `http://localhost:5173`. Frontend changes hot-reload instantly.
+
+### Verify the embedded frontend
+
+```bash
+make dev-restart TOKEN=mytoken PORT=12026 ADMIN_USER=admin ADMIN_PASS=dev-pass
+```
+
+This command:
+
+1. Builds the frontend
+2. Rebuilds `bin/thism-server` with embedded assets
+3. Restarts the local server
+
+### Test and build
+
+```bash
+make test
+
+cd frontend
+npm ci
+npm run lint
+npm test
+npm run build
 ```
 
 ## systemd
@@ -53,16 +150,19 @@ sudo cp deploy/thism-agent.service /etc/systemd/system/
 sudo systemctl enable --now thism-agent
 ```
 
-## Docker
+## Build Docker Image from Source
 
 ```bash
 docker build -t thism-server .
-docker run -p 8080:8080 -v ./data:/data -e ADMIN_TOKEN=yourtoken thism-server
+docker run -p 8080:8080 -v thism-data:/data thism-server \
+  --port 8080 --db /data/thism.db --token your-admin-token \
+  --admin-user admin --admin-pass strong-password
 ```
 
 ## Architecture
 
-- **thisM-server**: Single Go binary with embedded React UI. Runs on your main server.
+- **thisM-server**: Single Go binary with embedded React UI. Runs on your main server and hosts agent downloads.
 - **thisM-agent**: Lightweight Go binary. Runs on each monitored server.
 - **Communication**: Agent connects to server via WebSocket and pushes metrics every 5 seconds.
-- **Storage**: SQLite — zero external database dependencies.
+- **Storage**: SQLite with zero external database dependencies.
+- **Deployment**: Source builds, Docker image, and Docker Compose are supported.

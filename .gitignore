@@ -4,7 +4,11 @@ frontend/dist/
 frontend/build/
 frontend/node_modules/
 *.db
+*.db-journal
 .env*
 !.env.example
 .agents/
 .tmp/
+AGENTS.md
+skills-lock.json
+docs/plans/

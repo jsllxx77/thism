@@ -3,7 +3,7 @@ Description=ThisM Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/thism-server --port 8080 --db /var/lib/thism/data.db --token YOUR_ADMIN_TOKEN
+ExecStart=/usr/local/bin/thism-server --port 8080 --db /var/lib/thism/data.db --token YOUR_ADMIN_TOKEN --admin-user YOUR_ADMIN_USER --admin-pass YOUR_ADMIN_PASSWORD
 Restart=always
 RestartSec=5
 User=thism

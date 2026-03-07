@@ -1,9 +1,23 @@
 services:
   thism-server:
-    image: thism-server:latest
+    image: ${THISM_IMAGE:-ghcr.io/thism-dev/thism:latest}
+    container_name: thism-server
     ports:
-      - "8080:8080"
+      - "${THISM_PORT:-8080}:8080"
     volumes:
-      - ./data:/data
-    command: ["--port", "8080", "--db", "/data/thism.db", "--token", "${ADMIN_TOKEN}"]
+      - thism-data:/data
+    command:
+      - --port
+      - "8080"
+      - --db
+      - /data/thism.db
+      - --token
+      - ${THISM_TOKEN:?set THISM_TOKEN in .env}
+      - --admin-user
+      - ${THISM_ADMIN_USER:?set THISM_ADMIN_USER in .env}
+      - --admin-pass
+      - ${THISM_ADMIN_PASS:?set THISM_ADMIN_PASS in .env}
     restart: unless-stopped
+
+volumes:
+  thism-data:
