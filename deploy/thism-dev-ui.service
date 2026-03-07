@@ -1,0 +1,19 @@
+[Unit]
+Description=ThisM Dev Frontend (Vite via make dev-ui)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/thism
+EnvironmentFile=-/etc/default/thism-dev-ui
+ExecStart=/usr/bin/make dev-ui
+Restart=always
+RestartSec=2
+KillMode=control-group
+TimeoutStopSec=20
+StandardOutput=append:/tmp/thism-dev-ui.log
+StandardError=append:/tmp/thism-dev-ui.log
+
+[Install]
+WantedBy=multi-user.target

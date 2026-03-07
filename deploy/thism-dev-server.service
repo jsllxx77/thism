@@ -1,0 +1,26 @@
+[Unit]
+Description=ThisM Dev Backend (go run via make dev-server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/thism
+EnvironmentFile=-/etc/default/thism-dev-server
+Environment=TOKEN=thism2026
+Environment=PORT=12026
+Environment=ADMIN_USER=
+Environment=ADMIN_PASS=
+Environment=GOCACHE_DIR=/tmp/go-build
+Environment=GOPATH=/tmp/go
+Environment=GOMODCACHE=/tmp/go/pkg/mod
+ExecStart=/usr/bin/make dev-server TOKEN=${TOKEN} PORT=${PORT} ADMIN_USER=${ADMIN_USER} ADMIN_PASS=${ADMIN_PASS}
+Restart=always
+RestartSec=2
+KillMode=control-group
+TimeoutStopSec=20
+StandardOutput=append:/tmp/thism-dev-server.log
+StandardError=append:/tmp/thism-dev-server.log
+
+[Install]
+WantedBy=multi-user.target
