@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -33,6 +34,11 @@ import (
 
 const DefaultReportInterval = 5 * time.Second
 const DefaultAutoUpdateInterval = 30 * time.Minute
+
+const (
+	ipv4DefaultRoutePath = "/proc/net/route"
+	ipv6DefaultRoutePath = "/proc/net/ipv6_route"
+)
 
 type dialMode string
 
@@ -59,6 +65,7 @@ var (
 	diskUsageFunc      = disk.Usage
 	ioCountersFunc     = psnet.IOCounters
 	netInterfacesFunc  = net.Interfaces
+	readFileFunc       = os.ReadFile
 	httpClient         = &http.Client{Timeout: 2 * time.Minute}
 )
 
@@ -218,14 +225,103 @@ func isLoopbackInterfaceName(name string) bool {
 	return normalized == "lo" || strings.HasPrefix(normalized, "lo")
 }
 
-func collectNetworkStats() models.NetStats {
-	loopbackNames := map[string]struct{}{}
-	if interfaces, err := netInterfacesFunc(); err == nil {
-		for _, iface := range interfaces {
-			if iface.Flags&net.FlagLoopback != 0 {
-				loopbackNames[iface.Name] = struct{}{}
-			}
+func parseIPv4DefaultRouteInterfaceNames(raw []byte) map[string]struct{} {
+	names := map[string]struct{}{}
+	for index, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 8 {
+			continue
 		}
+		if index == 0 && strings.EqualFold(fields[0], "Iface") {
+			continue
+		}
+		interfaceName := strings.TrimSpace(fields[0])
+		if interfaceName == "" || isLoopbackInterfaceName(interfaceName) {
+			continue
+		}
+		if fields[1] != "00000000" || fields[7] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseUint(fields[3], 16, 64)
+		if err != nil || flags&0x1 == 0 {
+			continue
+		}
+		names[interfaceName] = struct{}{}
+	}
+	return names
+}
+
+func parseIPv6DefaultRouteInterfaceNames(raw []byte) map[string]struct{} {
+	names := map[string]struct{}{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 10 {
+			continue
+		}
+		interfaceName := strings.TrimSpace(fields[9])
+		if interfaceName == "" || isLoopbackInterfaceName(interfaceName) {
+			continue
+		}
+		if fields[0] != "00000000000000000000000000000000" || fields[1] != "00" {
+			continue
+		}
+		flags, err := strconv.ParseUint(fields[8], 16, 64)
+		if err != nil || flags&0x1 == 0 {
+			continue
+		}
+		names[interfaceName] = struct{}{}
+	}
+	return names
+}
+
+func defaultRouteInterfaceNames() map[string]struct{} {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	names := map[string]struct{}{}
+	for _, routeFile := range []struct {
+		path  string
+		parse func([]byte) map[string]struct{}
+	}{
+		{path: ipv4DefaultRoutePath, parse: parseIPv4DefaultRouteInterfaceNames},
+		{path: ipv6DefaultRoutePath, parse: parseIPv6DefaultRouteInterfaceNames},
+	} {
+		raw, err := readFileFunc(routeFile.path)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		for interfaceName := range routeFile.parse(raw) {
+			names[interfaceName] = struct{}{}
+		}
+	}
+
+	return names
+}
+
+func nonLoopbackInterfaceNames() map[string]struct{} {
+	names := map[string]struct{}{}
+	interfaces, err := netInterfacesFunc()
+	if err != nil {
+		return names
+	}
+	for _, iface := range interfaces {
+		interfaceName := strings.TrimSpace(iface.Name)
+		if interfaceName == "" || iface.Flags&net.FlagLoopback != 0 || isLoopbackInterfaceName(interfaceName) {
+			continue
+		}
+		names[interfaceName] = struct{}{}
+	}
+	return names
+}
+
+func collectNetworkStats() models.NetStats {
+	selectedInterfaces := defaultRouteInterfaceNames()
+	if len(selectedInterfaces) == 0 && runtime.GOOS != "linux" {
+		selectedInterfaces = nonLoopbackInterfaceNames()
+	}
+	if len(selectedInterfaces) == 0 {
+		return models.NetStats{}
 	}
 
 	ioCounters, err := ioCountersFunc(true)
@@ -240,7 +336,7 @@ func collectNetworkStats() models.NetStats {
 		if name == "" || name == "all" {
 			continue
 		}
-		if _, isLoopback := loopbackNames[name]; isLoopback || isLoopbackInterfaceName(name) {
+		if _, ok := selectedInterfaces[name]; !ok {
 			continue
 		}
 		rxBytes += counter.BytesRecv
