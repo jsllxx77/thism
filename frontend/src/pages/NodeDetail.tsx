@@ -94,7 +94,11 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         if (!cancelled && typeof response.retention_days === "number" && Number.isFinite(response.retention_days)) {
           setMetricsRetentionDays(response.retention_days)
         }
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setMetricsRetentionDays(DEFAULT_METRICS_RETENTION_DAYS)
+        }
+      }
     }
 
     void loadMetricsRetention()
