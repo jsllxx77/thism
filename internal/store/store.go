@@ -18,14 +18,15 @@ type Store struct {
 
 // MetricsRow is a flat struct representing a single metrics sample for API use.
 type MetricsRow struct {
-	TS        int64   `json:"ts"`
-	CPU       float64 `json:"cpu"`
-	MemUsed   uint64  `json:"mem_used"`
-	MemTotal  uint64  `json:"mem_total"`
-	DiskUsed  uint64  `json:"disk_used"`
-	DiskTotal uint64  `json:"disk_total"`
-	NetRx     uint64  `json:"net_rx"`
-	NetTx     uint64  `json:"net_tx"`
+	TS            int64   `json:"ts"`
+	CPU           float64 `json:"cpu"`
+	MemUsed       uint64  `json:"mem_used"`
+	MemTotal      uint64  `json:"mem_total"`
+	DiskUsed      uint64  `json:"disk_used"`
+	DiskTotal     uint64  `json:"disk_total"`
+	NetRx         uint64  `json:"net_rx"`
+	NetTx         uint64  `json:"net_tx"`
+	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
 }
 
 // New opens (or creates) the SQLite database at the given path, runs migrations,
@@ -77,8 +78,9 @@ CREATE TABLE IF NOT EXISTS metrics (
     mem_total   INTEGER DEFAULT 0,
     disk_used   INTEGER DEFAULT 0,
     disk_total  INTEGER DEFAULT 0,
-    net_rx      INTEGER DEFAULT 0,
-    net_tx      INTEGER DEFAULT 0
+    net_rx         INTEGER DEFAULT 0,
+    net_tx         INTEGER DEFAULT 0,
+    uptime_seconds INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_node_ts ON metrics(node_id, ts);
@@ -138,6 +140,9 @@ CREATE INDEX IF NOT EXISTS idx_update_job_targets_job_id ON update_job_targets(j
 		return err
 	}
 	if err := s.ensureColumn("nodes", "agent_version", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics", "uptime_seconds", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	return s.ensureColumn("update_jobs", "updated_at", "INTEGER NOT NULL DEFAULT 0")
@@ -663,12 +668,12 @@ func (s *Store) InsertMetrics(nodeID string, m *models.MetricsPayload) error {
 	}
 
 	_, err := s.db.Exec(`
-INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nodeID, m.TS, m.CPU,
 		m.Mem.Used, m.Mem.Total,
 		diskUsed, diskTotal,
-		m.Net.RxBytes, m.Net.TxBytes,
+		m.Net.RxBytes, m.Net.TxBytes, m.UptimeSeconds,
 	)
 	return err
 }
@@ -677,7 +682,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ordered by ascending timestamp.
 func (s *Store) QueryMetrics(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
 FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
@@ -689,7 +694,7 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 	var result []*MetricsRow
 	for rows.Next() {
 		var r MetricsRow
-		if err := rows.Scan(&r.TS, &r.CPU, &r.MemUsed, &r.MemTotal, &r.DiskUsed, &r.DiskTotal, &r.NetRx, &r.NetTx); err != nil {
+		if err := rows.Scan(&r.TS, &r.CPU, &r.MemUsed, &r.MemTotal, &r.DiskUsed, &r.DiskTotal, &r.NetRx, &r.NetTx, &r.UptimeSeconds); err != nil {
 			return nil, err
 		}
 		result = append(result, &r)
@@ -704,7 +709,7 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 	for _, nodeID := range nodeIDs {
 		var snapshot models.NodeMetricsSnapshot
 		err := s.db.QueryRow(`
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
 FROM metrics
 WHERE node_id = ?
 ORDER BY ts DESC, id DESC
@@ -717,6 +722,7 @@ LIMIT 1`, nodeID).Scan(
 			&snapshot.DiskTotal,
 			&snapshot.NetRx,
 			&snapshot.NetTx,
+			&snapshot.UptimeSeconds,
 		)
 		if err == sql.ErrNoRows {
 			continue

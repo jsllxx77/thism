@@ -237,3 +237,32 @@ export function formatRelativeLastSeen(language: AppLanguage, lastSeen: number, 
   const diffDays = Math.floor(diffHours / 24)
   return interpolate(catalog.dashboard.nodeCard.daysAgo, { value: diffDays })
 }
+
+export function formatUptimeDuration(language: AppLanguage, uptimeSeconds?: number | null) {
+  const catalog = getCachedLanguageMessages(language)
+  if (!uptimeSeconds || uptimeSeconds <= 0) {
+    return catalog.common.unavailable
+  }
+  if (uptimeSeconds < 60) {
+    return language === "zh-CN" ? "不到1分钟" : "<1m"
+  }
+
+  const totalMinutes = Math.floor(uptimeSeconds / 60)
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+  const minutes = totalMinutes % 60
+
+  if (language === "zh-CN") {
+    const parts: string[] = []
+    if (days > 0) parts.push(`${days}天`)
+    if (hours > 0) parts.push(`${hours}小时`)
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes}分`)
+    return parts.join(" ")
+  }
+
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`)
+  return parts.join(" ")
+}

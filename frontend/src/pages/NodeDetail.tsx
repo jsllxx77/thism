@@ -144,6 +144,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
           disk_total: data.disk_total ?? 0,
           net_rx: data.net?.rx_bytes ?? 0,
           net_tx: data.net?.tx_bytes ?? 0,
+          uptime_seconds: data.uptime_seconds ?? 0,
         }
         setMetrics((prev) => [...prev.slice(-719), point])
       }
@@ -161,9 +162,13 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const netTxData = metrics.map((m) => ({ ts: m.ts, value: m.net_tx }))
   const netRxSpeedData = deriveRateSeries(netRxData)
   const netTxSpeedData = deriveRateSeries(netTxData)
-  const latestNetworkPoint = metrics[metrics.length - 1]
-  const latestInboundTotal = formatOptionalBytes(latestNetworkPoint?.net_rx)
-  const latestOutboundTotal = formatOptionalBytes(latestNetworkPoint?.net_tx)
+  const latestMetricPoint = metrics[metrics.length - 1]
+  const heroUptimeSeconds =
+    typeof latestMetricPoint?.uptime_seconds === "number" && latestMetricPoint.uptime_seconds > 0
+      ? latestMetricPoint.uptime_seconds
+      : node?.latest_metrics?.uptime_seconds
+  const latestInboundTotal = formatOptionalBytes(latestMetricPoint?.net_rx)
+  const latestOutboundTotal = formatOptionalBytes(latestMetricPoint?.net_tx)
   const latestInboundSpeed = formatOptionalBytesPerSecond(getLatestValidValue(netRxSpeedData))
   const latestOutboundSpeed = formatOptionalBytesPerSecond(getLatestValidValue(netTxSpeedData))
   const networkSummary = (
@@ -209,7 +214,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         </section>
       ) : (
         <>
-          <NodeHero node={node} showIP={accessMode !== "guest"} />
+          <NodeHero node={node} showIP={accessMode !== "guest"} uptimeSeconds={heroUptimeSeconds} />
           <HardwarePassport hardware={node?.hardware} os={node?.os} arch={node?.arch} />
           {showMetrics && (
             <MetricTabs

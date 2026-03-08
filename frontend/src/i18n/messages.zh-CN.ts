@@ -35,6 +35,7 @@ export const messagesZhCN = {
       node: "节点",
       deleteNode: "删除节点",
       lastSeen: "最后在线",
+      uptime: "在线时长",
       created: "创建时间",
       actions: "操作",
       osArch: "系统 / 架构",

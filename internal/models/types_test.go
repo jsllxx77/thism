@@ -9,10 +9,11 @@ import (
 
 func TestMetricsPayloadJSON(t *testing.T) {
 	payload := models.MetricsPayload{
-		Type: "metrics",
-		TS:   1709500000,
-		CPU:  23.5,
-		Mem:  models.MemStats{Used: 2048, Total: 8192},
+		Type:          "metrics",
+		TS:            1709500000,
+		CPU:           23.5,
+		UptimeSeconds: 3723,
+		Mem:           models.MemStats{Used: 2048, Total: 8192},
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -24,5 +25,8 @@ func TestMetricsPayloadJSON(t *testing.T) {
 	}
 	if out.CPU != 23.5 {
 		t.Errorf("expected CPU 23.5, got %v", out.CPU)
+	}
+	if out.UptimeSeconds != 3723 {
+		t.Errorf("expected uptime 3723, got %d", out.UptimeSeconds)
 	}
 }

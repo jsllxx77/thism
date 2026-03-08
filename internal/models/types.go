@@ -41,31 +41,33 @@ func (h *NodeHardware) IsEmpty() bool {
 }
 
 type NodeMetricsSnapshot struct {
-	TS        int64   `json:"ts"`
-	CPU       float64 `json:"cpu"`
-	MemUsed   uint64  `json:"mem_used"`
-	MemTotal  uint64  `json:"mem_total"`
-	DiskUsed  uint64  `json:"disk_used"`
-	DiskTotal uint64  `json:"disk_total"`
-	NetRx     uint64  `json:"net_rx"`
-	NetTx     uint64  `json:"net_tx"`
+	TS            int64   `json:"ts"`
+	CPU           float64 `json:"cpu"`
+	MemUsed       uint64  `json:"mem_used"`
+	MemTotal      uint64  `json:"mem_total"`
+	DiskUsed      uint64  `json:"disk_used"`
+	DiskTotal     uint64  `json:"disk_total"`
+	NetRx         uint64  `json:"net_rx"`
+	NetTx         uint64  `json:"net_tx"`
+	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
 }
 
 // MetricsPayload is the JSON message sent by agents over WebSocket.
 type MetricsPayload struct {
-	Type         string        `json:"type"`
-	TS           int64         `json:"ts"`
-	CPU          float64       `json:"cpu"`
-	IP           string        `json:"ip,omitempty"`
-	OS           string        `json:"os,omitempty"`
-	Arch         string        `json:"arch,omitempty"`
-	AgentVersion string        `json:"agent_version,omitempty"`
-	Hardware     *NodeHardware `json:"hardware,omitempty"`
-	Mem          MemStats      `json:"mem"`
-	Disk         []DiskStats   `json:"disk"`
-	Net          NetStats      `json:"net"`
-	Processes    []Process     `json:"processes"`
-	Services     []Service     `json:"services"`
+	Type          string        `json:"type"`
+	TS            int64         `json:"ts"`
+	CPU           float64       `json:"cpu"`
+	IP            string        `json:"ip,omitempty"`
+	OS            string        `json:"os,omitempty"`
+	Arch          string        `json:"arch,omitempty"`
+	AgentVersion  string        `json:"agent_version,omitempty"`
+	UptimeSeconds uint64        `json:"uptime_seconds,omitempty"`
+	Hardware      *NodeHardware `json:"hardware,omitempty"`
+	Mem           MemStats      `json:"mem"`
+	Disk          []DiskStats   `json:"disk"`
+	Net           NetStats      `json:"net"`
+	Processes     []Process     `json:"processes"`
+	Services      []Service     `json:"services"`
 }
 
 type MemStats struct {

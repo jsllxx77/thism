@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import {
   formatRelativeLastSeen,
+  formatUptimeDuration,
   getCachedLanguageMessages,
   getLanguageToggleLabel,
   loadLanguageMessages,
@@ -26,6 +27,7 @@ type LanguageContextValue = {
   translateError: (message: string) => string
   translateServiceStatus: (status: string) => string
   formatRelativeLastSeen: (lastSeen: number, nowMs: number) => string
+  formatUptimeDuration: (uptimeSeconds?: number | null) => string
 }
 
 function normalizeLanguage(value?: string | null): AppLanguage | null {
@@ -85,6 +87,7 @@ const defaultLanguageContext: LanguageContextValue = {
   translateError: (message) => translateApiErrorMessage("en", message),
   translateServiceStatus: (status) => translateServiceStatus("en", status),
   formatRelativeLastSeen: (lastSeen, nowMs) => formatRelativeLastSeen("en", lastSeen, nowMs),
+  formatUptimeDuration: (uptimeSeconds) => formatUptimeDuration("en", uptimeSeconds),
 }
 
 const LanguageContext = createContext<LanguageContextValue>(defaultLanguageContext)
@@ -134,6 +137,7 @@ export function LanguageProvider({ children }: Props) {
       translateError: (message) => translateApiErrorMessage(language, message),
       translateServiceStatus: (status) => translateServiceStatus(language, status),
       formatRelativeLastSeen: (lastSeen, nowMs) => formatRelativeLastSeen(language, lastSeen, nowMs),
+      formatUptimeDuration: (uptimeSeconds) => formatUptimeDuration(language, uptimeSeconds),
     }),
     [language, messages],
   )

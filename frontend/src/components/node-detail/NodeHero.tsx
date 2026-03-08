@@ -1,4 +1,4 @@
-import { Layers3, MapPinned } from "lucide-react"
+import { Clock3, Layers3, MapPinned } from "lucide-react"
 import type { Node } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
 import { Badge } from "../ui/badge"
@@ -7,11 +7,20 @@ import { Card, CardContent } from "../ui/card"
 type Props = {
   node: Node | null
   showIP?: boolean
+  uptimeSeconds?: number
 }
 
-export function NodeHero({ node, showIP = true }: Props) {
-  const { t } = useLanguage()
-  const platformLabel = `${node?.os || "—"}/${node?.arch || "—"}`
+export function NodeHero({ node, showIP = true, uptimeSeconds }: Props) {
+  const { t, formatUptimeDuration } = useLanguage()
+  const unavailable = t("common.unavailable")
+  const platformLabel = `${node?.os || unavailable}/${node?.arch || unavailable}`
+  const resolvedUptimeSeconds =
+    typeof uptimeSeconds === "number" && uptimeSeconds > 0
+      ? uptimeSeconds
+      : typeof node?.latest_metrics?.uptime_seconds === "number" && node.latest_metrics.uptime_seconds > 0
+        ? node.latest_metrics.uptime_seconds
+        : undefined
+  const formattedUptime = formatUptimeDuration(resolvedUptimeSeconds)
 
   return (
     <Card className="panel-card enterprise-hero rounded-[28px]">
@@ -28,12 +37,16 @@ export function NodeHero({ node, showIP = true }: Props) {
               {showIP && (
                 <div className="enterprise-chip inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1.5">
                   <MapPinned className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
-                  <span className="truncate">{node?.ip || "—"}</span>
+                  <span className="truncate">{node?.ip || unavailable}</span>
                 </div>
               )}
               <div className="enterprise-chip inline-flex items-center gap-2 rounded-full px-3 py-1.5">
                 <Layers3 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
                 <span>{platformLabel}</span>
+              </div>
+              <div className="enterprise-chip inline-flex items-center gap-2 rounded-full px-3 py-1.5">
+                <Clock3 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                <span>{`${t("common.uptime")} ${formattedUptime}`}</span>
               </div>
             </div>
           </div>

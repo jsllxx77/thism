@@ -62,6 +62,7 @@ export type MetricsRow = {
   disk_total: number
   net_rx: number
   net_tx: number
+  uptime_seconds?: number
 }
 
 export type Process = {

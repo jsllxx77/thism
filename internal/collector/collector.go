@@ -269,6 +269,9 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	if payload.Hardware = c.hardware(); payload.Hardware != nil && payload.Hardware.IsEmpty() {
 		payload.Hardware = nil
 	}
+	if hostInfo, err := hostInfoFunc(); err == nil && hostInfo != nil {
+		payload.UptimeSeconds = hostInfo.Uptime
+	}
 
 	// CPU — blocks for 1 second for an accurate reading.
 	cpuPercents, err := cpu.Percent(time.Second, false)

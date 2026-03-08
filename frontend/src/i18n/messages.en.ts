@@ -35,6 +35,7 @@ export const messagesEn = {
       node: "Node",
       deleteNode: "Delete Node",
       lastSeen: "Last seen",
+      uptime: "Uptime",
       created: "Created",
       actions: "Actions",
       osArch: "OS / Arch",

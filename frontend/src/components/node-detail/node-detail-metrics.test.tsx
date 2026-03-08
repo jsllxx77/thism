@@ -14,6 +14,17 @@ const node: Node = {
   created_at: 0,
   last_seen: 1733011200,
   online: true,
+  latest_metrics: {
+    ts: 1733011200,
+    cpu: 37.5,
+    mem_used: 2048,
+    mem_total: 4096,
+    disk_used: 8192,
+    disk_total: 16384,
+    net_rx: 1234,
+    net_tx: 5678,
+    uptime_seconds: 93784,
+  },
   hardware: {
     cpu_model: "AMD EPYC 7B13",
     cpu_cores: 8,
@@ -33,6 +44,7 @@ describe("node detail metrics", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("Online")).toBeInTheDocument()
     expect(screen.getByText(/10.0.0.7/)).toBeInTheDocument()
+    expect(screen.getByText(/Uptime 1d 2h 3m/)).toBeInTheDocument()
     expect(screen.queryByText(/Last seen/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Node ID/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Heartbeat/i)).not.toBeInTheDocument()

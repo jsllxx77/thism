@@ -58,9 +58,10 @@ func TestStoreMetrics(t *testing.T) {
 	s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"})
 
 	m := &models.MetricsPayload{
-		TS:  time.Now().Unix(),
-		CPU: 55.0,
-		Mem: models.MemStats{Used: 1024, Total: 4096},
+		TS:            time.Now().Unix(),
+		CPU:           55.0,
+		UptimeSeconds: 3723,
+		Mem:           models.MemStats{Used: 1024, Total: 4096},
 	}
 	if err := s.InsertMetrics("n1", m); err != nil {
 		t.Fatalf("InsertMetrics: %v", err)
@@ -72,6 +73,9 @@ func TestStoreMetrics(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].UptimeSeconds != 3723 {
+		t.Fatalf("expected uptime 3723, got %d", rows[0].UptimeSeconds)
 	}
 }
 

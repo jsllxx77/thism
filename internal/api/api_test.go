@@ -74,10 +74,11 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	}
 
 	if err := s.InsertMetrics("node-1", &models.MetricsPayload{
-		TS:  1733011200,
-		CPU: 37.5,
-		Mem: models.MemStats{Used: 2048, Total: 4096},
-		Net: models.NetStats{RxBytes: 1234, TxBytes: 5678},
+		TS:            1733011200,
+		CPU:           37.5,
+		UptimeSeconds: 3723,
+		Mem:           models.MemStats{Used: 2048, Total: 4096},
+		Net:           models.NetStats{RxBytes: 1234, TxBytes: 5678},
 	}); err != nil {
 		t.Fatalf("InsertMetrics: %v", err)
 	}
@@ -114,6 +115,9 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	}
 	if body.Nodes[0].LatestMetrics.MemUsed != 2048 || body.Nodes[0].LatestMetrics.MemTotal != 4096 {
 		t.Fatalf("unexpected latest memory snapshot: %#v", body.Nodes[0].LatestMetrics)
+	}
+	if body.Nodes[0].LatestMetrics.UptimeSeconds != 3723 {
+		t.Fatalf("expected latest uptime 3723, got %d", body.Nodes[0].LatestMetrics.UptimeSeconds)
 	}
 }
 
