@@ -19,6 +19,9 @@ type Props = {
 }
 
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 768px)"
+const DEFAULT_METRICS_RETENTION_DAYS = 7
+const SEVEN_DAYS_SECONDS = 604800
+const THIRTY_DAYS_SECONDS = 2592000
 
 function isDesktopViewport() {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -54,9 +57,11 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [processes, setProcesses] = useState<Process[]>([])
   const [services, setServices] = useState<ServiceCheck[]>([])
   const [range, setRange] = useState(3600)
+  const [metricsRetentionDays, setMetricsRetentionDays] = useState(DEFAULT_METRICS_RETENTION_DAYS)
   const [desktopSectionsOpen, setDesktopSectionsOpen] = useState(isDesktopViewport)
   const [loadingDetail, setLoadingDetail] = useState(true)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const maxRange = metricsRetentionDays >= 30 ? THIRTY_DAYS_SECONDS : SEVEN_DAYS_SECONDS
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -76,6 +81,35 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     }
   }, [])
 
+  useEffect(() => {
+    if (accessMode === "guest") {
+      return
+    }
+
+    let cancelled = false
+
+    const loadMetricsRetention = async () => {
+      try {
+        const response = await api.metricsRetention()
+        if (!cancelled && typeof response.retention_days === "number" && Number.isFinite(response.retention_days)) {
+          setMetricsRetentionDays(response.retention_days)
+        }
+      } catch {}
+    }
+
+    void loadMetricsRetention()
+
+    return () => {
+      cancelled = true
+    }
+  }, [accessMode, refreshNonce])
+
+  useEffect(() => {
+    if (range > maxRange) {
+      setRange(maxRange)
+    }
+  }, [maxRange, range])
+
   const loadNodeDetail = useCallback(async () => {
     setLoadingDetail(true)
     setDetailError(null)
@@ -92,8 +126,9 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         return
       }
 
+      const effectiveRange = Math.min(range, maxRange)
       const to = Math.floor(Date.now() / 1000)
-      const from = to - range
+      const from = to - effectiveRange
       const [metricsResponse, processesResponse, servicesResponse] = await Promise.all([
         api.metrics(nodeId, from, to),
         api.processes(nodeId),
@@ -108,7 +143,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     } finally {
       setLoadingDetail(false)
     }
-  }, [accessMode, nodeId, range, t])
+  }, [accessMode, maxRange, nodeId, range, t])
 
   useEffect(() => {
     void loadNodeDetail()
@@ -220,6 +255,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
             <MetricTabs
               range={range}
               onRangeChange={setRange}
+              retentionDays={metricsRetentionDays}
               cpuData={cpuData}
               memData={memData}
               netRxData={netRxData}

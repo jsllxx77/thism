@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent } from "react"
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
+import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -143,6 +144,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
       </div>
 
       <AgentAutoUpdateCard />
+      <MetricsRetentionCard />
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Security")}</h3>

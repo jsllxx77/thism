@@ -137,6 +137,14 @@ export const messagesEn = {
       autoUpdateEnabled: "On",
       autoUpdateUnavailable: "Update details are unavailable right now.",
       autoUpdateChecksEveryMinutes: "Checks every {count} minutes",
+      metricsRetentionTitle: "Metrics Retention",
+      metricsRetentionDescription: "Choose how long historical metrics stay on the server. Changes apply immediately.",
+      metricsRetentionSave: "Save retention",
+      metricsRetentionSaving: "Saving...",
+      metricsRetentionSaved: "Metrics retention updated.",
+      metricsRetentionUpdateFailed: "Failed to update metrics retention.",
+      metricsRetention7Days: "7 days",
+      metricsRetention30Days: "30 days",
     },
     addNodeModal: {
       title: "Add Node",
@@ -227,6 +235,7 @@ export const messagesEn = {
       range6h: "6h",
       range24h: "24h",
       range7d: "7d",
+      range30d: "30d",
     },
     notFound: {
       title: "Nothing here",

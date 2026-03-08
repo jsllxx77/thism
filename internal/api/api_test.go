@@ -1225,3 +1225,101 @@ func TestAgentMetricsPreferPublicIPFromForwardedHeader(t *testing.T) {
 		t.Fatalf("expected forwarded public ip to win, got %s", node.IP)
 	}
 }
+
+func TestGetMetricsRetentionDefaultsToSevenDays(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/metrics-retention", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		RetentionDays int   `json:"retention_days"`
+		Options       []int `json:"options"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.RetentionDays != 7 {
+		t.Fatalf("expected default retention 7 days, got %d", body.RetentionDays)
+	}
+	if len(body.Options) != 2 || body.Options[0] != 7 || body.Options[1] != 30 {
+		t.Fatalf("unexpected retention options: %#v", body.Options)
+	}
+}
+
+func TestUpdateMetricsRetentionPersistsAndPrunesOldMetrics(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "node-1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	oldTS := time.Now().AddDate(0, 0, -40).Unix()
+	recentTS := time.Now().Unix()
+	if err := s.InsertMetrics("node-1", &models.MetricsPayload{TS: oldTS, CPU: 10}); err != nil {
+		t.Fatalf("InsertMetrics old: %v", err)
+	}
+	if err := s.InsertMetrics("node-1", &models.MetricsPayload{TS: recentTS, CPU: 20}); err != nil {
+		t.Fatalf("InsertMetrics recent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/metrics-retention", bytes.NewBufferString(`{"retention_days":30}`))
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	days, err := s.GetMetricsRetentionDays()
+	if err != nil {
+		t.Fatalf("GetMetricsRetentionDays: %v", err)
+	}
+	if days != 30 {
+		t.Fatalf("expected retention 30 days after update, got %d", days)
+	}
+
+	rows, err := s.QueryMetrics("node-1", oldTS-1, recentTS+1)
+	if err != nil {
+		t.Fatalf("QueryMetrics: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 metric row after prune, got %d", len(rows))
+	}
+	if rows[0].TS != recentTS {
+		t.Fatalf("expected recent metric to remain, got ts %d", rows[0].TS)
+	}
+}
+
+func TestUpdateMetricsRetentionRejectsInvalidValue(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/metrics-retention", bytes.NewBufferString(`{"retention_days":14}`))
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}

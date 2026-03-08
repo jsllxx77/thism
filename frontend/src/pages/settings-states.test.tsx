@@ -5,12 +5,16 @@ import { Settings } from "./Settings"
 const nodesMock = vi.fn()
 const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
+const metricsRetentionMock = vi.fn()
+const updateMetricsRetentionMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
     nodes: (...args: unknown[]) => nodesMock(...args),
     changePassword: (...args: unknown[]) => changePasswordMock(...args),
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
+    metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
+    updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
   },
 }))
 
@@ -29,7 +33,11 @@ describe("settings page states", () => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
     agentReleaseMock.mockReset()
+    metricsRetentionMock.mockReset()
+    updateMetricsRetentionMock.mockReset()
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
+    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
   })
 
   it("shows a loading state while settings data is pending", async () => {

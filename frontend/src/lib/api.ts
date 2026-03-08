@@ -144,6 +144,11 @@ export type AgentReleaseManifest = {
   check_interval_seconds: number
 }
 
+export type MetricsRetentionSettings = {
+  retention_days: number
+  options: number[]
+}
+
 export const api = {
   session: () => req<SessionInfo>("/api/auth/session"),
   nodes: () => req<{ nodes: Node[] }>("/api/nodes"),
@@ -191,5 +196,11 @@ export const api = {
       }),
     }),
   getAgentUpdateJob: (id: string) => req<UpdateJobResponse>(`/api/agent-updates/${id}`),
+  metricsRetention: () => req<MetricsRetentionSettings>("/api/settings/metrics-retention"),
+  updateMetricsRetention: (retentionDays: number) =>
+    req<MetricsRetentionSettings>("/api/settings/metrics-retention", {
+      method: "PUT",
+      body: JSON.stringify({ retention_days: retentionDays }),
+    }),
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),
 }

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/thism-dev/thism/frontend"
 	"github.com/thism-dev/thism/internal/api"
@@ -32,6 +33,8 @@ func main() {
 	}
 	defer s.Close()
 
+	startMetricsRetentionPruner(s)
+
 	h := hub.New(s)
 	go h.Run()
 
@@ -42,4 +45,28 @@ func main() {
 	}, frontend.Handler())
 	log.Printf("ThisM server listening on :%s", *port)
 	log.Fatal(http.ListenAndServe(":"+*port, router))
+}
+
+const metricsRetentionPruneInterval = time.Hour
+
+func startMetricsRetentionPruner(s *store.Store) {
+	go func() {
+		pruneMetrics(s)
+		ticker := time.NewTicker(metricsRetentionPruneInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			pruneMetrics(s)
+		}
+	}()
+}
+
+func pruneMetrics(s *store.Store) {
+	days, err := s.GetMetricsRetentionDays()
+	if err != nil {
+		log.Printf("metrics retention: failed to load retention days: %v", err)
+		return
+	}
+	if err := s.PruneOldMetrics(days); err != nil {
+		log.Printf("metrics retention: failed to prune old metrics: %v", err)
+	}
 }

@@ -68,6 +68,7 @@ describe("node detail metrics", () => {
       <MetricTabs
         range={3600}
         onRangeChange={onRangeChange}
+        retentionDays={7}
         cpuData={points}
         memData={points}
         netRxData={points}

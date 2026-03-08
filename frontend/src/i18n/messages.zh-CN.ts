@@ -137,6 +137,14 @@ export const messagesZhCN = {
       autoUpdateEnabled: "已开启",
       autoUpdateUnavailable: "当前无法获取更新信息。",
       autoUpdateChecksEveryMinutes: "每 {count} 分钟检查一次",
+      metricsRetentionTitle: "指标保留时长",
+      metricsRetentionDescription: "选择历史指标在服务器保留多久，保存后立即生效。",
+      metricsRetentionSave: "保存保留时长",
+      metricsRetentionSaving: "保存中...",
+      metricsRetentionSaved: "指标保留时长已更新。",
+      metricsRetentionUpdateFailed: "更新指标保留时长失败。",
+      metricsRetention7Days: "7天",
+      metricsRetention30Days: "30天",
     },
     addNodeModal: {
       title: "添加节点",
@@ -227,6 +235,7 @@ export const messagesZhCN = {
       range6h: "6小时",
       range24h: "24小时",
       range7d: "7天",
+      range30d: "30天",
     },
     notFound: {
       title: "这里什么也没有",

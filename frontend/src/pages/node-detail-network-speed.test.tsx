@@ -7,6 +7,7 @@ const nodesMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
+const metricsRetentionMock = vi.fn()
 let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = null
 
 vi.mock("../lib/api", () => ({
@@ -15,6 +16,7 @@ vi.mock("../lib/api", () => ({
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
+    metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
   },
 }))
 
@@ -51,8 +53,10 @@ describe("node detail network speed", () => {
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
+    metricsRetentionMock.mockReset()
     wsHandler = null
     mockMatchMedia()
+    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
 
     nodesMock.mockResolvedValue({
       nodes: [

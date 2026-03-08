@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,27 @@ import (
 // Store is the SQLite-backed data access layer.
 type Store struct {
 	db *sql.DB
+}
+
+const DefaultMetricsRetentionDays = 7
+
+const metricsRetentionSettingKey = "metrics_retention_days"
+
+var metricsRetentionOptions = []int{7, 30}
+
+func MetricsRetentionOptions() []int {
+	options := make([]int, len(metricsRetentionOptions))
+	copy(options, metricsRetentionOptions)
+	return options
+}
+
+func IsValidMetricsRetentionDays(days int) bool {
+	for _, candidate := range metricsRetentionOptions {
+		if candidate == days {
+			return true
+		}
+	}
+	return false
 }
 
 // MetricsRow is a flat struct representing a single metrics sample for API use.
@@ -131,6 +153,12 @@ CREATE TABLE IF NOT EXISTS update_job_targets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_update_job_targets_job_id ON update_job_targets(job_id);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
 `)
 	if err != nil {
 		return err
@@ -174,6 +202,36 @@ func (s *Store) ensureColumn(table, column, definition string) error {
 	}
 
 	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
+}
+
+func (s *Store) GetMetricsRetentionDays() (int, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, metricsRetentionSettingKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return DefaultMetricsRetentionDays, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || !IsValidMetricsRetentionDays(value) {
+		return DefaultMetricsRetentionDays, nil
+	}
+	return value, nil
+}
+
+func (s *Store) SetMetricsRetentionDays(days int) error {
+	if !IsValidMetricsRetentionDays(days) {
+		return fmt.Errorf("invalid metrics retention days")
+	}
+	_, err := s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, metricsRetentionSettingKey, strconv.Itoa(days), time.Now().Unix())
 	return err
 }
 

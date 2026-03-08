@@ -208,6 +208,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		r.Get("/api/nodes", func(w http.ResponseWriter, req *http.Request) {
 			handleListNodes(w, req, s, h)
 		})
+
+		r.Get("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
+			handleGetMetricsRetention(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -218,6 +222,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 		r.Post("/api/auth/change-password", func(w http.ResponseWriter, req *http.Request) {
 			handleChangePassword(w, req, s, authState)
+		})
+
+		r.Put("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateMetricsRetention(w, req, s)
 		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
@@ -1184,6 +1192,52 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request, s *store.Store
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleGetMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	days, err := s.GetMetricsRetentionDays()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"retention_days": days,
+		"options":        store.MetricsRetentionOptions(),
+	})
+}
+
+func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	var req struct {
+		RetentionDays int `json:"retention_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if !store.IsValidMetricsRetentionDays(req.RetentionDays) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid metrics retention days"})
+		return
+	}
+	if err := s.SetMetricsRetentionDays(req.RetentionDays); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.PruneOldMetrics(req.RetentionDays); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"retention_days": req.RetentionDays,
+		"options":        store.MetricsRetentionOptions(),
+	})
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { Settings } from "../../pages/Settings"
 
 const nodesMock = vi.fn()
@@ -18,16 +19,15 @@ vi.mock("../../lib/api", () => ({
   },
 }))
 
-describe("agent auto update status card", () => {
+describe("metrics retention settings", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
     agentReleaseMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+
     nodesMock.mockResolvedValue({ nodes: [] })
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     agentReleaseMock.mockImplementation((_os: string, arch: string) =>
       Promise.resolve({
         target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd",
@@ -36,19 +36,24 @@ describe("agent auto update status card", () => {
         check_interval_seconds: 1800,
       }),
     )
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [7, 30] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
   })
 
-  it("shows auto update status and hides batch upgrade controls", async () => {
+  it("loads the current retention and saves a new retention period", async () => {
+    const user = userEvent.setup()
+
     render(<Settings />)
 
-    expect(await screen.findByText("Automatic Updates")).toBeInTheDocument()
-    expect(screen.getByText("On")).toBeInTheDocument()
-    expect(screen.getByText("Checks every 30 minutes")).toBeInTheDocument()
-    expect(screen.getByText("linux/amd64 · aaaa1111bbbb")).toBeInTheDocument()
-    expect(screen.getByText("linux/arm64 · cccc2222dddd")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Metrics Retention", level: 3 })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "30 days" })).toBeChecked()
+
+    await user.click(screen.getByRole("radio", { name: "7 days" }))
+    await user.click(screen.getByRole("button", { name: "Save retention" }))
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /batch upgrade/i })).not.toBeInTheDocument()
+      expect(updateMetricsRetentionMock).toHaveBeenCalledWith(7)
     })
+    expect(await screen.findByText("Metrics retention updated.")).toBeInTheDocument()
   })
 })

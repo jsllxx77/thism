@@ -234,3 +234,43 @@ func TestStoreUpdateJobLifecycle(t *testing.T) {
 		t.Fatalf("expected one target to store reported version")
 	}
 }
+
+func TestStoreMetricsRetentionDefaultsToSevenDays(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	days, err := s.GetMetricsRetentionDays()
+	if err != nil {
+		t.Fatalf("GetMetricsRetentionDays: %v", err)
+	}
+	if days != 7 {
+		t.Fatalf("expected default retention 7 days, got %d", days)
+	}
+}
+
+func TestStoreMetricsRetentionRoundTrip(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.SetMetricsRetentionDays(30); err != nil {
+		t.Fatalf("SetMetricsRetentionDays: %v", err)
+	}
+
+	days, err := s.GetMetricsRetentionDays()
+	if err != nil {
+		t.Fatalf("GetMetricsRetentionDays: %v", err)
+	}
+	if days != 30 {
+		t.Fatalf("expected persisted retention 30 days, got %d", days)
+	}
+
+	if err := s.SetMetricsRetentionDays(14); err == nil {
+		t.Fatal("expected unsupported retention value to fail")
+	}
+}

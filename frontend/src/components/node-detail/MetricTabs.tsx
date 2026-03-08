@@ -10,6 +10,7 @@ type ValueFormatter = (value: number) => string
 type Props = {
   range: number
   onRangeChange: (seconds: number) => void
+  retentionDays: number
   cpuData: DataPoint[]
   memData: DataPoint[]
   netRxData: DataPoint[]
@@ -27,6 +28,7 @@ type Props = {
 export function MetricTabs({
   range,
   onRangeChange,
+  retentionDays,
   cpuData,
   memData,
   netRxData,
@@ -46,7 +48,8 @@ export function MetricTabs({
     { label: t("nodeDetail.range6h"), seconds: 21600 },
     { label: t("nodeDetail.range24h"), seconds: 86400 },
     { label: t("nodeDetail.range7d"), seconds: 604800 },
-  ] as const
+    ...(retentionDays >= 30 ? [{ label: t("nodeDetail.range30d"), seconds: 2592000 }] : []),
+  ]
   const [activeTab, setActiveTab] = useState<MetricTab>("cpu")
 
   return (

@@ -6,6 +6,7 @@ const nodesMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
+const metricsRetentionMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -13,6 +14,7 @@ vi.mock("../lib/api", () => ({
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
+    metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
   },
 }))
 
@@ -39,6 +41,7 @@ describe("node detail page states", () => {
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
+    metricsRetentionMock.mockReset()
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -53,6 +56,7 @@ describe("node detail page states", () => {
         dispatchEvent: () => false,
       }),
     })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
   })
 
   it("shows a loading state while node detail data is pending", async () => {
@@ -204,6 +208,32 @@ describe("node detail page states", () => {
 
     expect(await screen.findByText("Hardware")).toBeInTheDocument()
     expect(screen.getAllByText("AMD EPYC 7B13").length).toBeGreaterThan(0)
+  })
+
+
+  it("shows a 30d metric range when retention is set to 30 days", async () => {
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [7, 30] })
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "node-1",
+          name: "alpha",
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          created_at: 0,
+          last_seen: 0,
+          online: true,
+        },
+      ],
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    expect(await screen.findByRole("button", { name: "30d" })).toBeInTheDocument()
   })
 
   it("limits guest users to basic node information", async () => {
