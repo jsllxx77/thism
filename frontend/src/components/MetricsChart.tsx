@@ -8,9 +8,10 @@ import {
 } from "recharts"
 import { useLanguage } from "../i18n/language"
 
-export type DataPoint = { ts: number; value: number }
+export type DataPoint = { ts: number; value: number | null }
 
 type ValueFormatter = (value: number) => string
+type TimeFormatter = (value: number) => string
 
 type Props = {
   data: DataPoint[]
@@ -20,6 +21,8 @@ type Props = {
   domain?: [number | string, number | string]
   valueFormatter?: ValueFormatter
   axisTickFormatter?: ValueFormatter
+  xAxisTickFormatter?: TimeFormatter
+  tooltipLabelFormatter?: TimeFormatter
 }
 
 export function MetricsChart({
@@ -30,11 +33,17 @@ export function MetricsChart({
   domain = [0, 100],
   valueFormatter,
   axisTickFormatter,
+  xAxisTickFormatter,
+  tooltipLabelFormatter,
 }: Props) {
   const { language } = useLanguage()
   const gradId = `grad-${label.replace(/\s+/g, "-")}`
   const formatTooltipValue = valueFormatter ?? ((value: number) => `${value.toFixed(1)}${unit}`)
   const formatAxisTick = axisTickFormatter
+  const formatXAxisTick = xAxisTickFormatter ?? ((value: number) =>
+    new Date(value * 1000).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })
+  )
+  const formatTooltipLabel = tooltipLabelFormatter ?? ((value: number) => new Date(value * 1000).toLocaleTimeString(language))
 
   return (
     <div className="panel-card enterprise-surface rounded-[24px] p-4">
@@ -49,9 +58,7 @@ export function MetricsChart({
           </defs>
           <XAxis
             dataKey="ts"
-            tickFormatter={(value: number) =>
-              new Date(value * 1000).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })
-            }
+            tickFormatter={formatXAxisTick}
             tick={{ fill: "#6b7280", fontSize: 9 }}
             axisLine={false}
             tickLine={false}
@@ -75,8 +82,8 @@ export function MetricsChart({
             }}
             itemStyle={{ color: "hsl(var(--popover-foreground))" }}
             labelStyle={{ color: "hsl(var(--popover-foreground))" }}
-            labelFormatter={(value) => new Date((value as number) * 1000).toLocaleTimeString(language)}
-            formatter={(value) => [formatTooltipValue(value as number), label]}
+            labelFormatter={(value) => formatTooltipLabel(value as number)}
+            formatter={(value) => [value == null ? "—" : formatTooltipValue(value as number), label]}
           />
           <Area
             type="monotone"
@@ -86,6 +93,7 @@ export function MetricsChart({
             strokeWidth={1.5}
             dot={false}
             isAnimationActive={false}
+            connectNulls={false}
           />
         </AreaChart>
       </ResponsiveContainer>

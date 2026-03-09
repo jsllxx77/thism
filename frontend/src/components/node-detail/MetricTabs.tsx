@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { useLanguage } from "../../i18n/language"
 import { MetricsChart, type DataPoint } from "../MetricsChart"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
@@ -42,7 +42,7 @@ export function MetricTabs({
   netSpeedAxisTickFormatter,
   networkSummary,
 }: Props) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const ranges = [
     { label: t("nodeDetail.range1h"), seconds: 3600 },
     { label: t("nodeDetail.range6h"), seconds: 21600 },
@@ -52,6 +52,30 @@ export function MetricTabs({
   ]
   const [activeTab, setActiveTab] = useState<MetricTab>("cpu")
 
+  const showDateInTimeLabels = range >= 86400
+  const xAxisTickFormatter = useMemo(() => {
+    if (showDateInTimeLabels) {
+      return (value: number) =>
+        new Date(value * 1000).toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    }
+
+    return (value: number) =>
+      new Date(value * 1000).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })
+  }, [language, showDateInTimeLabels])
+  const tooltipLabelFormatter = useMemo(() => {
+    if (showDateInTimeLabels) {
+      return (value: number) =>
+        new Date(value * 1000).toLocaleString(language, {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+    }
+
+    return (value: number) => new Date(value * 1000).toLocaleTimeString(language)
+  }, [language, showDateInTimeLabels])
   return (
     <section className="space-y-4">
       <div className="panel-card enterprise-surface rounded-[24px] p-4">
@@ -94,8 +118,8 @@ export function MetricTabs({
         </div>
       </div>
 
-      {activeTab === "cpu" && <MetricsChart data={cpuData} label={t("nodeDetail.cpuUsage")} color="#4f78bf" />}
-      {activeTab === "memory" && <MetricsChart data={memData} label={t("nodeDetail.memoryUsage")} color="#4b8b6a" />}
+      {activeTab === "cpu" && <MetricsChart data={cpuData} label={t("nodeDetail.cpuUsage")} color="#4f78bf" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />}
+      {activeTab === "memory" && <MetricsChart data={memData} label={t("nodeDetail.memoryUsage")} color="#4b8b6a" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />}
       {activeTab === "network" && (
         <div className="space-y-4">
           {networkSummary}
@@ -107,6 +131,8 @@ export function MetricTabs({
               domain={[0, "auto"]}
               valueFormatter={netValueFormatter}
               axisTickFormatter={netAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
             />
             <MetricsChart
               data={netTxData}
@@ -115,6 +141,8 @@ export function MetricTabs({
               domain={[0, "auto"]}
               valueFormatter={netValueFormatter}
               axisTickFormatter={netAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
             />
             <MetricsChart
               data={netRxSpeedData}
@@ -123,6 +151,8 @@ export function MetricTabs({
               domain={[0, "auto"]}
               valueFormatter={netSpeedFormatter}
               axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
             />
             <MetricsChart
               data={netTxSpeedData}
@@ -131,11 +161,13 @@ export function MetricTabs({
               domain={[0, "auto"]}
               valueFormatter={netSpeedFormatter}
               axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
             />
           </div>
         </div>
       )}
-      {activeTab === "disk" && <MetricsChart data={diskData} label={t("nodeDetail.diskUsage")} color="#8b6d3f" />}
+      {activeTab === "disk" && <MetricsChart data={diskData} label={t("nodeDetail.diskUsage")} color="#8b6d3f" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />}
     </section>
   )
 }

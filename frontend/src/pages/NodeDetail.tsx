@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { api, type AccessMode, type Node, type MetricsRow, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
-import { formatBytes, formatBytesPerSecond, deriveRateSeries } from "../lib/units"
+import { formatBytes, formatBytesPerSecond } from "../lib/units"
+import { appendLiveMetricPoint, buildMetricChartSeries, buildMetricRateChartSeries } from "../lib/metric-series"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
@@ -31,7 +32,7 @@ function isDesktopViewport() {
   return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches
 }
 
-function getLatestValidValue(points: ReadonlyArray<{ value: number }>): number | undefined {
+function getLatestValidValue(points: ReadonlyArray<{ value: number | null }>): number | undefined {
   for (let index = points.length - 1; index >= 0; index -= 1) {
     const value = points[index]?.value
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -62,6 +63,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [loadingDetail, setLoadingDetail] = useState(true)
   const [detailError, setDetailError] = useState<string | null>(null)
   const maxRange = metricsRetentionDays >= 30 ? THIRTY_DAYS_SECONDS : SEVEN_DAYS_SECONDS
+  const effectiveRange = Math.min(range, maxRange)
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -130,7 +132,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         return
       }
 
-      const effectiveRange = Math.min(range, maxRange)
       const to = Math.floor(Date.now() / 1000)
       const from = to - effectiveRange
       const [metricsResponse, processesResponse, servicesResponse] = await Promise.all([
@@ -147,7 +148,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     } finally {
       setLoadingDetail(false)
     }
-  }, [accessMode, maxRange, nodeId, range, t])
+  }, [accessMode, effectiveRange, nodeId, t])
 
   useEffect(() => {
     void loadNodeDetail()
@@ -185,22 +186,24 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
           net_tx: data.net?.tx_bytes ?? 0,
           uptime_seconds: data.uptime_seconds ?? 0,
         }
-        setMetrics((prev) => [...prev.slice(-719), point])
+        setMetrics((prev) => appendLiveMetricPoint(prev, point, effectiveRange))
       }
     }
     ws.on(handler)
     return () => ws.off(handler)
-  }, [accessMode, nodeId])
+  }, [accessMode, effectiveRange, nodeId])
 
-  const cpuData = metrics.map((m) => ({ ts: m.ts, value: m.cpu }))
-  const memData = metrics.map((m) => ({
-    ts: m.ts,
-    value: m.mem_total > 0 ? (m.mem_used / m.mem_total) * 100 : 0,
-  }))
-  const netRxData = metrics.map((m) => ({ ts: m.ts, value: m.net_rx }))
-  const netTxData = metrics.map((m) => ({ ts: m.ts, value: m.net_tx }))
-  const netRxSpeedData = deriveRateSeries(netRxData)
-  const netTxSpeedData = deriveRateSeries(netTxData)
+  const cpuData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.cpu, "average"), [effectiveRange, metrics])
+  const memData = useMemo(() => buildMetricChartSeries(
+    metrics,
+    effectiveRange,
+    (row) => (row.mem_total > 0 ? (row.mem_used / row.mem_total) * 100 : 0),
+    "average",
+  ), [effectiveRange, metrics])
+  const netRxData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.net_rx, "last"), [effectiveRange, metrics])
+  const netTxData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.net_tx, "last"), [effectiveRange, metrics])
+  const netRxSpeedData = useMemo(() => buildMetricRateChartSeries(metrics, effectiveRange, (row) => row.net_rx), [effectiveRange, metrics])
+  const netTxSpeedData = useMemo(() => buildMetricRateChartSeries(metrics, effectiveRange, (row) => row.net_tx), [effectiveRange, metrics])
   const latestMetricPoint = metrics[metrics.length - 1]
   const heroUptimeSeconds =
     typeof latestMetricPoint?.uptime_seconds === "number" && latestMetricPoint.uptime_seconds > 0
@@ -218,10 +221,12 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
       outboundSpeed={latestOutboundSpeed}
     />
   )
-  const diskData = metrics.map((m) => ({
-    ts: m.ts,
-    value: m.disk_total > 0 ? (m.disk_used / m.disk_total) * 100 : 0,
-  }))
+  const diskData = useMemo(() => buildMetricChartSeries(
+    metrics,
+    effectiveRange,
+    (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0),
+    "average",
+  ), [effectiveRange, metrics])
   const hasProcessSection = processes.length > 0
   const hasServiceSection = services.length > 0
   const showMetrics = accessMode !== "guest"
