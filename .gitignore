@@ -1,7 +1,6 @@
 bin/
 dist/
 frontend/dist/
-frontend/build/
 frontend/node_modules/
 *.db
 *.db-journal

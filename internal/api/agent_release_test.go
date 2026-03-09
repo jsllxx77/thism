@@ -1,38 +1,75 @@
 package api_test
 
 import (
-  "encoding/json"
-  "net/http"
-  "net/http/httptest"
-  "testing"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
 
-  "github.com/thism-dev/thism/internal/api"
-  "github.com/thism-dev/thism/internal/hub"
-  "github.com/thism-dev/thism/internal/store"
+	"github.com/thism-dev/thism/internal/api"
+	"github.com/thism-dev/thism/internal/hub"
+	"github.com/thism-dev/thism/internal/store"
 )
 
 func TestAgentReleaseManifest(t *testing.T) {
-  s, _ := store.New(":memory:")
-  defer s.Close()
-  h := hub.New(s)
-  go h.Run()
+	fixture := []byte("test-agent-release-binary")
+	tempDir := t.TempDir()
+	distDir := filepath.Join(tempDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("create dist dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "thism-agent-linux-amd64"), fixture, 0o755); err != nil {
+		t.Fatalf("write agent fixture: %v", err)
+	}
 
-  router := api.NewRouter(s, h, "admin-token", nil)
-  req := httptest.NewRequest(http.MethodGet, "/api/agent-release?os=linux&arch=amd64", nil)
-  w := httptest.NewRecorder()
-  router.ServeHTTP(w, req)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
 
-  if w.Code != http.StatusOK {
-    t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-  }
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
 
-  var body map[string]any
-  if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-    t.Fatalf("decode response: %v", err)
-  }
-  for _, key := range []string{"target_version", "download_url", "sha256", "check_interval_seconds"} {
-    if _, ok := body[key]; !ok {
-      t.Fatalf("expected manifest field %q, got %#v", key, body)
-    }
-  }
+	router := api.NewRouter(s, h, "admin-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-release?os=linux&arch=amd64", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	checksum := sha256.Sum256(fixture)
+	expectedSHA := hex.EncodeToString(checksum[:])
+	expectedVersion := expectedSHA[:12]
+
+	if body["sha256"] != expectedSHA {
+		t.Fatalf("expected sha256 %q, got %#v", expectedSHA, body["sha256"])
+	}
+	if body["target_version"] != expectedVersion {
+		t.Fatalf("expected target_version %q, got %#v", expectedVersion, body["target_version"])
+	}
+	if body["download_url"] != "http://example.com/dl/thism-agent-linux-amd64" {
+		t.Fatalf("expected download_url for amd64 binary, got %#v", body["download_url"])
+	}
+	if body["check_interval_seconds"] != float64(1800) {
+		t.Fatalf("expected 1800 second interval, got %#v", body["check_interval_seconds"])
+	}
 }
