@@ -10,7 +10,16 @@ import { ViewModeToggle } from "../components/dashboard/ViewModeToggle"
 import { MotionSection } from "../motion/transitions"
 import { useLanguage } from "../i18n/language"
 
-type LiveMetrics = Record<string, { cpu: number; memUsed: number; memTotal: number }>
+type LiveNetSample = { ts: number; rxBytes: number; txBytes: number }
+type LiveMetricsSample = {
+  cpu: number
+  memUsed: number
+  memTotal: number
+  netRxSpeed?: number
+  netTxSpeed?: number
+  lastNet?: LiveNetSample
+}
+type LiveMetrics = Record<string, LiveMetricsSample>
 const ONLINE_GRACE_PERIOD_SECONDS = 15
 const NodeTable = lazy(async () => ({ default: (await import("../components/dashboard/NodeTable")).NodeTable }))
 
@@ -18,11 +27,17 @@ function snapshotToLive(node: Node): LiveMetrics[string] | null {
   const snapshot = node.latest_metrics
   if (!snapshot) return null
 
-  return {
+  const entry: LiveMetrics[string] = {
     cpu: snapshot.cpu,
     memUsed: snapshot.mem_used,
     memTotal: snapshot.mem_total,
   }
+
+  if (typeof snapshot.ts === "number" && typeof (snapshot as any).net_rx === "number" && typeof (snapshot as any).net_tx === "number") {
+    entry.lastNet = { ts: snapshot.ts, rxBytes: (snapshot as any).net_rx, txBytes: (snapshot as any).net_tx }
+  }
+
+  return entry
 }
 
 function isNodeEffectivelyOnline(node: Node, nowMs: number): boolean {
@@ -104,12 +119,35 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
         const { node_id, last_seen, data } = msg.payload as {
           node_id: string
           last_seen?: number
-          data: { cpu: number; mem: { used: number; total: number } }
+          data: { cpu: number; mem: { used: number; total: number }; ts?: number; net?: { rx_bytes: number; tx_bytes: number } }
         }
-        setLive((prev) => ({
-          ...prev,
-          [node_id]: { cpu: data.cpu, memUsed: data.mem.used, memTotal: data.mem.total },
-        }))
+        setLive((prev) => {
+          const existing = prev[node_id]
+          const next: LiveMetrics[string] = existing
+            ? { ...existing, cpu: data.cpu, memUsed: data.mem.used, memTotal: data.mem.total }
+            : { cpu: data.cpu, memUsed: data.mem.used, memTotal: data.mem.total }
+
+          if (typeof data.ts === "number" && data.net && typeof data.net.rx_bytes === "number" && typeof data.net.tx_bytes === "number") {
+            const ts = data.ts
+            const rxBytes = data.net.rx_bytes
+            const txBytes = data.net.tx_bytes
+
+            if (existing?.lastNet && ts > existing.lastNet.ts) {
+              const deltaTs = ts - existing.lastNet.ts
+              const deltaRx = rxBytes - existing.lastNet.rxBytes
+              const deltaTx = txBytes - existing.lastNet.txBytes
+              next.netRxSpeed = deltaTs > 0 && deltaRx >= 0 ? deltaRx / deltaTs : undefined
+              next.netTxSpeed = deltaTs > 0 && deltaTx >= 0 ? deltaTx / deltaTs : undefined
+            }
+
+            next.lastNet = { ts, rxBytes, txBytes }
+          }
+
+          return {
+            ...prev,
+            [node_id]: next,
+          }
+        })
         if (typeof last_seen === "number") {
           setNodes((prev) => prev.map((n) => (n.id === node_id ? { ...n, last_seen } : n)))
         }
@@ -250,6 +288,8 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
                   cpu={live[node.id]?.cpu}
                   memUsed={live[node.id]?.memUsed}
                   memTotal={live[node.id]?.memTotal}
+                  netRxSpeed={live[node.id]?.netRxSpeed}
+                  netTxSpeed={live[node.id]?.netTxSpeed}
                   showIP={accessMode !== "guest"}
                   onClick={() => onSelectNode(node.id)}
                 />

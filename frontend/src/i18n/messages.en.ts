@@ -98,6 +98,8 @@ export const messagesEn = {
       nodeCard: {
         cpu: "CPU",
         memory: "MEM",
+        inboundSpeed: "Inbound",
+        outboundSpeed: "Outbound",
         lastSeen: "Last seen {value}",
         justNow: "just now",
         secondsAgo: "{value}s ago",

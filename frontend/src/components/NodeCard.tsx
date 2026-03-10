@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
+import { formatBytesPerSecond } from "../lib/units"
 import { Badge } from "./ui/badge"
 import { Card, CardContent } from "./ui/card"
 
@@ -10,6 +11,8 @@ type Props = {
   cpu?: number
   memUsed?: number
   memTotal?: number
+  netRxSpeed?: number
+  netTxSpeed?: number
   showIP?: boolean
   onClick?: () => void
 }
@@ -36,11 +39,16 @@ function MetricBar({ value, hasValue = true }: { value: number; hasValue?: boole
   )
 }
 
-export function NodeCard({ node, cpu, memUsed, memTotal, showIP = true, onClick }: Props) {
+export function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed, showIP = true, onClick }: Props) {
   const { t, formatRelativeLastSeen } = useLanguage()
   const hasCpu = typeof cpu === "number"
   const hasMemory = typeof memUsed === "number" && typeof memTotal === "number" && memTotal > 0
   const memPct = hasMemory ? (memUsed / memTotal) * 100 : null
+  const showNetSpeed = node.online
+  const hasNetRxSpeed = showNetSpeed && typeof netRxSpeed === "number" && Number.isFinite(netRxSpeed) && netRxSpeed >= 0
+  const hasNetTxSpeed = showNetSpeed && typeof netTxSpeed === "number" && Number.isFinite(netTxSpeed) && netTxSpeed >= 0
+  const netRxLabel = hasNetRxSpeed ? formatBytesPerSecond(netRxSpeed) : "—"
+  const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
   const [nowMs, setNowMs] = useState(() => Date.now())
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
@@ -108,6 +116,17 @@ export function NodeCard({ node, cpu, memUsed, memTotal, showIP = true, onClick 
                 <span className="text-slate-700 dark:text-slate-200">{memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`}</span>
               </div>
               <MetricBar value={memPct === null ? 0 : Number(memPct.toFixed(1))} hasValue={memPct !== null} />
+            </div>
+
+            <div className={`space-y-1 ${showNetSpeed ? "" : "opacity-60"}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.inboundSpeed")}</span>
+                <span className="text-slate-700 dark:text-slate-200 tabular-nums">↓ {netRxLabel}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.outboundSpeed")}</span>
+                <span className="text-slate-700 dark:text-slate-200 tabular-nums">↑ {netTxLabel}</span>
+              </div>
             </div>
           </div>
 

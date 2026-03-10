@@ -71,6 +71,13 @@ describe("node card redesign", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2)
   })
 
+  it('renders network speed when provided', () => {
+    render(<NodeCard node={createNode()} cpu={12.3} memUsed={512} memTotal={1024} netRxSpeed={1024} netTxSpeed={2048} />)
+
+    expect(screen.getByText(/1\.0 KB\/s/)).toBeInTheDocument()
+    expect(screen.getByText(/2\.0 KB\/s/)).toBeInTheDocument()
+  })
+
   it("can hide node IP for restricted views", () => {
     render(<NodeCard node={createNode()} showIP={false} />)
 

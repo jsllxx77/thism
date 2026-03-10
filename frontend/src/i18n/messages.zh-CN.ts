@@ -98,6 +98,8 @@ export const messagesZhCN = {
       nodeCard: {
         cpu: "CPU",
         memory: "内存",
+        inboundSpeed: "入站速度",
+        outboundSpeed: "出站速度",
         lastSeen: "最后在线 {value}",
         justNow: "刚刚",
         secondsAgo: "{value}秒前",
