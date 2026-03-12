@@ -51,6 +51,23 @@ type MetricsRow struct {
 	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
 }
 
+type Metrics1mRow struct {
+	NodeID       string
+	TS           int64
+	Samples      int64
+	CPUAvg       float64
+	CPUMax       float64
+	MemUsedAvg   int64
+	MemUsedMax   int64
+	MemTotalMax  int64
+	DiskUsedAvg  int64
+	DiskUsedMax  int64
+	DiskTotalMax int64
+	NetRxMax     int64
+	NetTxMax     int64
+	UptimeMax    int64
+}
+
 // New opens (or creates) the SQLite database at the given path, runs migrations,
 // and returns a ready-to-use Store.
 func New(path string) (*Store, error) {
@@ -106,6 +123,26 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_node_ts ON metrics(node_id, ts);
+
+CREATE TABLE IF NOT EXISTS metrics_1m (
+    node_id            TEXT NOT NULL,
+    ts                 INTEGER NOT NULL,
+    samples            INTEGER NOT NULL DEFAULT 0,
+    cpu_avg            REAL DEFAULT 0,
+    cpu_max            REAL DEFAULT 0,
+    mem_used_avg       INTEGER DEFAULT 0,
+    mem_used_max       INTEGER DEFAULT 0,
+    mem_total_max      INTEGER DEFAULT 0,
+    disk_used_avg      INTEGER DEFAULT 0,
+    disk_used_max      INTEGER DEFAULT 0,
+    disk_total_max     INTEGER DEFAULT 0,
+    net_rx_max         INTEGER DEFAULT 0,
+    net_tx_max         INTEGER DEFAULT 0,
+    uptime_seconds_max INTEGER DEFAULT 0,
+    PRIMARY KEY (node_id, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_1m_node_ts ON metrics_1m(node_id, ts);
 
 CREATE TABLE IF NOT EXISTS processes (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -758,6 +795,109 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		result = append(result, &r)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) QueryMetrics1m(nodeID string, from, to int64) ([]*MetricsRow, error) {
+	rows, err := s.db.Query(`
+SELECT ts, cpu_avg, mem_used_avg, mem_total_max, disk_used_avg, disk_total_max, net_rx_max, net_tx_max, uptime_seconds_max
+FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
+		nodeID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*MetricsRow
+	for rows.Next() {
+		var r MetricsRow
+		var memUsedAvg int64
+		var memTotalMax int64
+		var diskUsedAvg int64
+		var diskTotalMax int64
+		var netRxMax int64
+		var netTxMax int64
+		var uptimeMax int64
+		if err := rows.Scan(&r.TS, &r.CPU, &memUsedAvg, &memTotalMax, &diskUsedAvg, &diskTotalMax, &netRxMax, &netTxMax, &uptimeMax); err != nil {
+			return nil, err
+		}
+		if memUsedAvg > 0 {
+			r.MemUsed = uint64(memUsedAvg)
+		}
+		if memTotalMax > 0 {
+			r.MemTotal = uint64(memTotalMax)
+		}
+		if diskUsedAvg > 0 {
+			r.DiskUsed = uint64(diskUsedAvg)
+		}
+		if diskTotalMax > 0 {
+			r.DiskTotal = uint64(diskTotalMax)
+		}
+		if netRxMax > 0 {
+			r.NetRx = uint64(netRxMax)
+		}
+		if netTxMax > 0 {
+			r.NetTx = uint64(netTxMax)
+		}
+		if uptimeMax > 0 {
+			r.UptimeSeconds = uint64(uptimeMax)
+		}
+		result = append(result, &r)
+	}
+	return result, rows.Err()
+}
+
+// RollupMetrics1m aggregates raw metrics into 1-minute buckets over [from, to].
+// from/to are unix timestamps in seconds.
+func (s *Store) RollupMetrics1m(from, to int64) error {
+	// Align to minute boundaries.
+	from = (from / 60) * 60
+	to = (to / 60) * 60
+	if to < from {
+		return nil
+	}
+	_, err := s.db.Exec(`
+INSERT INTO metrics_1m (
+  node_id, ts, samples,
+  cpu_avg, cpu_max,
+  mem_used_avg, mem_used_max, mem_total_max,
+  disk_used_avg, disk_used_max, disk_total_max,
+  net_rx_max, net_tx_max,
+  uptime_seconds_max
+)
+SELECT
+  node_id,
+  (ts/60)*60 AS minute_ts,
+  COUNT(*) AS samples,
+  AVG(cpu_percent) AS cpu_avg,
+  MAX(cpu_percent) AS cpu_max,
+  CAST(AVG(mem_used) AS INTEGER) AS mem_used_avg,
+  MAX(mem_used) AS mem_used_max,
+  MAX(mem_total) AS mem_total_max,
+  CAST(AVG(disk_used) AS INTEGER) AS disk_used_avg,
+  MAX(disk_used) AS disk_used_max,
+  MAX(disk_total) AS disk_total_max,
+  MAX(net_rx) AS net_rx_max,
+  MAX(net_tx) AS net_tx_max,
+  MAX(uptime_seconds) AS uptime_seconds_max
+FROM metrics
+WHERE ts BETWEEN ? AND ?
+GROUP BY node_id, minute_ts
+ON CONFLICT(node_id, ts) DO UPDATE SET
+  samples            = excluded.samples,
+  cpu_avg            = excluded.cpu_avg,
+  cpu_max            = excluded.cpu_max,
+  mem_used_avg       = excluded.mem_used_avg,
+  mem_used_max       = excluded.mem_used_max,
+  mem_total_max      = excluded.mem_total_max,
+  disk_used_avg      = excluded.disk_used_avg,
+  disk_used_max      = excluded.disk_used_max,
+  disk_total_max     = excluded.disk_total_max,
+  net_rx_max         = excluded.net_rx_max,
+  net_tx_max         = excluded.net_tx_max,
+  uptime_seconds_max = excluded.uptime_seconds_max
+`, from, to)
+	return err
 }
 
 // LatestMetricsByNodeIDs returns the most recent metrics sample for each node ID.

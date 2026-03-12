@@ -34,6 +34,7 @@ func main() {
 	defer s.Close()
 
 	startMetricsRetentionPruner(s)
+	startMetricsRolluper(s)
 
 	h := hub.New(s)
 	go h.Run()
@@ -48,6 +49,7 @@ func main() {
 }
 
 const metricsRetentionPruneInterval = time.Hour
+const metricsRollupInterval = time.Minute
 
 func startMetricsRetentionPruner(s *store.Store) {
 	go func() {
@@ -68,5 +70,29 @@ func pruneMetrics(s *store.Store) {
 	}
 	if err := s.PruneOldMetrics(days); err != nil {
 		log.Printf("metrics retention: failed to prune old metrics: %v", err)
+	}
+}
+
+func startMetricsRolluper(s *store.Store) {
+	go func() {
+		ticker := time.NewTicker(metricsRollupInterval)
+		defer ticker.Stop()
+
+		// Give the server a moment to finish booting.
+		time.Sleep(2 * time.Second)
+		rollupMetrics(s)
+		for range ticker.C {
+			rollupMetrics(s)
+		}
+	}()
+}
+
+func rollupMetrics(s *store.Store) {
+	now := time.Now().Unix()
+	// Roll up the last 15 minutes to cover delayed arrivals.
+	from := now - int64((15 * time.Minute).Seconds())
+	to := now
+	if err := s.RollupMetrics1m(from, to); err != nil {
+		log.Printf("metrics rollup: failed: %v", err)
 	}
 }

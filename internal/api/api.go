@@ -1665,7 +1665,39 @@ func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
 		}
 	}
 
-	rows, err := s.QueryMetrics(nodeID, from, to)
+	resolution := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("resolution")))
+	if resolution == "" {
+		resolution = "auto"
+	}
+
+	span := to - from
+	use1m := false
+	switch resolution {
+	case "1m":
+		use1m = true
+	case "raw":
+		use1m = false
+	case "auto":
+		// Switch to 1m when the range is large to avoid returning too many points.
+		if span > int64((6 * time.Hour).Seconds()) {
+			use1m = true
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resolution"})
+		return
+	}
+
+	var (
+		rows []*store.MetricsRow
+		err  error
+	)
+	metaResolution := "raw"
+	if use1m {
+		rows, err = s.QueryMetrics1m(nodeID, from, to)
+		metaResolution = "1m"
+	} else {
+		rows, err = s.QueryMetrics(nodeID, from, to)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1673,7 +1705,12 @@ func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	if rows == nil {
 		rows = []*store.MetricsRow{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"metrics": rows})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"metrics": rows,
+		"meta": map[string]any{
+			"resolution": metaResolution,
+		},
+	})
 }
 
 func handleGetProcesses(w http.ResponseWriter, r *http.Request, s *store.Store) {
