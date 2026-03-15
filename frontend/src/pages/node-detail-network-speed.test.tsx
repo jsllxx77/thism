@@ -7,6 +7,7 @@ const nodesMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
+const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = null
 
@@ -16,6 +17,7 @@ vi.mock("../lib/api", () => ({
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
+    docker: (...args: unknown[]) => dockerMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
   },
 }))
@@ -53,6 +55,7 @@ describe("node detail network speed", () => {
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
+    dockerMock.mockReset()
     metricsRetentionMock.mockReset()
     wsHandler = null
     mockMatchMedia()
@@ -74,6 +77,7 @@ describe("node detail network speed", () => {
     })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
   })
 
   it("shows a network summary plus traffic and speed charts", async () => {

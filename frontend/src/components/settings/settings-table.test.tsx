@@ -130,4 +130,19 @@ describe("settings nodes table", () => {
     await user.click(screen.getByRole("button", { name: "Copy command" }))
     expect(await screen.findByText("Clipboard access was denied. Please copy the command manually.")).toBeInTheDocument()
   })
+
+  it("shows agent versions in the settings table with a fallback when missing", () => {
+    render(
+      <NodesTable
+        nodes={[
+          { ...node({ id: "n1", name: "alpha" }), agent_version: "cda21ec8f20b" } as Node,
+          node({ id: "n2", name: "beta" }),
+        ]}
+      />
+    )
+
+    expect(screen.getByRole("columnheader", { name: "Agent" })).toBeInTheDocument()
+    expect(screen.getByText("cda21ec8f20b")).toBeInTheDocument()
+    expect(screen.getByText("—")).toBeInTheDocument()
+  })
 })

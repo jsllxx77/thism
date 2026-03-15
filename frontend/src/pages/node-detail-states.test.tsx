@@ -6,6 +6,7 @@ const nodesMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
+const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
@@ -14,6 +15,7 @@ vi.mock("../lib/api", () => ({
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
+    docker: (...args: unknown[]) => dockerMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
   },
 }))
@@ -41,6 +43,7 @@ describe("node detail page states", () => {
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
+    dockerMock.mockReset()
     metricsRetentionMock.mockReset()
 
     Object.defineProperty(window, "matchMedia", {
@@ -77,6 +80,7 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     render(<NodeDetail nodeId="node-1" />)
     expect(screen.getByText("Loading node details...")).toBeInTheDocument()
@@ -106,10 +110,41 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     render(<NodeDetail nodeId="node-1" />)
 
     expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't load node details. Please try again.")
+  })
+
+  it("shows docker details when docker is available", async () => {
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "node-1",
+          name: "alpha",
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          created_at: 0,
+          last_seen: 0,
+          online: true,
+        },
+      ],
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({
+      docker_available: true,
+      containers: [
+        { id: "0123456789ab", name: "web", image: "nginx:alpine", state: "running", status: "Up 2 hours" },
+      ],
+    })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    expect(await screen.findByRole("button", { name: /Docker/i })).toBeInTheDocument()
   })
 
   it("uses a single detail column when only one operational section is available", async () => {
@@ -130,6 +165,7 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([{ pid: 10, name: "sshd", cpu: 0.1, mem: 1024 }])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     render(<NodeDetail nodeId="node-1" />)
 
@@ -158,6 +194,7 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     const { rerender } = render(<NodeDetail nodeId="node-1" refreshNonce={0} />)
     await waitFor(() => {
@@ -165,6 +202,7 @@ describe("node detail page states", () => {
       expect(metricsMock).toHaveBeenCalledTimes(1)
       expect(processesMock).toHaveBeenCalledTimes(1)
       expect(servicesMock).toHaveBeenCalledTimes(1)
+      expect(dockerMock).toHaveBeenCalledTimes(1)
     })
 
     rerender(<NodeDetail nodeId="node-1" refreshNonce={1} />)
@@ -173,6 +211,7 @@ describe("node detail page states", () => {
       expect(metricsMock).toHaveBeenCalledTimes(2)
       expect(processesMock).toHaveBeenCalledTimes(2)
       expect(servicesMock).toHaveBeenCalledTimes(2)
+      expect(dockerMock).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -203,6 +242,7 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     render(<NodeDetail nodeId="node-1" />)
 
@@ -230,6 +270,7 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
 
     render(<NodeDetail nodeId="node-1" />)
 
@@ -263,6 +304,10 @@ describe("node detail page states", () => {
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([{ pid: 10, name: "sshd", cpu: 0.1, mem: 1024 }])
     servicesMock.mockResolvedValue({ services: [{ name: "nginx", status: "ok", last_checked: 0 }] })
+    dockerMock.mockResolvedValue({
+      docker_available: true,
+      containers: [{ id: "0123456789ab", name: "web", image: "nginx:alpine", state: "running", status: "Up 2 hours" }],
+    })
 
     render(<NodeDetail nodeId="node-1" accessMode="guest" />)
 
@@ -274,5 +319,6 @@ describe("node detail page states", () => {
     expect(metricsMock).not.toHaveBeenCalled()
     expect(processesMock).not.toHaveBeenCalled()
     expect(servicesMock).not.toHaveBeenCalled()
+    expect(dockerMock).not.toHaveBeenCalled()
   })
 })

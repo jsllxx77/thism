@@ -48,6 +48,22 @@ describe("node table", () => {
     expect(onSelect).toHaveBeenCalledWith("n2")
   })
 
+  it("shows agent versions with a fallback when unavailable", () => {
+    render(
+      <NodeTable
+        nodes={[
+          { ...node({ id: "n1", name: "alpha" }), agent_version: "cda21ec8f20b" } as Node,
+          node({ id: "n2", name: "beta" }),
+        ]}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("columnheader", { name: "Agent" })).toBeInTheDocument()
+    expect(screen.getByText("cda21ec8f20b")).toBeInTheDocument()
+    expect(screen.getByText("—")).toBeInTheDocument()
+  })
+
   it("includes dark-safe classes for buttons and row text", () => {
     render(<NodeTable nodes={[node({ id: "n1", name: "alpha", online: true })]} onSelectNode={vi.fn()} />)
 

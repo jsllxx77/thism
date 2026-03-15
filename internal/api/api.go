@@ -256,6 +256,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 			handleGetServices(w, req, s)
 		})
 
+		r.Get("/api/nodes/{id}/docker", func(w http.ResponseWriter, req *http.Request) {
+			handleGetDocker(w, req, s)
+		})
+
 		r.Post("/api/agent-updates", func(w http.ResponseWriter, req *http.Request) {
 			handleCreateAgentUpdateJob(w, req, s, h)
 		})
@@ -1726,6 +1730,19 @@ func handleGetProcesses(w http.ResponseWriter, r *http.Request, s *store.Store) 
 	w.Write([]byte(data))
 }
 
+func handleGetDocker(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+	available, data, err := s.GetDockerContainers(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"docker_available": available,
+		"containers":       json.RawMessage(data),
+	})
+}
+
 func handleGetServices(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	nodeID := chi.URLParam(r, "id")
 	checks, err := s.GetServiceChecks(nodeID)
@@ -1783,6 +1800,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"NAME=\"" + name + "\"\n" +
 		"BASE=\"" + baseURL + "\"\n\n" +
 		"TARGET_BIN=\"/usr/local/bin/thism-agent\"\n" +
+		"VERSION_FILE=\"/usr/local/bin/.thism-agent.version\"\n" +
 		"TMP_BIN=\"/usr/local/bin/.thism-agent.$$\"\n" +
 		"trap 'rm -f \"${TMP_BIN}\"' EXIT\n\n" +
 		"ARCH=$(uname -m)\n" +
@@ -1801,6 +1819,8 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o \"${TMP_BIN}\"\n" +
 		"chmod +x \"${TMP_BIN}\"\n" +
 		"mv -f \"${TMP_BIN}\" \"${TARGET_BIN}\"\n" +
+		"TARGET_VERSION=$(sha256sum \"${TARGET_BIN}\" | awk '{print substr($1,1,12)}')\n" +
+		"printf \"%s\\n\" \"${TARGET_VERSION}\" > \"${VERSION_FILE}\"\n" +
 		"trap - EXIT\n\n" +
 		"WS_SCHEME=\"ws\"\n" +
 		"case \"$BASE\" in\n" +
@@ -1996,6 +2016,19 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		// Persist service checks.
 		for _, svc := range payload.Services {
 			_ = s.UpsertServiceCheck(node.ID, svc.Name, svc.Status)
+		}
+
+		// Persist docker availability and container snapshot when the agent reports it.
+		if payload.DockerAvailable != nil {
+			available := *payload.DockerAvailable
+			containers := payload.Containers
+			if containers == nil || !available {
+				containers = []models.DockerContainer{}
+			}
+			containersJSON, err := json.Marshal(containers)
+			if err == nil {
+				_ = s.UpsertDockerContainers(node.ID, payload.TS, available, string(containersJSON))
+			}
 		}
 
 		// Broadcast metrics to dashboard subscribers, wrapped with node_id.

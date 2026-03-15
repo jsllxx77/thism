@@ -66,8 +66,10 @@ type MetricsPayload struct {
 	Mem           MemStats      `json:"mem"`
 	Disk          []DiskStats   `json:"disk"`
 	Net           NetStats      `json:"net"`
-	Processes     []Process     `json:"processes"`
-	Services      []Service     `json:"services"`
+	Processes       []Process         `json:"processes"`
+	Services        []Service         `json:"services"`
+	DockerAvailable *bool             `json:"docker_available,omitempty"`
+	Containers      []DockerContainer `json:"containers,omitempty"`
 }
 
 type MemStats struct {
@@ -95,6 +97,15 @@ type Process struct {
 
 type Service struct {
 	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// DockerContainer represents a running or stopped Docker container.
+type DockerContainer struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	State  string `json:"state"`
 	Status string `json:"status"`
 }
 

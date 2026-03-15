@@ -196,6 +196,9 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	if !strings.Contains(script, `TARGET_BIN="/usr/local/bin/thism-agent"`) {
 		t.Fatalf("expected install script to define target binary path, got: %s", script)
 	}
+	if !strings.Contains(script, `VERSION_FILE="/usr/local/bin/.thism-agent.version"`) {
+		t.Fatalf("expected install script to define version file path, got: %s", script)
+	}
 	if !strings.Contains(script, `TMP_BIN="/usr/local/bin/.thism-agent.$$"`) {
 		t.Fatalf("expected install script to define temp binary path, got: %s", script)
 	}
@@ -204,6 +207,12 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	}
 	if !strings.Contains(script, `mv -f "${TMP_BIN}" "${TARGET_BIN}"`) {
 		t.Fatalf("expected install script to atomically move temp binary into place, got: %s", script)
+	}
+	if !strings.Contains(script, `TARGET_VERSION=$(sha256sum "${TARGET_BIN}" | awk '{print substr($1,1,12)}')`) {
+		t.Fatalf("expected install script to derive target version from installed binary checksum, got: %s", script)
+	}
+	if !strings.Contains(script, `printf "%s\n" "${TARGET_VERSION}" > "${VERSION_FILE}"`) {
+		t.Fatalf("expected install script to persist installed agent version, got: %s", script)
 	}
 	if strings.Contains(script, `curl -fsSL "${BASE}/dl/${BINARY}" -o /usr/local/bin/thism-agent`) {
 		t.Fatalf("expected install script to avoid writing binary directly in place, got: %s", script)

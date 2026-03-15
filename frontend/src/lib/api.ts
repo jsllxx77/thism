@@ -36,6 +36,7 @@ export type Node = {
   ip: string
   os: string
   arch: string
+  agent_version?: string
   created_at: number
   last_seen: number
   online: boolean
@@ -70,6 +71,19 @@ export type Process = {
   name: string
   cpu: number
   mem: number
+}
+
+export type DockerContainer = {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+}
+
+export type DockerSnapshot = {
+  docker_available: boolean
+  containers: DockerContainer[]
 }
 
 export type ServiceCheck = {
@@ -172,6 +186,7 @@ export const api = {
   },
   processes: (id: string) => req<Process[]>(`/api/nodes/${id}/processes`),
   services: (id: string) => req<{ services: ServiceCheck[] }>(`/api/nodes/${id}/services`),
+  docker: (id: string) => req<DockerSnapshot>(`/api/nodes/${id}/docker`),
   register: (name: string) =>
     req<{ id: string; token: string }>("/api/nodes/register", {
       method: "POST",

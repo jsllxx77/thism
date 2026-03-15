@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { api, type AccessMode, type Node, type MetricsRow, type Process, type ServiceCheck } from "../lib/api"
+import { api, type AccessMode, type Node, type MetricsRow, type Process, type ServiceCheck, type DockerSnapshot } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond } from "../lib/units"
 import { appendLiveMetricPoint, buildMetricChartSeries, buildMetricRateChartSeries } from "../lib/metric-series"
@@ -10,6 +10,7 @@ import { HardwarePassport } from "../components/node-detail/HardwarePassport"
 import { MetricTabs } from "../components/node-detail/MetricTabs"
 import { ProcessTable } from "../components/node-detail/ProcessTable"
 import { ServiceStatusList } from "../components/node-detail/ServiceStatusList"
+import { DockerContainerTable } from "../components/node-detail/DockerContainerTable"
 import { MotionSection } from "../motion/transitions"
 import { useLanguage } from "../i18n/language"
 
@@ -57,6 +58,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [metrics, setMetrics] = useState<MetricsRow[]>([])
   const [processes, setProcesses] = useState<Process[]>([])
   const [services, setServices] = useState<ServiceCheck[]>([])
+  const [dockerSnapshot, setDockerSnapshot] = useState<DockerSnapshot | null>(null)
   const [range, setRange] = useState(3600)
   const [metricsRetentionDays, setMetricsRetentionDays] = useState(DEFAULT_METRICS_RETENTION_DAYS)
   const [desktopSectionsOpen, setDesktopSectionsOpen] = useState(isDesktopViewport)
@@ -129,20 +131,23 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         setMetrics([])
         setProcesses([])
         setServices([])
+        setDockerSnapshot(null)
         return
       }
 
       const to = Math.floor(Date.now() / 1000)
       const from = to - effectiveRange
-      const [metricsResponse, processesResponse, servicesResponse] = await Promise.all([
+      const [metricsResponse, processesResponse, servicesResponse, dockerResponse] = await Promise.all([
         api.metrics(nodeId, from, to),
         api.processes(nodeId),
         api.services(nodeId),
+        api.docker(nodeId).catch(() => ({ docker_available: false, containers: [] })),
       ])
 
       setMetrics(metricsResponse.metrics ?? [])
       setProcesses(Array.isArray(processesResponse) ? processesResponse : [])
       setServices(servicesResponse.services ?? [])
+      setDockerSnapshot(dockerResponse)
     } catch {
       setDetailError(t("nodeDetail.loadError"))
     } finally {
@@ -229,8 +234,12 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   ), [effectiveRange, metrics])
   const hasProcessSection = processes.length > 0
   const hasServiceSection = services.length > 0
+  const hasDockerSection = dockerSnapshot?.docker_available === true
   const showMetrics = accessMode !== "guest"
-  const showDetailSections = accessMode !== "guest" && (hasProcessSection || hasServiceSection)
+  const showDetailSections = accessMode !== "guest" && (hasProcessSection || hasServiceSection || hasDockerSection)
+  const detailSectionCount = Number(hasProcessSection) + Number(hasServiceSection) + Number(hasDockerSection)
+  const detailSectionGridClass =
+    detailSectionCount >= 3 ? "xl:grid-cols-2 2xl:grid-cols-3" : detailSectionCount === 2 ? "xl:grid-cols-2" : ""
 
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.02}>
@@ -280,9 +289,10 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
             />
           )}
           {showDetailSections && (
-            <div className={`grid grid-cols-1 gap-4 ${hasProcessSection && hasServiceSection ? "xl:grid-cols-2" : ""}`}>
+            <div className={`grid grid-cols-1 gap-4 ${detailSectionGridClass}`}>
               {hasProcessSection && <ProcessTable processes={processes} defaultOpen={desktopSectionsOpen} />}
               {hasServiceSection && <ServiceStatusList services={services} defaultOpen={desktopSectionsOpen} />}
+              {hasDockerSection && <DockerContainerTable containers={dockerSnapshot?.containers ?? []} defaultOpen={desktopSectionsOpen} />}
             </div>
           )}
         </>

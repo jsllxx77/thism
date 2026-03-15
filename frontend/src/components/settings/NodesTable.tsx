@@ -232,6 +232,10 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                   <dd className="mt-0.5 text-slate-700 dark:text-slate-200">{node.os && node.arch ? `${node.os}/${node.arch}` : "—"}</dd>
                 </div>
                 <div>
+                  <dt className="text-slate-500 dark:text-slate-400">{t("dashboard.table.agent")}</dt>
+                  <dd className="mt-0.5 font-mono text-slate-700 dark:text-slate-200">{node.agent_version || "—"}</dd>
+                </div>
+                <div>
                   <dt className="text-slate-500 dark:text-slate-400">{t("Created")}</dt>
                   <dd className="mt-0.5 text-slate-700 dark:text-slate-200">{formatCreatedDate(node.created_at)}</dd>
                 </div>
@@ -261,6 +265,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                     {t("Name")}
                   </button>
                 </th>
+                <th className="py-2 pr-3 font-medium">{t("dashboard.table.agent")}</th>
                 <th className="py-2 pr-3 font-medium">{t("IP")}</th>
                 <th className="py-2 pr-3 font-medium">{t("OS / Arch")}</th>
                 <th className="py-2 pr-3 font-medium">{t("Status")}</th>
@@ -271,7 +276,8 @@ export function NodesTable({ nodes, onUpdated }: Props) {
             <tbody>
               {rows.map((node) => (
                 <tr key={node.id} className="border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70">
-                                    <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{node.name}</td>
+                  <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{node.name}</td>
+                  <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.ip || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.os && node.arch ? `${node.os}/${node.arch}` : "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{statusLabel(node.online)}</td>

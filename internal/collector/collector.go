@@ -442,6 +442,13 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 		payload.Processes = []models.Process{}
 	}
 
+	// Docker containers — graceful degradation when Docker is unavailable.
+	containers, dockerAvailable, _ := collectDockerContainers()
+	payload.DockerAvailable = &dockerAvailable
+	if dockerAvailable {
+		payload.Containers = containers
+	}
+
 	return payload, nil
 }
 

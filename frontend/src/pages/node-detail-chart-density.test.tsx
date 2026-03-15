@@ -6,6 +6,7 @@ const nodesMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
+const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = null
 let latestCPUData: Array<{ ts: number; value: number }> = []
@@ -16,6 +17,7 @@ vi.mock("../lib/api", () => ({
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
+    docker: (...args: unknown[]) => dockerMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
   },
 }))
@@ -94,6 +96,7 @@ describe("node detail chart density", () => {
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
+    dockerMock.mockReset()
     metricsRetentionMock.mockReset()
     wsHandler = null
     latestCPUData = []
@@ -119,6 +122,7 @@ describe("node detail chart density", () => {
     )
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
   })
 
   it("keeps the selected 6h window after live updates while reducing chart density", async () => {

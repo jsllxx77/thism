@@ -151,6 +151,13 @@ CREATE TABLE IF NOT EXISTS processes (
     data    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS docker_containers (
+    node_id          TEXT PRIMARY KEY,
+    ts               INTEGER NOT NULL,
+    docker_available INTEGER NOT NULL DEFAULT 0,
+    data             TEXT NOT NULL DEFAULT '[]'
+);
+
 CREATE TABLE IF NOT EXISTS service_checks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     node_id      TEXT NOT NULL,
@@ -737,6 +744,7 @@ func (s *Store) DeleteNode(nodeID string) error {
 	stmts := []string{
 		`DELETE FROM metrics WHERE node_id = ?`,
 		`DELETE FROM processes WHERE node_id = ?`,
+		`DELETE FROM docker_containers WHERE node_id = ?`,
 		`DELETE FROM service_checks WHERE node_id = ?`,
 		`DELETE FROM update_job_targets WHERE node_id = ?`,
 		`DELETE FROM nodes WHERE id = ?`,
@@ -967,6 +975,44 @@ func (s *Store) GetProcesses(nodeID string) (string, error) {
 		return "[]", err
 	}
 	return data, nil
+}
+
+// -------------------------------------------------------------------------
+// Docker operations
+// -------------------------------------------------------------------------
+
+// UpsertDockerContainers stores Docker availability and a pre-serialized JSON
+// container list for a node, overwriting any existing record.
+func (s *Store) UpsertDockerContainers(nodeID string, ts int64, dockerAvailable bool, data string) error {
+	if strings.TrimSpace(data) == "" {
+		data = "[]"
+	}
+
+	available := 0
+	if dockerAvailable {
+		available = 1
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO docker_containers (node_id, ts, docker_available, data) VALUES (?, ?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET ts=excluded.ts, docker_available=excluded.docker_available, data=excluded.data
+	`, nodeID, ts, available, data)
+	return err
+}
+
+// GetDockerContainers returns Docker availability and the JSON-encoded container
+// list for a node. Returns (false, "[]", nil) when no data is found.
+func (s *Store) GetDockerContainers(nodeID string) (bool, string, error) {
+	var dockerAvailable int64
+	var data string
+	err := s.db.QueryRow(`SELECT docker_available, data FROM docker_containers WHERE node_id = ?`, nodeID).Scan(&dockerAvailable, &data)
+	if err == sql.ErrNoRows {
+		return false, "[]", nil
+	}
+	if err != nil {
+		return false, "[]", err
+	}
+	return dockerAvailable != 0, data, nil
 }
 
 // -------------------------------------------------------------------------

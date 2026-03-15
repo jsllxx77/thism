@@ -48,6 +48,7 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
                 {t("dashboard.table.nodeName")}
               </button>
             </th>
+            <th className="pb-2 pr-3 font-medium">{t("dashboard.table.agent")}</th>
             <th className="pb-2 pr-3 font-medium">{t("dashboard.table.ip")}</th>
             <th className="pb-2 pr-3 font-medium">
               <button type="button" onClick={() => toggleSort("status")} className="text-left hover:text-slate-900 dark:hover:text-slate-200">
@@ -72,6 +73,7 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
                   {node.name}
                 </button>
               </td>
+              <td className="py-2.5 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
               <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.ip || t("common.unavailable")}</td>
               <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.online ? t("common.online") : t("common.offline")}</td>
             </tr>
