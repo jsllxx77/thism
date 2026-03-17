@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"log"
+	"net"
 	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/thism-dev/thism/frontend"
@@ -44,12 +49,80 @@ func main() {
 		Username:   *adminUser,
 		Password:   *adminPass,
 	}, frontend.Handler())
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	server := newHTTPServer(":"+*port, router)
 	log.Printf("ThisM server listening on :%s", *port)
-	log.Fatal(http.ListenAndServe(":"+*port, router))
+	if err := serveHTTPServer(ctx, server, nil); err != nil {
+		log.Fatal(err)
+	}
 }
 
 const metricsRetentionPruneInterval = time.Hour
 const metricsRollupInterval = time.Minute
+const (
+	serverReadHeaderTimeout = 5 * time.Second
+	serverReadTimeout       = 15 * time.Second
+	serverWriteTimeout      = 30 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+	serverShutdownTimeout   = 10 * time.Second
+)
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+	}
+}
+
+func serveHTTPServer(ctx context.Context, server *http.Server, listener net.Listener) error {
+	if server == nil {
+		return errors.New("http server is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var err error
+	if listener == nil {
+		listener, err = net.Listen("tcp", server.Addr)
+		if err != nil {
+			return err
+		}
+	}
+
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- server.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveErrCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		defer cancel()
+
+		shutdownErr := server.Shutdown(shutdownCtx)
+		serveErr := <-serveErrCh
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		if errors.Is(serveErr, http.ErrServerClosed) {
+			return nil
+		}
+		return serveErr
+	}
+}
 
 func startMetricsRetentionPruner(s *store.Store) {
 	go func() {

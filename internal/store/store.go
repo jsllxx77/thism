@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/security"
 	_ "modernc.org/sqlite"
 )
 
@@ -295,6 +296,14 @@ func (s *Store) GetAdminAuth() (username, password string, found bool, err error
 
 // UpsertAdminAuth persists admin login credentials.
 func (s *Store) UpsertAdminAuth(username, password string) error {
+	if security.NeedsPasswordHashUpgrade(password) {
+		hashedPassword, err := security.HashPassword(password)
+		if err != nil {
+			return err
+		}
+		password = hashedPassword
+	}
+
 	_, err := s.db.Exec(`
 INSERT INTO admin_auth (id, username, password, updated_at)
 VALUES (1, ?, ?, ?)
@@ -743,6 +752,7 @@ func (s *Store) DeleteNode(nodeID string) error {
 
 	stmts := []string{
 		`DELETE FROM metrics WHERE node_id = ?`,
+		`DELETE FROM metrics_1m WHERE node_id = ?`,
 		`DELETE FROM processes WHERE node_id = ?`,
 		`DELETE FROM docker_containers WHERE node_id = ?`,
 		`DELETE FROM service_checks WHERE node_id = ?`,
@@ -945,8 +955,20 @@ LIMIT 1`, nodeID).Scan(
 // PruneOldMetrics deletes metrics rows older than retentionDays days.
 func (s *Store) PruneOldMetrics(retentionDays int) error {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
-	_, err := s.db.Exec(`DELETE FROM metrics WHERE ts < ?`, cutoff)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM metrics WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM metrics_1m WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // -------------------------------------------------------------------------

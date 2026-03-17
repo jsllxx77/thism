@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"testing"
@@ -20,7 +21,9 @@ func TestAgentMetricsBroadcastIncludesLastSeen(t *testing.T) {
 	h := hub.New(s)
 	go h.Run()
 
-	router := api.NewRouter(s, h, "admin-token", nil)
+	router := api.NewRouter(s, h, "admin-token", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
 	server := newIPv4TestServer(router)
 	defer server.Close()
 
@@ -39,14 +42,41 @@ func TestAgentMetricsBroadcastIncludesLastSeen(t *testing.T) {
 		t.Fatalf("parse server url: %v", err)
 	}
 
+	bootstrapURL := *baseURL
+	bootstrapQuery := bootstrapURL.Query()
+	bootstrapQuery.Set("token", "admin-token")
+	bootstrapURL.RawQuery = bootstrapQuery.Encode()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	bootstrapResp, err := client.Get(bootstrapURL.String())
+	if err != nil {
+		t.Fatalf("bootstrap admin session: %v", err)
+	}
+	defer bootstrapResp.Body.Close()
+
+	var sessionCookie *http.Cookie
+	for _, cookie := range bootstrapResp.Cookies() {
+		if cookie.Name == "thism_admin" {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("expected bootstrap request to return a non-empty admin session cookie")
+	}
+
 	dashboardURL := *baseURL
 	dashboardURL.Scheme = "ws"
 	dashboardURL.Path = "/ws/dashboard"
-	dashboardQuery := dashboardURL.Query()
-	dashboardQuery.Set("token", "admin-token")
-	dashboardURL.RawQuery = dashboardQuery.Encode()
 
-	dashboardConn, _, err := websocket.DefaultDialer.Dial(dashboardURL.String(), nil)
+	dashboardHeader := http.Header{}
+	dashboardHeader.Add("Cookie", sessionCookie.String())
+
+	dashboardConn, _, err := websocket.DefaultDialer.Dial(dashboardURL.String(), dashboardHeader)
 	if err != nil {
 		t.Fatalf("dial dashboard websocket: %v", err)
 	}
@@ -121,5 +151,108 @@ func TestAgentMetricsBroadcastIncludesLastSeen(t *testing.T) {
 	}
 	if node.LastSeen != lastSeen {
 		t.Fatalf("expected stored last_seen %d to match broadcast %d", node.LastSeen, lastSeen)
+	}
+}
+
+func TestAgentMetricsDoesNotBroadcastWhenPersistenceFails(t *testing.T) {
+	s, _ := store.New(":memory:")
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server := newIPv4TestServer(router)
+	defer server.Close()
+
+	err := s.UpsertNode(&models.Node{
+		ID:        "node-1",
+		Name:      "agent-node",
+		Token:     "agent-token-1",
+		CreatedAt: time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+
+	dashboardURL := *baseURL
+	dashboardURL.Scheme = "ws"
+	dashboardURL.Path = "/ws/dashboard"
+	dashboardHeader := http.Header{}
+	dashboardHeader.Set("Authorization", "Bearer admin-token")
+
+	dashboardConn, _, err := websocket.DefaultDialer.Dial(dashboardURL.String(), dashboardHeader)
+	if err != nil {
+		t.Fatalf("dial dashboard websocket: %v", err)
+	}
+	defer dashboardConn.Close()
+
+	var initial struct {
+		Type string `json:"type"`
+	}
+	_ = dashboardConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := dashboardConn.ReadJSON(&initial); err != nil {
+		t.Fatalf("read initial dashboard message: %v", err)
+	}
+	if initial.Type != "node_status" {
+		t.Fatalf("expected initial node_status message, got %q", initial.Type)
+	}
+
+	agentURL := *baseURL
+	agentURL.Scheme = "ws"
+	agentURL.Path = "/ws/agent"
+	agentQuery := agentURL.Query()
+	agentQuery.Set("token", "agent-token-1")
+	agentURL.RawQuery = agentQuery.Encode()
+
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL.String(), http.Header{})
+	if err != nil {
+		t.Fatalf("dial agent websocket: %v", err)
+	}
+	defer agentConn.Close()
+
+	var onlineMsg struct {
+		Type string `json:"type"`
+	}
+	_ = dashboardConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := dashboardConn.ReadJSON(&onlineMsg); err != nil {
+		t.Fatalf("read online node status: %v", err)
+	}
+	if onlineMsg.Type != "node_status" {
+		t.Fatalf("expected node_status after agent connection, got %q", onlineMsg.Type)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store to force persistence failure: %v", err)
+	}
+
+	payload := models.MetricsPayload{
+		Type: "metrics",
+		TS:   time.Now().Unix(),
+		CPU:  12.5,
+		Mem:  models.MemStats{Used: 1024, Total: 2048},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := agentConn.WriteMessage(websocket.TextMessage, raw); err != nil {
+		t.Fatalf("write agent metrics: %v", err)
+	}
+
+	_ = dashboardConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	var msg map[string]any
+	err = dashboardConn.ReadJSON(&msg)
+	if err == nil {
+		t.Fatalf("expected no dashboard broadcast when persistence fails, got %#v", msg)
+	}
+	netErr, ok := err.(net.Error)
+	if !ok || !netErr.Timeout() {
+		t.Fatalf("expected read timeout when no broadcast is sent, got %v", err)
 	}
 }

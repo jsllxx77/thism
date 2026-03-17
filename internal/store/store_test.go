@@ -144,7 +144,13 @@ func TestStoreAdminAuthCRUD(t *testing.T) {
 	if !found {
 		t.Fatal("expected persisted admin auth after insert")
 	}
-	if username != "admin" || password != "secret-pass" {
+	if username != "admin" {
+		t.Fatalf("unexpected username after insert: %q", username)
+	}
+	if password == "" {
+		t.Fatal("expected persisted password hash after insert")
+	}
+	if password == "secret-pass" {
 		t.Fatalf("unexpected admin auth values: username=%q password=%q", username, password)
 	}
 
@@ -158,8 +164,101 @@ func TestStoreAdminAuthCRUD(t *testing.T) {
 	if !found {
 		t.Fatal("expected persisted admin auth after update")
 	}
-	if password != "new-pass" {
-		t.Fatalf("expected updated password, got %q", password)
+	if password == "" {
+		t.Fatal("expected updated persisted password hash")
+	}
+	if password == "new-pass" {
+		t.Fatalf("expected updated password to be hashed, got %q", password)
+	}
+}
+
+func TestDeleteNodeRemovesAggregatedMetrics(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	ts := time.Now().Add(-2 * time.Minute).Unix()
+	bucketTS := (ts / 60) * 60
+	if err := s.InsertMetrics("n1", &models.MetricsPayload{
+		TS:  ts,
+		CPU: 55,
+		Mem: models.MemStats{Used: 1024, Total: 4096},
+	}); err != nil {
+		t.Fatalf("InsertMetrics: %v", err)
+	}
+	if err := s.RollupMetrics1m(ts, ts+59); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	rows, err := s.QueryMetrics1m("n1", bucketTS, bucketTS)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m before delete: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one aggregated row before delete, got %d", len(rows))
+	}
+
+	if err := s.DeleteNode("n1"); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+
+	rows, err = s.QueryMetrics1m("n1", bucketTS, bucketTS)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m after delete: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected aggregated metrics to be removed with node delete, got %d rows", len(rows))
+	}
+}
+
+func TestPruneOldMetricsRemovesAggregatedMetrics(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	oldTS := time.Now().AddDate(0, 0, -10).Unix()
+	bucketTS := (oldTS / 60) * 60
+	if err := s.InsertMetrics("n1", &models.MetricsPayload{
+		TS:  oldTS,
+		CPU: 40,
+		Mem: models.MemStats{Used: 512, Total: 4096},
+	}); err != nil {
+		t.Fatalf("InsertMetrics old: %v", err)
+	}
+	if err := s.RollupMetrics1m(oldTS, oldTS+59); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	rows, err := s.QueryMetrics1m("n1", bucketTS, bucketTS)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m before prune: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one aggregated row before prune, got %d", len(rows))
+	}
+
+	if err := s.PruneOldMetrics(7); err != nil {
+		t.Fatalf("PruneOldMetrics: %v", err)
+	}
+
+	rows, err = s.QueryMetrics1m("n1", bucketTS, bucketTS)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m after prune: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected aggregated metrics older than retention to be pruned, got %d rows", len(rows))
 	}
 }
 

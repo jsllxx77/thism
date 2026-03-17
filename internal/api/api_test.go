@@ -2,10 +2,12 @@ package api_test
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/store"
+	_ "modernc.org/sqlite"
 )
 
 func TestGetNodesEmpty(t *testing.T) {
@@ -282,8 +285,11 @@ func TestFrontendQueryTokenCreatesSessionCookie(t *testing.T) {
 	if sessionCookie == nil {
 		t.Fatal("expected thism_admin cookie to be set")
 	}
-	if sessionCookie.Value != "admin-token" {
-		t.Fatalf("expected thism_admin cookie to contain admin token, got %q", sessionCookie.Value)
+	if sessionCookie.Value == "" {
+		t.Fatal("expected thism_admin cookie to have an opaque session value")
+	}
+	if sessionCookie.Value == "admin-token" {
+		t.Fatalf("expected thism_admin cookie to avoid exposing the admin token, got %q", sessionCookie.Value)
 	}
 
 	secondReq := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -296,6 +302,22 @@ func TestFrontendQueryTokenCreatesSessionCookie(t *testing.T) {
 	}
 	if strings.TrimSpace(secondResp.Body.String()) != "frontend" {
 		t.Fatalf("expected frontend handler body, got %q", secondResp.Body.String())
+	}
+}
+
+func TestAdminQueryTokenDoesNotAuthorizeAPIRequests(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes?token=admin-token", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected query token to be rejected for admin API access, got %d: %s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -518,6 +540,12 @@ func TestPasswordLoginCreatesSessionCookie(t *testing.T) {
 	}
 	if sessionCookie == nil {
 		t.Fatal("expected thism_admin cookie to be set on successful password login")
+	}
+	if sessionCookie.Value == "" {
+		t.Fatal("expected thism_admin cookie to have an opaque session value")
+	}
+	if sessionCookie.Value == "admin-token" {
+		t.Fatalf("expected thism_admin cookie to avoid exposing the admin token, got %q", sessionCookie.Value)
 	}
 
 	frontendReq := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -984,6 +1012,64 @@ func TestChangePasswordPersistsAcrossRouterRebuild(t *testing.T) {
 	router.ServeHTTP(loginResp, loginReq)
 	if loginResp.Code != http.StatusOK {
 		t.Fatalf("expected persisted password to be accepted, got %d: %s", loginResp.Code, loginResp.Body.String())
+	}
+}
+
+func TestRouterUpgradesLegacyPersistedAdminPasswordHash(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thism.db")
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	s.Close()
+
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := rawDB.Exec(`
+	INSERT INTO admin_auth (id, username, password, updated_at)
+	VALUES (1, 'admin', 'legacy-plain-pass', ?)
+	`, time.Now().Unix()); err != nil {
+		t.Fatalf("insert legacy admin auth: %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	s, err = store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New reopen: %v", err)
+	}
+	defer s.Close()
+
+	h := hub.New(s)
+	go h.Run()
+
+	_ = api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{
+			AdminToken: "admin-token",
+			Username:   "admin",
+			Password:   "boot-pass",
+		},
+		nil,
+	)
+
+	username, password, found, err := s.GetAdminAuth()
+	if err != nil {
+		t.Fatalf("GetAdminAuth: %v", err)
+	}
+	if !found {
+		t.Fatal("expected persisted admin auth to remain present")
+	}
+	if username != "admin" {
+		t.Fatalf("expected username to remain admin, got %q", username)
+	}
+	if password == "legacy-plain-pass" {
+		t.Fatal("expected legacy plaintext password to be upgraded to a hash")
 	}
 }
 

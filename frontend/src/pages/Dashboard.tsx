@@ -33,8 +33,8 @@ function snapshotToLive(node: Node): LiveMetrics[string] | null {
     memTotal: snapshot.mem_total,
   }
 
-  if (typeof snapshot.ts === "number" && typeof (snapshot as any).net_rx === "number" && typeof (snapshot as any).net_tx === "number") {
-    entry.lastNet = { ts: snapshot.ts, rxBytes: (snapshot as any).net_rx, txBytes: (snapshot as any).net_tx }
+  if (typeof snapshot.ts === "number" && typeof snapshot.net_rx === "number" && typeof snapshot.net_tx === "number") {
+    entry.lastNet = { ts: snapshot.ts, rxBytes: snapshot.net_rx, txBytes: snapshot.net_tx }
   }
 
   return entry

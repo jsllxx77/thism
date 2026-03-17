@@ -54,10 +54,10 @@ func TestDockerEndpointReturnsContainersWhenAvailable(t *testing.T) {
 
 	dockerAvailable := true
 	payload := models.MetricsPayload{
-		Type:           "metrics",
-		TS:             time.Now().Unix(),
-		CPU:            10,
-		Mem:            models.MemStats{Used: 1, Total: 2},
+		Type:            "metrics",
+		TS:              time.Now().Unix(),
+		CPU:             10,
+		Mem:             models.MemStats{Used: 1, Total: 2},
 		DockerAvailable: &dockerAvailable,
 		Containers: []models.DockerContainer{
 			{
@@ -87,6 +87,7 @@ func TestDockerEndpointReturnsContainersWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
+	req.Header.Set("Authorization", "Bearer admin-token")
 
 	res, err := server.Client().Do(req)
 	if err != nil {
@@ -130,4 +131,3 @@ func TestDockerEndpointReturnsContainersWhenAvailable(t *testing.T) {
 		t.Fatalf("expected container image nginx:alpine, got %q", out.Containers[0].Image)
 	}
 }
-

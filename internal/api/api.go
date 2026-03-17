@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"html/template"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/security"
 	"github.com/thism-dev/thism/internal/store"
 )
 
@@ -59,7 +61,7 @@ func (c AuthConfig) ValidPasswordLogin(username, password string) bool {
 		return false
 	}
 	userMatch := constantTimeStringEqual(username, c.Username)
-	passMatch := constantTimeStringEqual(password, c.Password)
+	passMatch := security.VerifyPassword(password, c.Password)
 	return userMatch && passMatch
 }
 
@@ -68,6 +70,12 @@ type authManager struct {
 	adminToken string
 	username   string
 	password   string
+	sessions   *sessionManager
+}
+
+type sessionManager struct {
+	mu       sync.RWMutex
+	sessions map[string]struct{}
 }
 
 var (
@@ -80,7 +88,45 @@ func newAuthManager(cfg AuthConfig) *authManager {
 		adminToken: cfg.AdminToken,
 		username:   strings.TrimSpace(cfg.Username),
 		password:   cfg.Password,
+		sessions:   newSessionManager(),
 	}
+}
+
+func newSessionManager() *sessionManager {
+	return &sessionManager{sessions: make(map[string]struct{})}
+}
+
+func (m *sessionManager) Create() (string, error) {
+	sessionID, err := generateHexBytes(32)
+	if err != nil {
+		return "", err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessions[sessionID] = struct{}{}
+	return sessionID, nil
+}
+
+func (m *sessionManager) Has(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.sessions[sessionID]
+	return ok
+}
+
+func (m *sessionManager) Delete(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, sessionID)
 }
 
 func (m *authManager) AdminToken() string {
@@ -107,14 +153,33 @@ func (m *authManager) PasswordLoginEnabled() bool {
 }
 
 func (m *authManager) ValidPasswordLogin(username, password string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	return m.AuthenticatePassword(username, password, nil)
+}
+
+func (m *authManager) AuthenticatePassword(username, password string, persistFn func(username, password string) error) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.username == "" || m.password == "" {
 		return false
 	}
+
 	userMatch := constantTimeStringEqual(username, m.username)
-	passMatch := constantTimeStringEqual(password, m.password)
-	return userMatch && passMatch
+	passMatch := security.VerifyPassword(password, m.password)
+	if !userMatch || !passMatch {
+		return false
+	}
+
+	if security.NeedsPasswordHashUpgrade(m.password) {
+		hashedPassword, err := security.HashPassword(password)
+		if err == nil {
+			if persistFn == nil || persistFn(m.username, hashedPassword) == nil {
+				m.password = hashedPassword
+			}
+		}
+	}
+
+	return true
 }
 
 func (m *authManager) ChangePassword(currentPassword, newPassword string, persistFn func(username, password string) error) error {
@@ -124,18 +189,83 @@ func (m *authManager) ChangePassword(currentPassword, newPassword string, persis
 	if m.username == "" || m.password == "" {
 		return errPasswordLoginDisabled
 	}
-	if !constantTimeStringEqual(currentPassword, m.password) {
+	if !security.VerifyPassword(currentPassword, m.password) {
 		return errInvalidCurrentPass
 	}
 
+	hashedPassword, err := security.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
 	if persistFn != nil {
-		if err := persistFn(m.username, newPassword); err != nil {
+		if err := persistFn(m.username, hashedPassword); err != nil {
 			return err
 		}
 	}
 
-	m.password = newPassword
+	m.password = hashedPassword
 	return nil
+}
+
+func (m *authManager) HasAdminAccess(r *http.Request) bool {
+	if m == nil || m.adminToken == "" {
+		return false
+	}
+	if bearerToken(r) == m.adminToken {
+		return true
+	}
+	return m.sessions.Has(adminSessionID(r))
+}
+
+func (m *authManager) HasBootstrapQueryToken(r *http.Request) bool {
+	if m == nil || m.adminToken == "" || r == nil {
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
+		return false
+	}
+	return r.URL.Query().Get("token") == m.adminToken
+}
+
+func (m *authManager) BootstrapSessionCookie(w http.ResponseWriter, r *http.Request) {
+	if m == nil || m.sessions.Has(adminSessionID(r)) {
+		return
+	}
+
+	if !m.HasBootstrapQueryToken(r) && bearerToken(r) != m.adminToken {
+		return
+	}
+
+	sessionID, err := m.sessions.Create()
+	if err != nil {
+		return
+	}
+	writeAdminSessionCookie(w, r, sessionID)
+}
+
+func (m *authManager) IssueAdminSession(w http.ResponseWriter, r *http.Request) error {
+	if m == nil {
+		return errors.New("auth manager is nil")
+	}
+
+	m.sessions.Delete(adminSessionID(r))
+	sessionID, err := m.sessions.Create()
+	if err != nil {
+		return err
+	}
+	writeAdminSessionCookie(w, r, sessionID)
+	return nil
+}
+
+func (m *authManager) ClearAdminSession(w http.ResponseWriter, r *http.Request) {
+	if m != nil {
+		m.sessions.Delete(adminSessionID(r))
+	}
+	clearSessionCookie(w, r)
 }
 
 func constantTimeStringEqual(a, b string) bool {
@@ -156,7 +286,6 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 // admin login credentials.
 func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler) http.Handler {
 	authState := newAuthManager(auth)
-	adminToken := authState.AdminToken()
 
 	// Load persisted credentials if present, otherwise bootstrap from startup
 	// configuration when password login is enabled.
@@ -164,9 +293,20 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		if username, password, found, err := s.GetAdminAuth(); err == nil {
 			if found {
 				authState.SetCredentials(username, password)
+				if security.NeedsPasswordHashUpgrade(password) {
+					if hashedPassword, err := security.HashPassword(password); err == nil {
+						if err := s.UpsertAdminAuth(username, hashedPassword); err == nil {
+							authState.SetCredentials(username, hashedPassword)
+						}
+					}
+				}
 			} else if authState.PasswordLoginEnabled() {
 				username, password := authState.Credentials()
-				_ = s.UpsertAdminAuth(username, password)
+				if hashedPassword, err := security.HashPassword(password); err == nil {
+					if err := s.UpsertAdminAuth(username, hashedPassword); err == nil {
+						authState.SetCredentials(username, hashedPassword)
+					}
+				}
 			}
 		}
 	}
@@ -184,13 +324,13 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 	// Dashboard WebSocket: requires admin or guest access
 	r.Get("/ws/dashboard", func(w http.ResponseWriter, req *http.Request) {
-		role := resolveAccessRole(req, adminToken)
+		role := resolveAccessRole(req, authState)
 		if role == accessRoleNone {
 			http.Error(w, uiMessage(resolveUILanguage(req), "unauthorized"), http.StatusUnauthorized)
 			return
 		}
 		if role == accessRoleAdmin {
-			bootstrapSessionCookie(w, req, adminToken)
+			authState.BootstrapSessionCookie(w, req)
 		}
 		handleDashboardWS(w, req, s, h)
 	})
@@ -218,7 +358,7 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 	// Admin API
 	// ---------------------------------------------------------------
 	r.Group(func(r chi.Router) {
-		r.Use(adminAuth(adminToken))
+		r.Use(adminAuth(authState))
 
 		r.Post("/api/auth/change-password", func(w http.ResponseWriter, req *http.Request) {
 			handleChangePassword(w, req, s, authState)
@@ -285,13 +425,13 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		handleLoginPage(w, req, authState)
 	})
 	r.Post("/api/auth/login", func(w http.ResponseWriter, req *http.Request) {
-		handlePasswordLogin(w, req, authState)
+		handlePasswordLogin(w, req, s, authState)
 	})
 	r.Post("/api/auth/guest", func(w http.ResponseWriter, req *http.Request) {
-		handleGuestLogin(w, req)
+		handleGuestLogin(w, req, authState)
 	})
 	r.Post("/api/auth/logout", func(w http.ResponseWriter, req *http.Request) {
-		handleLogout(w, req)
+		handleLogout(w, req, authState)
 	})
 
 	// ---------------------------------------------------------------
@@ -313,22 +453,6 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 // Auth helpers
 // -----------------------------------------------------------------------
 
-// checkToken validates the admin token from bearer header, session cookie,
-// or ?token= query parameter.
-func checkToken(r *http.Request, expected string) bool {
-	if expected == "" {
-		return false
-	}
-
-	if bearerToken(r) == expected {
-		return true
-	}
-	if sessionToken(r) == expected {
-		return true
-	}
-	return r.URL.Query().Get("token") == expected
-}
-
 func bearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
@@ -337,7 +461,7 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 }
 
-func sessionToken(r *http.Request) string {
+func adminSessionID(r *http.Request) string {
 	cookie, err := r.Cookie(adminSessionCookieName)
 	if err != nil {
 		return ""
@@ -345,10 +469,10 @@ func sessionToken(r *http.Request) string {
 	return cookie.Value
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, adminToken string) {
+func writeAdminSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookieName,
-		Value:    adminToken,
+		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -410,25 +534,14 @@ func accessRoleFromRequest(r *http.Request) accessRole {
 	return role
 }
 
-func resolveAccessRole(r *http.Request, adminToken string) accessRole {
-	if checkToken(r, adminToken) {
+func resolveAccessRole(r *http.Request, auth *authManager) accessRole {
+	if auth != nil && (auth.HasAdminAccess(r) || auth.HasBootstrapQueryToken(r)) {
 		return accessRoleAdmin
 	}
 	if guestSessionActive(r) {
 		return accessRoleGuest
 	}
 	return accessRoleNone
-}
-
-func bootstrapSessionCookie(w http.ResponseWriter, r *http.Request, adminToken string) {
-	if sessionToken(r) == adminToken {
-		return
-	}
-
-	queryToken := r.URL.Query().Get("token")
-	if queryToken == adminToken || bearerToken(r) == adminToken {
-		setSessionCookie(w, r, adminToken)
-	}
 }
 
 func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
@@ -448,15 +561,15 @@ func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// adminAuth returns a middleware that enforces the admin token.
-func adminAuth(adminToken string) func(http.Handler) http.Handler {
+// adminAuth returns a middleware that enforces administrator access.
+func adminAuth(auth *authManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !checkToken(r, adminToken) {
+			if auth == nil || !auth.HasAdminAccess(r) {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "unauthorized")})
 				return
 			}
-			bootstrapSessionCookie(w, r, adminToken)
+			auth.BootstrapSessionCookie(w, r)
 			next.ServeHTTP(w, withAccessRole(r, accessRoleAdmin))
 		})
 	}
@@ -465,13 +578,13 @@ func adminAuth(adminToken string) func(http.Handler) http.Handler {
 func viewerAuth(auth *authManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			role := resolveAccessRole(r, auth.AdminToken())
+			role := resolveAccessRole(r, auth)
 			if role == accessRoleNone {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "unauthorized")})
 				return
 			}
 			if role == accessRoleAdmin {
-				bootstrapSessionCookie(w, r, auth.AdminToken())
+				auth.BootstrapSessionCookie(w, r)
 			}
 			next.ServeHTTP(w, withAccessRole(r, role))
 		})
@@ -484,7 +597,7 @@ func frontendAuth(auth *authManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			adminToken := auth.AdminToken()
-			role := resolveAccessRole(r, adminToken)
+			role := resolveAccessRole(r, auth)
 			if role == accessRoleNone {
 				if shouldRedirectToLogin(r, auth) {
 					http.Redirect(w, r, "/login", http.StatusFound)
@@ -495,7 +608,7 @@ func frontendAuth(auth *authManager) func(http.Handler) http.Handler {
 			}
 
 			if role == accessRoleAdmin {
-				bootstrapSessionCookie(w, r, adminToken)
+				auth.BootstrapSessionCookie(w, r)
 
 				if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Query().Get("token") == adminToken {
 					redirectWithoutToken(w, r)
@@ -1017,6 +1130,8 @@ func uiMessage(language uiLanguage, key string) string {
 			return "当前密码和新密码均为必填"
 		case "newPasswordMustDiffer":
 			return "新密码必须与当前密码不同"
+		case "sessionStartFailed":
+			return "会话创建失败"
 		}
 	}
 	switch key {
@@ -1038,6 +1153,8 @@ func uiMessage(language uiLanguage, key string) string {
 		return "current_password and new_password are required"
 	case "newPasswordMustDiffer":
 		return "new password must be different"
+	case "sessionStartFailed":
+		return "failed to start session"
 	default:
 		return key
 	}
@@ -1099,7 +1216,8 @@ func renderLoginPageHTML(language uiLanguage) string {
 }
 
 func handleLoginPage(w http.ResponseWriter, r *http.Request, auth *authManager) {
-	if resolveAccessRole(r, auth.AdminToken()) == accessRoleAdmin {
+	if resolveAccessRole(r, auth) == accessRoleAdmin {
+		auth.BootstrapSessionCookie(w, r)
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -1113,7 +1231,7 @@ func handleLoginPage(w http.ResponseWriter, r *http.Request, auth *authManager) 
 	_, _ = w.Write([]byte(renderLoginPageHTML(resolveUILanguage(r))))
 }
 
-func handlePasswordLogin(w http.ResponseWriter, r *http.Request, auth *authManager) {
+func handlePasswordLogin(w http.ResponseWriter, r *http.Request, s *store.Store, auth *authManager) {
 	if !auth.PasswordLoginEnabled() {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": uiMessage(resolveUILanguage(r), "passwordLoginDisabled")})
 		return
@@ -1128,18 +1246,26 @@ func handlePasswordLogin(w http.ResponseWriter, r *http.Request, auth *authManag
 		return
 	}
 
-	if !auth.ValidPasswordLogin(req.Username, req.Password) {
+	if !auth.AuthenticatePassword(req.Username, req.Password, func(username, password string) error {
+		if s == nil {
+			return nil
+		}
+		return s.UpsertAdminAuth(username, password)
+	}) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidCredentials")})
 		return
 	}
 
 	clearGuestSessionCookie(w, r)
-	setSessionCookie(w, r, auth.AdminToken())
+	if err := auth.IssueAdminSession(w, r); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": uiMessage(resolveUILanguage(r), "sessionStartFailed")})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func handleGuestLogin(w http.ResponseWriter, r *http.Request) {
-	clearSessionCookie(w, r)
+func handleGuestLogin(w http.ResponseWriter, r *http.Request, auth *authManager) {
+	auth.ClearAdminSession(w, r)
 	setGuestSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -1244,8 +1370,8 @@ func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *sto
 	})
 }
 
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-	clearSessionCookie(w, r)
+func handleLogout(w http.ResponseWriter, r *http.Request, auth *authManager) {
+	auth.ClearAdminSession(w, r)
 	clearGuestSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -1256,7 +1382,11 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // generateHex returns a random 32-character hex string (16 random bytes).
 func generateHex() (string, error) {
-	b := make([]byte, 16)
+	return generateHexBytes(16)
+}
+
+func generateHexBytes(size int) (string, error) {
+	b := make([]byte, size)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
@@ -1998,24 +2128,39 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 
 		lastSeen := time.Now().Unix()
 
-		// Persist metrics.
-		_ = s.InsertMetrics(node.ID, &payload)
-		_ = s.UpdateNodeMetadata(node.ID, resolveNodeIP(r, payload.IP), payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen)
+		// Persist metrics before broadcasting them so the dashboard does not
+		// show data that failed to land in storage.
+		if err := s.InsertMetrics(node.ID, &payload); err != nil {
+			log.Printf("agent metrics: persist sample for node %s failed: %v", node.ID, err)
+			continue
+		}
+		if err := s.UpdateNodeMetadata(node.ID, resolveNodeIP(r, payload.IP), payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
+			log.Printf("agent metrics: update node metadata for node %s failed: %v", node.ID, err)
+			continue
+		}
 		if strings.TrimSpace(payload.AgentVersion) != "" {
-			_ = s.FinalizeUpdateJobsForNodeVersion(node.ID, payload.AgentVersion)
+			if err := s.FinalizeUpdateJobsForNodeVersion(node.ID, payload.AgentVersion); err != nil {
+				log.Printf("agent metrics: finalize update jobs for node %s failed: %v", node.ID, err)
+			}
 		}
 
 		// Persist processes as a JSON string.
 		if len(payload.Processes) > 0 {
 			procJSON, err := json.Marshal(payload.Processes)
 			if err == nil {
-				_ = s.UpsertProcesses(node.ID, payload.TS, string(procJSON))
+				if err := s.UpsertProcesses(node.ID, payload.TS, string(procJSON)); err != nil {
+					log.Printf("agent metrics: persist processes for node %s failed: %v", node.ID, err)
+				}
+			} else {
+				log.Printf("agent metrics: marshal processes for node %s failed: %v", node.ID, err)
 			}
 		}
 
 		// Persist service checks.
 		for _, svc := range payload.Services {
-			_ = s.UpsertServiceCheck(node.ID, svc.Name, svc.Status)
+			if err := s.UpsertServiceCheck(node.ID, svc.Name, svc.Status); err != nil {
+				log.Printf("agent metrics: persist service check %q for node %s failed: %v", svc.Name, node.ID, err)
+			}
 		}
 
 		// Persist docker availability and container snapshot when the agent reports it.
@@ -2027,7 +2172,11 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			}
 			containersJSON, err := json.Marshal(containers)
 			if err == nil {
-				_ = s.UpsertDockerContainers(node.ID, payload.TS, available, string(containersJSON))
+				if err := s.UpsertDockerContainers(node.ID, payload.TS, available, string(containersJSON)); err != nil {
+					log.Printf("agent metrics: persist docker snapshot for node %s failed: %v", node.ID, err)
+				}
+			} else {
+				log.Printf("agent metrics: marshal docker snapshot for node %s failed: %v", node.ID, err)
 			}
 		}
 
