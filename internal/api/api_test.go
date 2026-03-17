@@ -17,6 +17,7 @@ import (
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/store"
+	sharedversion "github.com/thism-dev/thism/internal/version"
 	_ "modernc.org/sqlite"
 )
 
@@ -179,6 +180,12 @@ func TestGetNodesIncludesHardwareSnapshot(t *testing.T) {
 }
 
 func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
+	originalVersion := sharedversion.Version
+	sharedversion.Version = "v1.2.3"
+	t.Cleanup(func() {
+		sharedversion.Version = originalVersion
+	})
+
 	s, _ := store.New(":memory:")
 	defer s.Close()
 	h := hub.New(s)
@@ -211,8 +218,8 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	if !strings.Contains(script, `mv -f "${TMP_BIN}" "${TARGET_BIN}"`) {
 		t.Fatalf("expected install script to atomically move temp binary into place, got: %s", script)
 	}
-	if !strings.Contains(script, `TARGET_VERSION=$(sha256sum "${TARGET_BIN}" | awk '{print substr($1,1,12)}')`) {
-		t.Fatalf("expected install script to derive target version from installed binary checksum, got: %s", script)
+	if !strings.Contains(script, `TARGET_VERSION="v1.2.3"`) {
+		t.Fatalf("expected install script to embed the server-provided target version, got: %s", script)
 	}
 	if !strings.Contains(script, `printf "%s\n" "${TARGET_VERSION}" > "${VERSION_FILE}"`) {
 		t.Fatalf("expected install script to persist installed agent version, got: %s", script)
@@ -1349,6 +1356,53 @@ func TestGetMetricsRetentionDefaultsToSevenDays(t *testing.T) {
 	}
 	if len(body.Options) != 2 || body.Options[0] != 7 || body.Options[1] != 30 {
 		t.Fatalf("unexpected retention options: %#v", body.Options)
+	}
+}
+
+func TestGetVersionMetadata(t *testing.T) {
+	originalVersion := sharedversion.Version
+	originalCommit := sharedversion.Commit
+	originalBuildTime := sharedversion.BuildTime
+	sharedversion.Version = "v1.2.3"
+	sharedversion.Commit = "abc1234"
+	sharedversion.BuildTime = "2026-03-18T04:00:00Z"
+	t.Cleanup(func() {
+		sharedversion.Version = originalVersion
+		sharedversion.Commit = originalCommit
+		sharedversion.BuildTime = originalBuildTime
+	})
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/meta/version", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Version   string `json:"version"`
+		Commit    string `json:"commit"`
+		BuildTime string `json:"build_time"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Version != "v1.2.3" {
+		t.Fatalf("expected version v1.2.3, got %q", body.Version)
+	}
+	if body.Commit != "abc1234" {
+		t.Fatalf("expected commit abc1234, got %q", body.Commit)
+	}
+	if body.BuildTime != "2026-03-18T04:00:00Z" {
+		t.Fatalf("expected build time to round-trip, got %q", body.BuildTime)
 	}
 }
 

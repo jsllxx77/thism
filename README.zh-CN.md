@@ -106,6 +106,31 @@ docker run --name thism-server -p 8080:8080 \
   --admin-user admin --admin-pass strong-password
 ```
 
+## 发布流程
+
+正式发布仅通过手动语义化标签触发：
+
+1. 准备并合并可发布变更到 `main`。
+2. 在本地创建语义化版本标签（例如：`v1.4.0`）。
+3. 推送标签：`git push origin v1.4.0`。
+
+Release 工作流只会在推送 `v*` 标签时执行，并发布：
+
+- `ghcr.io/thism-dev/thism:v1.4.0`（正式 semver 标签）
+- `ghcr.io/thism-dev/thism:sha-<shortsha>`（可追溯的不可变标签）
+- `ghcr.io/thism-dev/thism:latest`（当前正式发布）
+
+Docker 构建时会把统一构建元数据注入到二进制：
+
+- `THISM_VERSION`：来自 git 标签（例如 `v1.4.0`）
+- `THISM_COMMIT`：完整 commit SHA
+- `THISM_BUILD_TIME`：UTC RFC3339 时间戳
+
+开发构建 vs 正式发布：
+
+- 开发构建（例如本地 `make build` 或未传发布参数的临时 Docker 构建）用于调试验证，版本元数据可能是默认值或非正式值。
+- 正式发布是由上述标签触发工作流生成的不可变 semver 构建产物。
+
 ## 开发流程
 
 ### 本地快速开发

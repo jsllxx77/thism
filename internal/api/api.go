@@ -26,6 +26,7 @@ import (
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/security"
 	"github.com/thism-dev/thism/internal/store"
+	sharedversion "github.com/thism-dev/thism/internal/version"
 )
 
 var upgrader = websocket.Upgrader{
@@ -347,6 +348,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 		r.Get("/api/nodes", func(w http.ResponseWriter, req *http.Request) {
 			handleListNodes(w, req, s, h)
+		})
+
+		r.Get("/api/meta/version", func(w http.ResponseWriter, req *http.Request) {
+			handleGetVersionMetadata(w, req)
 		})
 
 		r.Get("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
@@ -1340,6 +1345,14 @@ func handleGetMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.
 	})
 }
 
+func handleGetVersionMetadata(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":    sharedversion.Version,
+		"commit":     sharedversion.Commit,
+		"build_time": sharedversion.BuildTime,
+	})
+}
+
 func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	if s == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
@@ -1924,6 +1937,10 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	}
 	host := r.Host
 	baseURL := scheme + "://" + host
+	targetVersion := sharedversion.Version
+	if strings.TrimSpace(targetVersion) == "" {
+		targetVersion = "dev"
+	}
 
 	script := "#!/bin/bash\nset -e\n\n" +
 		"TOKEN=\"" + token + "\"\n" +
@@ -1949,7 +1966,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o \"${TMP_BIN}\"\n" +
 		"chmod +x \"${TMP_BIN}\"\n" +
 		"mv -f \"${TMP_BIN}\" \"${TARGET_BIN}\"\n" +
-		"TARGET_VERSION=$(sha256sum \"${TARGET_BIN}\" | awk '{print substr($1,1,12)}')\n" +
+		"TARGET_VERSION=\"" + targetVersion + "\"\n" +
 		"printf \"%s\\n\" \"${TARGET_VERSION}\" > \"${VERSION_FILE}\"\n" +
 		"trap - EXIT\n\n" +
 		"WS_SCHEME=\"ws\"\n" +
@@ -1998,9 +2015,9 @@ func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	digest := sha256.Sum256(raw)
 	checksum := strings.ToLower(hex.EncodeToString(digest[:]))
-	targetVersion := checksum
-	if len(targetVersion) > 12 {
-		targetVersion = targetVersion[:12]
+	targetVersion := sharedversion.Version
+	if strings.TrimSpace(targetVersion) == "" {
+		targetVersion = "dev"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"target_version":         targetVersion,

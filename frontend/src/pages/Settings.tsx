@@ -7,7 +7,7 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { useLanguage } from "../i18n/language"
 import { api } from "../lib/api"
-import type { Node } from "../lib/api"
+import type { Node, VersionMeta } from "../lib/api"
 import { MotionSection } from "../motion/transitions"
 
 type Props = {
@@ -28,6 +28,8 @@ export function Settings({ refreshNonce = 0 }: Props) {
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
+  const [versionMeta, setVersionMeta] = useState<VersionMeta | null>(null)
+  const [versionError, setVersionError] = useState<string | null>(null)
 
   const fetchNodes = useCallback(async () => {
     setLoadingNodes(true)
@@ -51,6 +53,30 @@ export function Settings({ refreshNonce = 0 }: Props) {
     if (refreshNonce === 0) return
     void fetchNodes()
   }, [fetchNodes, refreshNonce])
+
+  const fetchVersionMeta = useCallback(async () => {
+    setVersionError(null)
+    try {
+      const versionMetaRequest = (api as { versionMeta?: () => Promise<VersionMeta> }).versionMeta
+      if (!versionMetaRequest) {
+        setVersionError(t("Version metadata is currently unavailable."))
+        return
+      }
+      const response = await versionMetaRequest()
+      setVersionMeta(response)
+    } catch {
+      setVersionError(t("Version metadata is currently unavailable."))
+    }
+  }, [t])
+
+  useEffect(() => {
+    void fetchVersionMeta()
+  }, [fetchVersionMeta])
+
+  useEffect(() => {
+    if (refreshNonce === 0) return
+    void fetchVersionMeta()
+  }, [fetchVersionMeta, refreshNonce])
 
   const handleChangePassword = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -145,6 +171,32 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
       <AgentAutoUpdateCard />
       <MetricsRetentionCard />
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>
+        <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
+          {versionError ? (
+            <p role="status" className="text-xs text-slate-500 dark:text-slate-400">{versionError}</p>
+          ) : !versionMeta ? (
+            <p role="status" className="text-xs text-slate-500 dark:text-slate-400">{t("Loading version metadata...")}</p>
+          ) : (
+            <dl className="grid gap-3 text-xs sm:grid-cols-3">
+              <div>
+                <dt className="font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">{t("Server version")}</dt>
+                <dd className="mt-1 font-mono text-slate-800 dark:text-slate-100">{versionMeta.version}</dd>
+              </div>
+              <div>
+                <dt className="font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">{t("Commit")}</dt>
+                <dd className="mt-1 font-mono text-slate-800 dark:text-slate-100">{versionMeta.commit}</dd>
+              </div>
+              <div>
+                <dt className="font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">{t("Build time")}</dt>
+                <dd className="mt-1 text-slate-800 dark:text-slate-100">{versionMeta.build_time}</dd>
+              </div>
+            </dl>
+          )}
+        </section>
+      </div>
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Security")}</h3>

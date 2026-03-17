@@ -163,6 +163,12 @@ export type MetricsRetentionSettings = {
   options: number[]
 }
 
+export type VersionMeta = {
+  version: string
+  commit: string
+  build_time: string
+}
+
 export const api = {
   session: () => req<SessionInfo>("/api/auth/session"),
   nodes: () => req<{ nodes: Node[] }>("/api/nodes"),
@@ -217,5 +223,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ retention_days: retentionDays }),
     }),
+  versionMeta: () => req<VersionMeta>("/api/meta/version"),
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),
 }

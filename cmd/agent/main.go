@@ -5,9 +5,8 @@ import (
 	"log"
 
 	"github.com/thism-dev/thism/internal/collector"
+	sharedversion "github.com/thism-dev/thism/internal/version"
 )
-
-var agentVersion = "dev"
 
 func main() {
 	serverURL := flag.String("server", "", "Server WebSocket URL (e.g. ws://host:8080)")
@@ -25,6 +24,10 @@ func main() {
 	}
 
 	c := collector.NewWithInterval(*serverURL, *token, *name, *nodeIP, *reportInterval)
-	c.SetAgentVersion(agentVersion)
+	c.SetAgentVersion(runtimeAgentVersion())
 	c.Run()
+}
+
+func runtimeAgentVersion() string {
+	return sharedversion.Version
 }
