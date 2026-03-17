@@ -27,7 +27,13 @@ The installer will:
 3. Generate a random admin password and API token on first run
 4. Start `thism-server` from `ghcr.io/thism-dev/thism:latest`
 
-When it finishes, open `http://localhost:8080` and log in with the credentials printed by the installer.
+Prerequisites:
+
+- Docker with `docker compose` v2 available on the host
+
+When it finishes, open `http://<server-ip-or-domain>:8080` from your browser and log in with the credentials printed by the installer. If you are running the installer on the same machine where you will open the browser, `http://localhost:8080` also works.
+
+The generated credentials are stored in `~/thism-deploy/.env`. Treat that file as sensitive because it contains the API token and the web UI administrator password.
 
 ### Manual Docker Compose deployment
 
@@ -42,6 +48,8 @@ docker compose up -d
 ```
 
 The default compose deployment stores application data in a named Docker volume and publishes the web UI on port `8080`.
+
+The `.env` file contains the API token and web login credentials. Keep it private and back it up if you want to preserve the generated secrets.
 
 ### Build from source
 
@@ -140,15 +148,20 @@ npm run build
 
 ## systemd
 
-Copy the service files from `deploy/`:
+The files in `deploy/` are templates. Before enabling them, replace the placeholder values in `ExecStart`, make sure the referenced binary exists, and create any required runtime user / working directory:
 
 ```bash
 # Server
 sudo cp deploy/thism-server.service /etc/systemd/system/
+
+# Edit placeholders such as YOUR_ADMIN_TOKEN / YOUR_ADMIN_USER / YOUR_ADMIN_PASSWORD
+# and ensure the `thism` user plus /var/lib/thism exist before starting.
 sudo systemctl enable --now thism-server
 
 # Agent (on each monitored machine)
 sudo cp deploy/thism-agent.service /etc/systemd/system/
+
+# Edit YOUR_SERVER_HOST / YOUR_NODE_TOKEN / YOUR_NODE_NAME before starting.
 sudo systemctl enable --now thism-agent
 ```
 
