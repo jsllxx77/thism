@@ -13,9 +13,16 @@ import (
 	"github.com/thism-dev/thism/internal/api"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/store"
+	sharedversion "github.com/thism-dev/thism/internal/version"
 )
 
 func TestAgentReleaseManifest(t *testing.T) {
+	originalVersion := sharedversion.Version
+	sharedversion.Version = "v1.2.3"
+	t.Cleanup(func() {
+		sharedversion.Version = originalVersion
+	})
+
 	fixture := []byte("test-agent-release-binary")
 	tempDir := t.TempDir()
 	distDir := filepath.Join(tempDir, "dist")
@@ -58,7 +65,7 @@ func TestAgentReleaseManifest(t *testing.T) {
 
 	checksum := sha256.Sum256(fixture)
 	expectedSHA := hex.EncodeToString(checksum[:])
-	expectedVersion := expectedSHA[:12]
+	expectedVersion := "v1.2.3"
 
 	if body["sha256"] != expectedSHA {
 		t.Fatalf("expected sha256 %q, got %#v", expectedSHA, body["sha256"])

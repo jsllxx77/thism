@@ -27,7 +27,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/
 3. 首次运行时生成随机管理员密码和 API Token
 4. 从 `ghcr.io/thism-dev/thism:latest` 启动 `thism-server`
 
-安装完成后，打开 `http://localhost:8080`，并使用脚本输出的账号密码登录。
+前提条件：
+
+- 目标主机已安装 Docker，并且可用 `docker compose` v2
+
+安装完成后，请在浏览器中打开 `http://<服务器 IP 或域名>:8080`，并使用脚本输出的账号密码登录。如果你是在本机安装并且也在本机访问，`http://localhost:8080` 同样可用。
+
+生成的凭据会保存在 `~/thism-deploy/.env`。这个文件包含 API Token 和 Web 管理员密码，应按敏感文件妥善保管。
 
 ### 手动 Docker Compose 部署
 
@@ -42,6 +48,8 @@ docker compose up -d
 ```
 
 默认 compose 部署会把数据保存在 Docker 命名卷中，并将 Web 界面暴露在 `8080` 端口。
+
+`.env` 文件里保存了 API Token 和 Web 登录凭据。请注意保密，并在需要保留原始凭据时做好备份。
 
 ### 从源码构建
 
@@ -98,6 +106,31 @@ docker run --name thism-server -p 8080:8080 \
   --admin-user admin --admin-pass strong-password
 ```
 
+## 发布流程
+
+正式发布仅通过手动语义化标签触发：
+
+1. 准备并合并可发布变更到 `main`。
+2. 在本地创建语义化版本标签（例如：`v1.4.0`）。
+3. 推送标签：`git push origin v1.4.0`。
+
+Release 工作流只会在推送 `v*` 标签时执行，并发布：
+
+- `ghcr.io/thism-dev/thism:v1.4.0`（正式 semver 标签）
+- `ghcr.io/thism-dev/thism:sha-<shortsha>`（可追溯的不可变标签）
+- `ghcr.io/thism-dev/thism:latest`（当前正式发布）
+
+Docker 构建时会把统一构建元数据注入到二进制：
+
+- `THISM_VERSION`：来自 git 标签（例如 `v1.4.0`）
+- `THISM_COMMIT`：完整 commit SHA
+- `THISM_BUILD_TIME`：UTC RFC3339 时间戳
+
+开发构建 vs 正式发布：
+
+- 开发构建（例如本地 `make build` 或未传发布参数的临时 Docker 构建）用于调试验证，版本元数据可能是默认值或非正式值。
+- 正式发布是由上述标签触发工作流生成的不可变 semver 构建产物。
+
 ## 开发流程
 
 ### 本地快速开发
@@ -140,15 +173,20 @@ npm run build
 
 ## systemd
 
-可以直接使用 `deploy/` 下的服务文件：
+`deploy/` 下的服务文件是模板，启用前需要先替换 `ExecStart` 里的占位参数，并确保对应二进制、运行用户和工作目录已经准备好：
 
 ```bash
 # 服务端
 sudo cp deploy/thism-server.service /etc/systemd/system/
+
+# 先把 YOUR_ADMIN_TOKEN / YOUR_ADMIN_USER / YOUR_ADMIN_PASSWORD 等占位符改成真实值，
+# 并确保 `thism` 用户和 /var/lib/thism 目录已存在。
 sudo systemctl enable --now thism-server
 
 # Agent（部署在每台被监控机器上）
 sudo cp deploy/thism-agent.service /etc/systemd/system/
+
+# 启动前请先替换 YOUR_SERVER_HOST / YOUR_NODE_TOKEN / YOUR_NODE_NAME。
 sudo systemctl enable --now thism-agent
 ```
 
