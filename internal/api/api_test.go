@@ -392,6 +392,46 @@ func TestLoginPageUsesStableViewportHeightForCenteredCard(t *testing.T) {
 	}
 }
 
+func TestLoginPageUsesTopAnchoredDesktopLayout(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{
+			AdminToken: "admin-token",
+			Username:   "admin",
+			Password:   "secret-pass",
+		},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend"))
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for login page, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "@media (min-width: 768px)") {
+		t.Fatalf("expected login page to define a desktop-specific layout rule, got %q", body)
+	}
+	if !strings.Contains(body, "display: block;") {
+		t.Fatalf("expected login page desktop layout to avoid viewport recentering, got %q", body)
+	}
+	if !strings.Contains(body, "margin: 0 auto;") {
+		t.Fatalf("expected login page shell to stay horizontally centered in desktop top-anchored layout, got %q", body)
+	}
+}
+
 func TestLoginPageUsesConsoleVisualLanguage(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

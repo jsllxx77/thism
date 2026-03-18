@@ -742,6 +742,16 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
     .shell {
       width: min(100%, 432px);
     }
+    @media (min-width: 768px) {
+      body {
+        display: block;
+        padding-top: clamp(40px, 9vh, 96px);
+        padding-bottom: 56px;
+      }
+      .shell {
+        margin: 0 auto;
+      }
+    }
     .page-toolbar {
       display: flex;
       justify-content: flex-end;
