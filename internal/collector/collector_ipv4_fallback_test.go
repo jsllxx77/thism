@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"net"
+	"net/http"
 	"syscall"
 	"testing"
 
@@ -88,7 +89,10 @@ func TestCollectorDialUsesIPv4FallbackBeforeAuto(t *testing.T) {
 	c.preferIPv4Fallback = true
 
 	var gotModes []dialMode
-	c.dialWebsocket = func(mode dialMode, targetURL string) (websocketConn, error) {
+	c.dialWebsocket = func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error) {
+		if got := headers.Get("Authorization"); got != "Bearer token" {
+			t.Fatalf("expected bearer token header, got %q", got)
+		}
 		gotModes = append(gotModes, mode)
 		if mode == dialModeIPv4 {
 			return nil, errors.New("ipv4 unavailable")

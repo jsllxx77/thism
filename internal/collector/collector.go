@@ -54,7 +54,7 @@ type websocketConn interface {
 	RemoteAddr() net.Addr
 }
 
-type websocketDialFunc func(mode dialMode, targetURL string) (websocketConn, error)
+type websocketDialFunc func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error)
 
 var (
 	cpuInfoFunc        = cpu.Info
@@ -779,9 +779,11 @@ func (c *Collector) dialModes() []dialMode {
 
 func (c *Collector) dialAgent(targetURL string) (websocketConn, dialMode, error) {
 	var lastErr error
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+c.token)
 
 	for index, mode := range c.dialModes() {
-		conn, err := c.dialWebsocket(mode, targetURL)
+		conn, err := c.dialWebsocket(mode, targetURL, headers)
 		if err == nil {
 			return conn, mode, nil
 		}
@@ -854,7 +856,7 @@ func isResetLikeError(err error) bool {
 	return strings.Contains(message, "connection reset by peer") || strings.Contains(message, "broken pipe")
 }
 
-func defaultWebsocketDial(mode dialMode, targetURL string) (websocketConn, error) {
+func defaultWebsocketDial(mode dialMode, targetURL string, headers http.Header) (websocketConn, error) {
 	dialer := *websocket.DefaultDialer
 	if mode == dialModeIPv4 {
 		netDialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
@@ -863,7 +865,7 @@ func defaultWebsocketDial(mode dialMode, targetURL string) (websocketConn, error
 		}
 	}
 
-	conn, _, err := dialer.Dial(targetURL, nil)
+	conn, _, err := dialer.Dial(targetURL, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -936,3 +938,4 @@ func detectLocalIP() string {
 
 	return ""
 }
+

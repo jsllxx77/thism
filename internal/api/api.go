@@ -30,7 +30,7 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: sameOriginWebsocketRequest,
 }
 
 const adminSessionCookieName = "thism_admin"
@@ -1920,10 +1920,9 @@ func buildInstallCommand(r *http.Request, token, name string) string {
 	baseURL := scheme + "://" + r.Host
 
 	query := url.Values{}
-	query.Set("token", token)
 	query.Set("name", name)
 	scriptURL := baseURL + "/install.sh?" + query.Encode()
-	return `curl -fsSL "` + scriptURL + `" | bash`
+	return `curl -fsSL -H "Authorization: Bearer ` + token + `" "` + scriptURL + `" | bash`
 }
 
 // -----------------------------------------------------------------------
@@ -1931,10 +1930,13 @@ func buildInstallCommand(r *http.Request, token, name string) string {
 // -----------------------------------------------------------------------
 
 func handleInstallScript(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
+	token := bearerToken(r)
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
 	name := r.URL.Query().Get("name")
 	if token == "" || name == "" {
-		http.Error(w, "token and name query params required", http.StatusBadRequest)
+		http.Error(w, "authorization bearer token and name query param required", http.StatusBadRequest)
 		return
 	}
 
@@ -2276,6 +2278,24 @@ func remoteAddrIP(value string) string {
 		return host
 	}
 	return trimmed
+}
+
+func sameOriginWebsocketRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if originURL.Scheme != "http" && originURL.Scheme != "https" {
+		return false
+	}
+	return strings.EqualFold(originURL.Host, r.Host)
 }
 
 func isPublicIP(value string) bool {

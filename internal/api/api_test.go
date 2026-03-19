@@ -227,6 +227,9 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	if strings.Contains(script, `curl -fsSL "${BASE}/dl/${BINARY}" -o /usr/local/bin/thism-agent`) {
 		t.Fatalf("expected install script to avoid writing binary directly in place, got: %s", script)
 	}
+	if strings.Contains(script, `token=node-token-1`) {
+		t.Fatalf("expected install script to avoid embedding token in URL query, got: %s", script)
+	}
 	if !strings.Contains(script, `systemctl enable thism-agent`) {
 		t.Fatalf("expected install script to enable service explicitly, got: %s", script)
 	}
@@ -1196,8 +1199,8 @@ func TestNodeManagementActions(t *testing.T) {
 		t.Fatalf("decode install command payload: %v", err)
 	}
 	command := commandPayload["command"]
-	if !strings.Contains(command, "/install.sh?") || !strings.Contains(command, "token=node-token-1") || !strings.Contains(command, "name=new-name") {
-		t.Fatalf("expected install command with token and renamed name, got: %s", command)
+	if !strings.Contains(command, "/install.sh?name=new-name") || strings.Contains(command, "token=node-token-1") || !strings.Contains(command, `Authorization: Bearer node-token-1`) {
+		t.Fatalf("expected install command to move token to bearer auth and keep renamed name, got: %s", command)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/nodes/node-1", nil)

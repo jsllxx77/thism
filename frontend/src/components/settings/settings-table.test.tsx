@@ -45,7 +45,7 @@ describe("settings nodes table", () => {
       last_seen: 1733011200,
       online: true,
     })
-    installCommandMock.mockResolvedValue({ command: "curl -fsSL http://localhost/install.sh?token=t1&name=alpha | bash" })
+    installCommandMock.mockResolvedValue({ command: "curl -fsSL -H \"Authorization: Bearer t1\" \"http://localhost/install.sh?name=alpha\" | bash" })
     deleteNodeMock.mockResolvedValue({ ok: true })
 
     Object.defineProperty(navigator, "clipboard", {
@@ -97,7 +97,7 @@ describe("settings nodes table", () => {
     expect(await screen.findByText("Install Command")).toBeInTheDocument()
     expect(onUpdated).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole("button", { name: "Copy command" }))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("curl -fsSL http://localhost/install.sh?token=t1&name=alpha | bash")
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("curl -fsSL -H \"Authorization: Bearer t1\" \"http://localhost/install.sh?name=alpha\" | bash")
     await user.click(screen.getByRole("button", { name: "Done" }))
     expect(onUpdated).toHaveBeenCalledTimes(1)
 
@@ -112,7 +112,7 @@ describe("settings nodes table", () => {
     const user = userEvent.setup()
     const installCommandMock = vi.mocked(api.installCommand)
 
-    installCommandMock.mockResolvedValue({ command: "curl -fsSL http://localhost/install.sh?token=t1&name=alpha | bash" })
+    installCommandMock.mockResolvedValue({ command: "curl -fsSL -H \"Authorization: Bearer t1\" \"http://localhost/install.sh?name=alpha\" | bash" })
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockRejectedValue(new Error("permission denied")) },
       configurable: true,
