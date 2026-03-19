@@ -218,7 +218,10 @@ export function NotificationsCard() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOffline")}</span>
+              <span className="flex flex-col">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOffline")}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_offline ? "已开启" : "已关闭"}</span>
+              </span>
               <button
                 type="button"
                 role="switch"
@@ -233,7 +236,10 @@ export function NotificationsCard() {
               </button>
             </label>
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOnline")}</span>
+              <span className="flex flex-col">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOnline")}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_online ? "已开启" : "已关闭"}</span>
+              </span>
               <button
                 type="button"
                 role="switch"
