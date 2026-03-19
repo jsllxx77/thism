@@ -382,17 +382,20 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		return models.NotificationSettingsView{}, err
 	}
 	view := models.NotificationSettingsView{
-		Enabled:             settings.Enabled,
-		Channel:             settings.Channel,
-		TelegramBotTokenSet: strings.TrimSpace(settings.TelegramBotToken) != "",
-		TelegramTargets:     settings.TelegramTargets,
-		CPUWarningPercent:   settings.CPUWarningPercent,
-		CPUCriticalPercent:  settings.CPUCriticalPercent,
-		MemWarningPercent:   settings.MemWarningPercent,
-		MemCriticalPercent:  settings.MemCriticalPercent,
-		DiskWarningPercent:  settings.DiskWarningPercent,
-		DiskCriticalPercent: settings.DiskCriticalPercent,
-		CooldownMinutes:     settings.CooldownMinutes,
+		Enabled:                 settings.Enabled,
+		Channel:                 settings.Channel,
+		TelegramBotTokenSet:     strings.TrimSpace(settings.TelegramBotToken) != "",
+		TelegramTargets:         settings.TelegramTargets,
+		CPUWarningPercent:       settings.CPUWarningPercent,
+		CPUCriticalPercent:      settings.CPUCriticalPercent,
+		MemWarningPercent:       settings.MemWarningPercent,
+		MemCriticalPercent:      settings.MemCriticalPercent,
+		DiskWarningPercent:      settings.DiskWarningPercent,
+		DiskCriticalPercent:     settings.DiskCriticalPercent,
+		CooldownMinutes:         settings.CooldownMinutes,
+		NotifyNodeOffline:       settings.NotifyNodeOffline,
+		NotifyNodeOnline:        settings.NotifyNodeOnline,
+		NodeOfflineGraceMinutes: settings.NodeOfflineGraceMinutes,
 	}
 	if includeSecret {
 		view.TelegramBotToken = settings.TelegramBotToken
