@@ -17,20 +17,22 @@ func (s *senderStub) Send(_ models.NotificationSettings, event models.AlertEvent
 
 func testNotificationSettings() models.NotificationSettings {
 	return models.NotificationSettings{
-		Enabled:                true,
-		Channel:                string(models.NotificationChannelTelegram),
-		TelegramBotToken:       "token",
-		TelegramTargets:        []models.TelegramTarget{{ChatID: "-1001", TopicID: 22}},
-		CPUWarningPercent:      80,
-		CPUCriticalPercent:     90,
-		MemWarningPercent:      80,
-		MemCriticalPercent:     90,
-		DiskWarningPercent:     80,
-		DiskCriticalPercent:    90,
-		CooldownMinutes:        30,
-		NotifyNodeOffline:      true,
-		NotifyNodeOnline:       true,
-		NodeOfflineGraceMinutes: 2,
+		Enabled:                             true,
+		Channel:                             string(models.NotificationChannelTelegram),
+		TelegramBotToken:                    "token",
+		TelegramTargets:                     []models.TelegramTarget{{ChatID: "-1001", TopicID: 22}},
+		CPUWarningPercent:                   80,
+		CPUCriticalPercent:                  90,
+		MemWarningPercent:                   80,
+		MemCriticalPercent:                  90,
+		DiskWarningPercent:                  80,
+		DiskCriticalPercent:                 90,
+		CooldownMinutes:                     30,
+		RecoverySuccessiveSamples:           3,
+		RecoveryNotificationCooldownMinutes: 30,
+		NotifyNodeOffline:                   true,
+		NotifyNodeOnline:                    true,
+		NodeOfflineGraceMinutes:             2,
 	}
 }
 
@@ -62,7 +64,7 @@ func TestEvaluatorSendsCriticalAndRespectsCooldown(t *testing.T) {
 	}
 }
 
-func TestEvaluatorSendsResolvedWhenMetricRecovers(t *testing.T) {
+func TestEvaluatorSendsResolvedWhenMetricRecoversAfterConsecutiveSamples(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -83,10 +85,20 @@ func TestEvaluatorSendsResolvedWhenMetricRecovers(t *testing.T) {
 	}
 
 	if err := evaluator.Process(node, &models.MetricsPayload{TS: 1100, CPU: 20, Mem: models.MemStats{Used: 50, Total: 100}, Disk: []models.DiskStats{{Used: 50, Total: 100}}}); err != nil {
-		t.Fatalf("Process recovery: %v", err)
+		t.Fatalf("Process recovery 1: %v", err)
+	}
+	if err := evaluator.Process(node, &models.MetricsPayload{TS: 1200, CPU: 30, Mem: models.MemStats{Used: 50, Total: 100}, Disk: []models.DiskStats{{Used: 50, Total: 100}}}); err != nil {
+		t.Fatalf("Process recovery 2: %v", err)
+	}
+	if len(stub.events) != 1 {
+		t.Fatalf("expected recovery to wait for consecutive healthy samples, got %#v", stub.events)
+	}
+
+	if err := evaluator.Process(node, &models.MetricsPayload{TS: 1300, CPU: 40, Mem: models.MemStats{Used: 50, Total: 100}, Disk: []models.DiskStats{{Used: 50, Total: 100}}}); err != nil {
+		t.Fatalf("Process recovery 3: %v", err)
 	}
 	if len(stub.events) != 2 {
-		t.Fatalf("expected resolved event after recovery, got %d", len(stub.events))
+		t.Fatalf("expected resolved event after delayed recovery, got %d", len(stub.events))
 	}
 	if stub.events[1].Severity != models.AlertSeverityResolved || stub.events[1].Metric != models.ResourceMetricCPU {
 		t.Fatalf("expected cpu resolved event, got %#v", stub.events[1])
@@ -98,6 +110,38 @@ func TestEvaluatorSendsResolvedWhenMetricRecovers(t *testing.T) {
 	}
 	if active {
 		t.Fatal("expected active cpu alert to be cleared after recovery")
+	}
+}
+
+func TestEvaluatorRecoveryStreakResetsWhenMetricFlapsBackToAlert(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+	settings := testNotificationSettings()
+	settings.CooldownMinutes = 1
+	if err := s.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+	stub := &senderStub{}
+	evaluator := &Evaluator{Store: s, Sender: stub}
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1000, CPU: 95, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1010, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1075, CPU: 95, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	if len(stub.events) != 2 || stub.events[1].Severity != models.AlertSeverityCritical {
+		t.Fatalf("expected second alert after cooldown expiry, got %#v", stub.events)
+	}
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1080, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1090, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	if len(stub.events) != 2 {
+		t.Fatalf("expected no recovery yet after flap reset, got %#v", stub.events)
+	}
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1100, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	if len(stub.events) != 3 || stub.events[2].Severity != models.AlertSeverityResolved {
+		t.Fatalf("expected resolved only after streak reset and rebuilt, got %#v", stub.events)
 	}
 }
 
@@ -122,6 +166,48 @@ func TestEvaluatorCooldownAppliesAcrossSeverityChanges(t *testing.T) {
 	}
 	if len(stub.events) != 1 {
 		t.Fatalf("expected warning to be suppressed during cooldown, got %#v", stub.events)
+	}
+}
+
+func TestEvaluatorSuppressesRecoveryNotificationWithinRecoveryCooldown(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+	settings := testNotificationSettings()
+	settings.RecoverySuccessiveSamples = 2
+	settings.RecoveryNotificationCooldownMinutes = 30
+	if err := s.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+	stub := &senderStub{}
+	evaluator := &Evaluator{Store: s, Sender: stub}
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1000, CPU: 95, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1100, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1200, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	if len(stub.events) != 2 || stub.events[1].Severity != models.AlertSeverityResolved {
+		t.Fatalf("expected first recovery notice, got %#v", stub.events)
+	}
+
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1300, CPU: 95, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1400, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	_ = evaluator.Process(node, &models.MetricsPayload{TS: 1500, CPU: 20, Mem: models.MemStats{Used: 10, Total: 100}, Disk: []models.DiskStats{{Used: 10, Total: 100}}})
+	if len(stub.events) != 3 {
+		t.Fatalf("expected second alert but suppressed duplicate recovery, got %#v", stub.events)
+	}
+	if stub.events[2].Severity != models.AlertSeverityCritical {
+		t.Fatalf("expected only re-alert after flap, got %#v", stub.events[2])
+	}
+
+	active, err := s.HasActiveAlertDelivery("node-1", "cpu")
+	if err != nil {
+		t.Fatalf("HasActiveAlertDelivery: %v", err)
+	}
+	if active {
+		t.Fatal("expected active cpu alert to be cleared even when recovery notification is cooled down")
 	}
 }
 

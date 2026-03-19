@@ -215,6 +215,21 @@ CREATE TABLE IF NOT EXISTS alert_deliveries (
     delivered_at INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (node_id, metric, severity)
 );
+
+CREATE TABLE IF NOT EXISTS recovery_deliveries (
+    node_id      TEXT NOT NULL,
+    metric       TEXT NOT NULL,
+    delivered_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (node_id, metric)
+);
+
+CREATE TABLE IF NOT EXISTS recovery_states (
+    node_id               TEXT NOT NULL,
+    metric                TEXT NOT NULL,
+    consecutive_successes INTEGER NOT NULL DEFAULT 0,
+    last_observed_at      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (node_id, metric)
+);
 `)
 	if err != nil {
 		return err
@@ -293,16 +308,18 @@ ON CONFLICT(key) DO UPDATE SET
 
 func defaultNotificationSettings() models.NotificationSettings {
 	return models.NotificationSettings{
-		Enabled:             false,
-		Channel:             string(models.NotificationChannelTelegram),
-		TelegramTargets:     []models.TelegramTarget{},
-		CPUWarningPercent:   85,
-		CPUCriticalPercent:  95,
-		MemWarningPercent:   85,
-		MemCriticalPercent:  95,
-		DiskWarningPercent:  85,
-		DiskCriticalPercent: 95,
-		CooldownMinutes:     30,
+		Enabled:                             false,
+		Channel:                             string(models.NotificationChannelTelegram),
+		TelegramTargets:                     []models.TelegramTarget{},
+		CPUWarningPercent:                   85,
+		CPUCriticalPercent:                  95,
+		MemWarningPercent:                   85,
+		MemCriticalPercent:                  95,
+		DiskWarningPercent:                  85,
+		DiskCriticalPercent:                 95,
+		CooldownMinutes:                     30,
+		RecoverySuccessiveSamples:           3,
+		RecoveryNotificationCooldownMinutes: 30,
 	}
 }
 
@@ -331,6 +348,12 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 	}
 	if settings.CooldownMinutes <= 0 {
 		settings.CooldownMinutes = defaults.CooldownMinutes
+	}
+	if settings.RecoverySuccessiveSamples <= 0 {
+		settings.RecoverySuccessiveSamples = defaults.RecoverySuccessiveSamples
+	}
+	if settings.RecoveryNotificationCooldownMinutes <= 0 {
+		settings.RecoveryNotificationCooldownMinutes = defaults.RecoveryNotificationCooldownMinutes
 	}
 	cleanTargets := make([]models.TelegramTarget, 0, len(settings.TelegramTargets))
 	for _, target := range settings.TelegramTargets {
@@ -382,20 +405,22 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		return models.NotificationSettingsView{}, err
 	}
 	view := models.NotificationSettingsView{
-		Enabled:                 settings.Enabled,
-		Channel:                 settings.Channel,
-		TelegramBotTokenSet:     strings.TrimSpace(settings.TelegramBotToken) != "",
-		TelegramTargets:         settings.TelegramTargets,
-		CPUWarningPercent:       settings.CPUWarningPercent,
-		CPUCriticalPercent:      settings.CPUCriticalPercent,
-		MemWarningPercent:       settings.MemWarningPercent,
-		MemCriticalPercent:      settings.MemCriticalPercent,
-		DiskWarningPercent:      settings.DiskWarningPercent,
-		DiskCriticalPercent:     settings.DiskCriticalPercent,
-		CooldownMinutes:         settings.CooldownMinutes,
-		NotifyNodeOffline:       settings.NotifyNodeOffline,
-		NotifyNodeOnline:        settings.NotifyNodeOnline,
-		NodeOfflineGraceMinutes: settings.NodeOfflineGraceMinutes,
+		Enabled:                             settings.Enabled,
+		Channel:                             settings.Channel,
+		TelegramBotTokenSet:                 strings.TrimSpace(settings.TelegramBotToken) != "",
+		TelegramTargets:                     settings.TelegramTargets,
+		CPUWarningPercent:                   settings.CPUWarningPercent,
+		CPUCriticalPercent:                  settings.CPUCriticalPercent,
+		MemWarningPercent:                   settings.MemWarningPercent,
+		MemCriticalPercent:                  settings.MemCriticalPercent,
+		DiskWarningPercent:                  settings.DiskWarningPercent,
+		DiskCriticalPercent:                 settings.DiskCriticalPercent,
+		CooldownMinutes:                     settings.CooldownMinutes,
+		RecoverySuccessiveSamples:           settings.RecoverySuccessiveSamples,
+		RecoveryNotificationCooldownMinutes: settings.RecoveryNotificationCooldownMinutes,
+		NotifyNodeOffline:                   settings.NotifyNodeOffline,
+		NotifyNodeOnline:                    settings.NotifyNodeOnline,
+		NodeOfflineGraceMinutes:             settings.NodeOfflineGraceMinutes,
 	}
 	if includeSecret {
 		view.TelegramBotToken = settings.TelegramBotToken
@@ -447,6 +472,57 @@ func (s *Store) HasActiveAlertDelivery(nodeID, metric string) (bool, error) {
 
 func (s *Store) ClearAlertDelivery(nodeID, metric string) error {
 	_, err := s.db.Exec(`DELETE FROM alert_deliveries WHERE node_id = ? AND metric = ?`, nodeID, metric)
+	return err
+}
+
+func (s *Store) ShouldSendRecovery(nodeID, metric string, cooldown time.Duration, now int64) (bool, error) {
+	if cooldown <= 0 {
+		return true, nil
+	}
+	var deliveredAt sql.NullInt64
+	err := s.db.QueryRow(`SELECT delivered_at FROM recovery_deliveries WHERE node_id = ? AND metric = ?`, nodeID, metric).Scan(&deliveredAt)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !deliveredAt.Valid || deliveredAt.Int64 == 0 {
+		return true, nil
+	}
+	return now-deliveredAt.Int64 >= int64(cooldown.Seconds()), nil
+}
+
+func (s *Store) RecordRecoveryDelivery(nodeID, metric string, deliveredAt int64) error {
+	_, err := s.db.Exec(`
+INSERT INTO recovery_deliveries (node_id, metric, delivered_at)
+VALUES (?, ?, ?)
+ON CONFLICT(node_id, metric) DO UPDATE SET
+	delivered_at = excluded.delivered_at
+`, nodeID, metric, deliveredAt)
+	return err
+}
+
+func (s *Store) IncrementRecoveryStreak(nodeID, metric string, observedAt int64) (int, error) {
+	_, err := s.db.Exec(`
+INSERT INTO recovery_states (node_id, metric, consecutive_successes, last_observed_at)
+VALUES (?, ?, 1, ?)
+ON CONFLICT(node_id, metric) DO UPDATE SET
+	consecutive_successes = recovery_states.consecutive_successes + 1,
+	last_observed_at = excluded.last_observed_at
+`, nodeID, metric, observedAt)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT consecutive_successes FROM recovery_states WHERE node_id = ? AND metric = ?`, nodeID, metric).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Store) ResetRecoveryState(nodeID, metric string) error {
+	_, err := s.db.Exec(`DELETE FROM recovery_states WHERE node_id = ? AND metric = ?`, nodeID, metric)
 	return err
 }
 

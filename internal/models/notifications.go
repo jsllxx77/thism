@@ -41,38 +41,42 @@ func (t TelegramTarget) Normalized() TelegramTarget {
 }
 
 type NotificationSettings struct {
-	Enabled                 bool             `json:"enabled"`
-	Channel                 string           `json:"channel"`
-	TelegramBotToken        string           `json:"telegram_bot_token,omitempty"`
-	TelegramTargets         []TelegramTarget `json:"telegram_targets,omitempty"`
-	CPUWarningPercent       float64          `json:"cpu_warning_percent"`
-	CPUCriticalPercent      float64          `json:"cpu_critical_percent"`
-	MemWarningPercent       float64          `json:"mem_warning_percent"`
-	MemCriticalPercent      float64          `json:"mem_critical_percent"`
-	DiskWarningPercent      float64          `json:"disk_warning_percent"`
-	DiskCriticalPercent     float64          `json:"disk_critical_percent"`
-	CooldownMinutes         int              `json:"cooldown_minutes"`
-	NotifyNodeOffline       bool             `json:"notify_node_offline"`
-	NotifyNodeOnline        bool             `json:"notify_node_online"`
-	NodeOfflineGraceMinutes int              `json:"node_offline_grace_minutes"`
+	Enabled                             bool             `json:"enabled"`
+	Channel                             string           `json:"channel"`
+	TelegramBotToken                    string           `json:"telegram_bot_token,omitempty"`
+	TelegramTargets                     []TelegramTarget `json:"telegram_targets,omitempty"`
+	CPUWarningPercent                   float64          `json:"cpu_warning_percent"`
+	CPUCriticalPercent                  float64          `json:"cpu_critical_percent"`
+	MemWarningPercent                   float64          `json:"mem_warning_percent"`
+	MemCriticalPercent                  float64          `json:"mem_critical_percent"`
+	DiskWarningPercent                  float64          `json:"disk_warning_percent"`
+	DiskCriticalPercent                 float64          `json:"disk_critical_percent"`
+	CooldownMinutes                     int              `json:"cooldown_minutes"`
+	RecoverySuccessiveSamples           int              `json:"recovery_successive_samples"`
+	RecoveryNotificationCooldownMinutes int              `json:"recovery_notification_cooldown_minutes"`
+	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
+	NotifyNodeOnline                    bool             `json:"notify_node_online"`
+	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
 }
 
 type NotificationSettingsView struct {
-	Enabled                 bool             `json:"enabled"`
-	Channel                 string           `json:"channel"`
-	TelegramBotTokenSet     bool             `json:"telegram_bot_token_set"`
-	TelegramBotToken        string           `json:"telegram_bot_token,omitempty"`
-	TelegramTargets         []TelegramTarget `json:"telegram_targets,omitempty"`
-	CPUWarningPercent       float64          `json:"cpu_warning_percent"`
-	CPUCriticalPercent      float64          `json:"cpu_critical_percent"`
-	MemWarningPercent       float64          `json:"mem_warning_percent"`
-	MemCriticalPercent      float64          `json:"mem_critical_percent"`
-	DiskWarningPercent      float64          `json:"disk_warning_percent"`
-	DiskCriticalPercent     float64          `json:"disk_critical_percent"`
-	CooldownMinutes         int              `json:"cooldown_minutes"`
-	NotifyNodeOffline       bool             `json:"notify_node_offline"`
-	NotifyNodeOnline        bool             `json:"notify_node_online"`
-	NodeOfflineGraceMinutes int              `json:"node_offline_grace_minutes"`
+	Enabled                             bool             `json:"enabled"`
+	Channel                             string           `json:"channel"`
+	TelegramBotTokenSet                 bool             `json:"telegram_bot_token_set"`
+	TelegramBotToken                    string           `json:"telegram_bot_token,omitempty"`
+	TelegramTargets                     []TelegramTarget `json:"telegram_targets,omitempty"`
+	CPUWarningPercent                   float64          `json:"cpu_warning_percent"`
+	CPUCriticalPercent                  float64          `json:"cpu_critical_percent"`
+	MemWarningPercent                   float64          `json:"mem_warning_percent"`
+	MemCriticalPercent                  float64          `json:"mem_critical_percent"`
+	DiskWarningPercent                  float64          `json:"disk_warning_percent"`
+	DiskCriticalPercent                 float64          `json:"disk_critical_percent"`
+	CooldownMinutes                     int              `json:"cooldown_minutes"`
+	RecoverySuccessiveSamples           int              `json:"recovery_successive_samples"`
+	RecoveryNotificationCooldownMinutes int              `json:"recovery_notification_cooldown_minutes"`
+	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
+	NotifyNodeOnline                    bool             `json:"notify_node_online"`
+	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
 }
 
 type AlertEvent struct {

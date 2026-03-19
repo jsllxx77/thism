@@ -429,4 +429,35 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	if err != nil || !allowed {
 		t.Fatalf("expected alert after cooldown to be allowed, got allowed=%v err=%v", allowed, err)
 	}
+
+	count, err := s.IncrementRecoveryStreak("node-1", "cpu", 3100)
+	if err != nil || count != 1 {
+		t.Fatalf("expected first recovery streak increment, count=%d err=%v", count, err)
+	}
+	count, err = s.IncrementRecoveryStreak("node-1", "cpu", 3200)
+	if err != nil || count != 2 {
+		t.Fatalf("expected second recovery streak increment, count=%d err=%v", count, err)
+	}
+	if err := s.ResetRecoveryState("node-1", "cpu"); err != nil {
+		t.Fatalf("ResetRecoveryState: %v", err)
+	}
+	count, err = s.IncrementRecoveryStreak("node-1", "cpu", 3300)
+	if err != nil || count != 1 {
+		t.Fatalf("expected recovery streak reset to 1, count=%d err=%v", count, err)
+	}
+
+	allowed, err = s.ShouldSendRecovery("node-1", "cpu", 30*time.Minute, 3300)
+	if err != nil || !allowed {
+		t.Fatalf("expected first recovery notice to be allowed, got allowed=%v err=%v", allowed, err)
+	}
+	if err := s.RecordRecoveryDelivery("node-1", "cpu", 3300); err != nil {
+		t.Fatalf("RecordRecoveryDelivery: %v", err)
+	}
+	allowed, err = s.ShouldSendRecovery("node-1", "cpu", 30*time.Minute, 3400)
+	if err != nil {
+		t.Fatalf("ShouldSendRecovery cooldown: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected recovery cooldown window to suppress duplicate recovery")
+	}
 }

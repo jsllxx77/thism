@@ -59,6 +59,9 @@ func (e *Evaluator) Process(node *models.Node, metrics *models.MetricsPayload) e
 		if err := e.Store.RecordAlertDelivery(event.NodeID, string(event.Metric), string(event.Severity), event.Value, event.Threshold, event.ObservedAt); err != nil {
 			return err
 		}
+		if err := e.Store.ResetRecoveryState(event.NodeID, string(event.Metric)); err != nil {
+			return err
+		}
 	}
 	for _, event := range recoveries {
 		active, err := e.Store.HasActiveAlertDelivery(event.NodeID, string(event.Metric))
@@ -66,12 +69,41 @@ func (e *Evaluator) Process(node *models.Node, metrics *models.MetricsPayload) e
 			return err
 		}
 		if !active {
+			if err := e.Store.ResetRecoveryState(event.NodeID, string(event.Metric)); err != nil {
+				return err
+			}
+			continue
+		}
+		count, err := e.Store.IncrementRecoveryStreak(event.NodeID, string(event.Metric), event.ObservedAt)
+		if err != nil {
+			return err
+		}
+		if count < settings.RecoverySuccessiveSamples {
+			continue
+		}
+		allowed, err := e.Store.ShouldSendRecovery(event.NodeID, string(event.Metric), time.Duration(settings.RecoveryNotificationCooldownMinutes)*time.Minute, event.ObservedAt)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			if err := e.Store.ClearAlertDelivery(event.NodeID, string(event.Metric)); err != nil {
+				return err
+			}
+			if err := e.Store.ResetRecoveryState(event.NodeID, string(event.Metric)); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := e.Sender.Send(settings, event); err != nil {
 			return err
 		}
+		if err := e.Store.RecordRecoveryDelivery(event.NodeID, string(event.Metric), event.ObservedAt); err != nil {
+			return err
+		}
 		if err := e.Store.ClearAlertDelivery(event.NodeID, string(event.Metric)); err != nil {
+			return err
+		}
+		if err := e.Store.ResetRecoveryState(event.NodeID, string(event.Metric)); err != nil {
 			return err
 		}
 	}
