@@ -174,6 +174,9 @@ export const messagesEn = {
       diskWarningThreshold: "Disk warning %",
       diskCriticalThreshold: "Disk critical %",
       notificationCooldownMinutes: "Cooldown (minutes)",
+      notifyNodeOffline: "Notify when a node goes offline",
+      notifyNodeOnline: "Notify when a node comes back online",
+      nodeOfflineGraceMinutes: "Offline grace (minutes)",
     },
     addNodeModal: {
       title: "Add Node",

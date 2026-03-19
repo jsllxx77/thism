@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -45,13 +46,16 @@ func (s *TelegramSender) Send(settings models.NotificationSettings, event models
 
 func formatTelegramMessage(event models.AlertEvent) string {
 	metricLabel := map[models.ResourceMetric]string{
-		models.ResourceMetricCPU:    "CPU",
-		models.ResourceMetricMemory: "Memory",
-		models.ResourceMetricDisk:   "Disk",
+		models.ResourceMetricCPU:        "CPU",
+		models.ResourceMetricMemory:     "Memory",
+		models.ResourceMetricDisk:       "Disk",
+		models.ResourceMetricNodeStatus: "Node status",
 	}[event.Metric]
 	severityLabel := map[models.AlertSeverity]string{
 		models.AlertSeverityWarning:  "Warning",
 		models.AlertSeverityCritical: "Critical",
+		models.AlertSeverityResolved: "Resolved",
+		models.AlertSeverityInfo:     "Info",
 	}[event.Severity]
 	if metricLabel == "" {
 		metricLabel = string(event.Metric)
@@ -59,7 +63,43 @@ func formatTelegramMessage(event models.AlertEvent) string {
 	if severityLabel == "" {
 		severityLabel = string(event.Severity)
 	}
-	return fmt.Sprintf("🚨 *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%.1f%%*\nThreshold: *%.1f%%*\nTime: `%s`", severityLabel, escapeTelegramMarkdown(event.NodeName), escapeTelegramMarkdown(metricLabel), event.Value, event.Threshold, time.Unix(event.ObservedAt, 0).UTC().Format(time.RFC3339))
+	timestamp := escapeTelegramMarkdown(time.Unix(event.ObservedAt, 0).UTC().Format(time.RFC3339))
+	if event.Metric == models.ResourceMetricNodeStatus {
+		status := "offline"
+		emoji := "🔴"
+		if event.Value > 0 {
+			status = "online"
+			emoji = "🟢"
+		}
+		return fmt.Sprintf(
+			"%s *Node %s*\nNode: *%s*\nTime: `%s`",
+			emoji,
+			escapeTelegramMarkdown(status),
+			escapeTelegramMarkdown(event.NodeName),
+			timestamp,
+		)
+	}
+	usage := escapeTelegramMarkdown(fmt.Sprintf("%.1f%%", event.Value))
+	threshold := escapeTelegramMarkdown(fmt.Sprintf("%.1f%%", event.Threshold))
+	if event.Severity == models.AlertSeverityResolved {
+		return fmt.Sprintf(
+			"✅ *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\nTime: `%s`",
+			escapeTelegramMarkdown(severityLabel),
+			escapeTelegramMarkdown(event.NodeName),
+			escapeTelegramMarkdown(metricLabel),
+			usage,
+			timestamp,
+		)
+	}
+	return fmt.Sprintf(
+		"🚨 *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\nThreshold: *%s*\nTime: `%s`",
+		escapeTelegramMarkdown(severityLabel),
+		escapeTelegramMarkdown(event.NodeName),
+		escapeTelegramMarkdown(metricLabel),
+		usage,
+		threshold,
+		timestamp,
+	)
 }
 
 func escapeTelegramMarkdown(value string) string {
@@ -87,7 +127,12 @@ func (s *TelegramSender) sendTelegramMessage(botToken string, target models.Tele
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("telegram send failed: %s", resp.Status)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			return fmt.Errorf("telegram send failed: %s", resp.Status)
+		}
+		return fmt.Errorf("telegram send failed: %s: %s", resp.Status, msg)
 	}
 	return nil
 }

@@ -182,6 +182,9 @@ export type NotificationSettings = {
   disk_warning_percent: number
   disk_critical_percent: number
   cooldown_minutes: number
+  notify_node_offline: boolean
+  notify_node_online: boolean
+  node_offline_grace_minutes: number
 }
 
 export type TestNotificationRequest = {

@@ -2231,7 +2231,9 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 	}
 
 	h.Register(node.ID, conn)
+	_ = alertEvaluator.ProcessHeartbeat(node, true, time.Now().Unix())
 	defer func() {
+		_ = alertEvaluator.ProcessHeartbeat(node, false, time.Now().Unix())
 		conn.Close()
 		h.Unregister(node.ID)
 	}()

@@ -31,3 +31,14 @@ func TestTelegramSenderIncludesTopicID(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 }
+
+func TestFormatTelegramMessageForNodeStatus(t *testing.T) {
+	message := formatTelegramMessage(models.AlertEvent{NodeName: "alpha", Metric: models.ResourceMetricNodeStatus, Severity: models.AlertSeverityInfo, Value: 0, ObservedAt: 1710000000})
+	if !strings.Contains(message, "Node offline") {
+		t.Fatalf("expected offline node status message, got %s", message)
+	}
+	message = formatTelegramMessage(models.AlertEvent{NodeName: "alpha", Metric: models.ResourceMetricNodeStatus, Severity: models.AlertSeverityInfo, Value: 1, ObservedAt: 1710000000})
+	if !strings.Contains(message, "Node online") {
+		t.Fatalf("expected online node status message, got %s", message)
+	}
+}

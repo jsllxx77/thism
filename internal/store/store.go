@@ -404,15 +404,18 @@ func (s *Store) ShouldSendAlert(nodeID, metric, severity string, cooldown time.D
 	if cooldown <= 0 {
 		return true, nil
 	}
-	var deliveredAt int64
-	err := s.db.QueryRow(`SELECT delivered_at FROM alert_deliveries WHERE node_id = ? AND metric = ? AND severity = ?`, nodeID, metric, severity).Scan(&deliveredAt)
+	var deliveredAt sql.NullInt64
+	err := s.db.QueryRow(`SELECT MAX(delivered_at) FROM alert_deliveries WHERE node_id = ? AND metric = ?`, nodeID, metric).Scan(&deliveredAt)
 	if err == sql.ErrNoRows {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return now-deliveredAt >= int64(cooldown.Seconds()), nil
+	if !deliveredAt.Valid || deliveredAt.Int64 == 0 {
+		return true, nil
+	}
+	return now-deliveredAt.Int64 >= int64(cooldown.Seconds()), nil
 }
 
 func (s *Store) RecordAlertDelivery(nodeID, metric, severity string, value, threshold float64, deliveredAt int64) error {

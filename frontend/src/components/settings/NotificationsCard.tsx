@@ -96,6 +96,9 @@ export function NotificationsCard() {
         disk_warning_percent: Number(settings.disk_warning_percent),
         disk_critical_percent: Number(settings.disk_critical_percent),
         cooldown_minutes: Number(settings.cooldown_minutes),
+        notify_node_offline: settings.notify_node_offline,
+        notify_node_online: settings.notify_node_online,
+        node_offline_grace_minutes: Number(settings.node_offline_grace_minutes),
       }
       const response = await api.updateNotificationSettings(payload)
       setSettings((current: NotificationSettings) => ({
@@ -208,6 +211,17 @@ export function NotificationsCard() {
                 />
               </label>
             ))}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-200">
+              <input type="checkbox" checked={settings.notify_node_offline} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, notify_node_offline: event.target.checked }))} />
+              {t("settingsPage.notifyNodeOffline")}
+            </label>
+            <label className="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-200">
+              <input type="checkbox" checked={settings.notify_node_online} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, notify_node_online: event.target.checked }))} />
+              {t("settingsPage.notifyNodeOnline")}
+            </label>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

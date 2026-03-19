@@ -32,6 +32,9 @@ describe("notifications card", () => {
       disk_warning_percent: 82,
       disk_critical_percent: 92,
       cooldown_minutes: 15,
+      notify_node_offline: true,
+      notify_node_online: true,
+      node_offline_grace_minutes: 2,
     })
     updateNotificationSettingsMock.mockResolvedValue({
       enabled: true,
@@ -45,6 +48,9 @@ describe("notifications card", () => {
       disk_warning_percent: 82,
       disk_critical_percent: 92,
       cooldown_minutes: 15,
+      notify_node_offline: true,
+      notify_node_online: true,
+      node_offline_grace_minutes: 2,
     })
     sendTestNotificationMock.mockResolvedValue({ ok: true })
   })
@@ -65,6 +71,9 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token: "123:abc",
       telegram_targets: [{ chat_id: "-100123", topic_id: 99, name: "Ops" }],
+      notify_node_offline: true,
+      notify_node_online: true,
+      node_offline_grace_minutes: 2,
     })
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
   })

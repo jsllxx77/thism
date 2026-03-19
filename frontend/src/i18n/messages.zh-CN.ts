@@ -174,6 +174,9 @@ export const messagesZhCN = {
       diskWarningThreshold: "磁盘告警阈值 %",
       diskCriticalThreshold: "磁盘严重阈值 %",
       notificationCooldownMinutes: "冷却时间（分钟）",
+      notifyNodeOffline: "节点离线时通知",
+      notifyNodeOnline: "节点恢复在线时通知",
+      nodeOfflineGraceMinutes: "离线宽限时间（分钟）",
     },
     addNodeModal: {
       title: "添加节点",

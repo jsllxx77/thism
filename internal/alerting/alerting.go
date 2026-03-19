@@ -14,8 +14,11 @@ type Sender interface {
 }
 
 type Evaluator struct {
-	Store  *store.Store
-	Sender Sender
+	Store            *store.Store
+	Sender           Sender
+	Now              func() time.Time
+	OfflineThreshold time.Duration
+	statusState      map[string]bool
 }
 
 type eventState struct {
@@ -73,6 +76,55 @@ func (e *Evaluator) Process(node *models.Node, metrics *models.MetricsPayload) e
 		}
 	}
 	return nil
+}
+
+func (e *Evaluator) ProcessHeartbeat(node *models.Node, online bool, observedAt int64) error {
+	if e == nil || e.Store == nil || e.Sender == nil || node == nil {
+		return nil
+	}
+	settings, err := e.Store.GetNotificationSettings()
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled || settings.Channel != string(models.NotificationChannelTelegram) || len(settings.TelegramTargets) == 0 {
+		return nil
+	}
+	if e.statusState == nil {
+		e.statusState = make(map[string]bool)
+	}
+	previous, ok := e.statusState[node.ID]
+	if !ok {
+		e.statusState[node.ID] = online
+		return nil
+	}
+	if previous == online {
+		return nil
+	}
+	e.statusState[node.ID] = online
+	if observedAt <= 0 {
+		observedAt = e.now().Unix()
+	}
+	if !online && !settings.NotifyNodeOffline {
+		return nil
+	}
+	if online && !settings.NotifyNodeOnline {
+		return nil
+	}
+	event := models.AlertEvent{
+		NodeID:     node.ID,
+		NodeName:   firstNonEmpty(node.Name, node.ID),
+		Metric:     models.ResourceMetricNodeStatus,
+		Severity:   models.AlertSeverityInfo,
+		ObservedAt: observedAt,
+	}
+	if online {
+		event.Value = 1
+		event.Threshold = 1
+	} else {
+		event.Value = 0
+		event.Threshold = 0
+	}
+	return e.Sender.Send(settings, event)
 }
 
 func evaluateStates(metrics *models.MetricsPayload, settings models.NotificationSettings) []eventState {
@@ -146,6 +198,20 @@ func clampPercent(value float64) float64 {
 		return 100
 	}
 	return math.Round(value*10) / 10
+}
+
+func (e *Evaluator) OfflineGrace(settings models.NotificationSettings) time.Duration {
+	if e != nil && e.OfflineThreshold > 0 {
+		return e.OfflineThreshold
+	}
+	return time.Duration(settings.NodeOfflineGraceMinutes) * time.Minute
+}
+
+func (e *Evaluator) now() time.Time {
+	if e != nil && e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
 }
 
 func firstNonEmpty(values ...string) string {
