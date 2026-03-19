@@ -217,13 +217,35 @@ export function NotificationsCard() {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-              <input type="checkbox" checked={settings.notify_node_offline} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, notify_node_offline: event.target.checked }))} />
-              {t("settingsPage.notifyNodeOffline")}
+            <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOffline")}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.notify_node_offline}
+                aria-label={t("settingsPage.notifyNodeOffline")}
+                onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_node_offline: !current.notify_node_offline }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_node_offline ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_node_offline ? "translate-x-5" : "translate-x-1"}`}
+                />
+              </button>
             </label>
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-              <input type="checkbox" checked={settings.notify_node_online} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, notify_node_online: event.target.checked }))} />
-              {t("settingsPage.notifyNodeOnline")}
+            <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOnline")}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.notify_node_online}
+                aria-label={t("settingsPage.notifyNodeOnline")}
+                onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_node_online: !current.notify_node_online }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_node_online ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_node_online ? "translate-x-5" : "translate-x-1"}`}
+                />
+              </button>
             </label>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
               {t("settingsPage.nodeOfflineGraceMinutes")}
