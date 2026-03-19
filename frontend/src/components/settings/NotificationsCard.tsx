@@ -26,6 +26,7 @@ export function NotificationsCard() {
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -68,6 +69,15 @@ export function NotificationsCard() {
     }))
   }
 
+  const buildTargetsPayload = (targets: TelegramTarget[]) =>
+    targets
+      .filter((target: TelegramTarget) => target.chat_id.trim() !== "")
+      .map((target: TelegramTarget) => ({
+        name: target.name?.trim() ?? "",
+        chat_id: target.chat_id.trim(),
+        topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
+      }))
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -78,13 +88,7 @@ export function NotificationsCard() {
         enabled: settings.enabled,
         channel: settings.channel,
         telegram_bot_token: settings.telegram_bot_token,
-        telegram_targets: settings.telegram_targets
-          .filter((target: TelegramTarget) => target.chat_id.trim() !== "")
-          .map((target: TelegramTarget) => ({
-            name: target.name?.trim() ?? "",
-            chat_id: target.chat_id.trim(),
-            topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
-          })),
+        telegram_targets: buildTargetsPayload(settings.telegram_targets),
         cpu_warning_percent: Number(settings.cpu_warning_percent),
         cpu_critical_percent: Number(settings.cpu_critical_percent),
         mem_warning_percent: Number(settings.mem_warning_percent),
@@ -105,6 +109,24 @@ export function NotificationsCard() {
       setError(err instanceof Error ? err.message : t("settingsPage.notificationsSaveFailed"))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleSendTest = async () => {
+    setTesting(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const targets = buildTargetsPayload(settings.telegram_targets)
+      await api.sendTestNotification({
+        telegram_bot_token: settings.telegram_bot_token,
+        target: targets[0],
+      })
+      setSuccess(t("settingsPage.notificationsTestSent"))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("settingsPage.notificationsTestFailed"))
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -189,8 +211,11 @@ export function NotificationsCard() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" disabled={saving} className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium">
+            <Button type="submit" disabled={saving || testing} className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium">
               {saving ? t("settingsPage.notificationsSaving") : t("settingsPage.notificationsSave")}
+            </Button>
+            <Button type="button" disabled={saving || testing} className="h-10 rounded-xl px-4 text-sm font-medium" onClick={() => void handleSendTest()}>
+              {testing ? t("settingsPage.notificationsTesting") : t("settingsPage.notificationsTestSend")}
             </Button>
             {success && <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{success}</p>}
             {error && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">{error}</p>}

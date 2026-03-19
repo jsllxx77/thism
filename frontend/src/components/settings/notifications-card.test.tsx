@@ -5,11 +5,13 @@ import { NotificationsCard } from "./NotificationsCard"
 
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
+const sendTestNotificationMock = vi.fn()
 
 vi.mock("../../lib/api", () => ({
   api: {
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
+    sendTestNotification: (...args: unknown[]) => sendTestNotificationMock(...args),
   },
 }))
 
@@ -17,6 +19,7 @@ describe("notifications card", () => {
   beforeEach(() => {
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
+    sendTestNotificationMock.mockReset()
     notificationSettingsMock.mockResolvedValue({
       enabled: true,
       channel: "telegram",
@@ -43,6 +46,7 @@ describe("notifications card", () => {
       disk_critical_percent: 92,
       cooldown_minutes: 15,
     })
+    sendTestNotificationMock.mockResolvedValue({ ok: true })
   })
 
   it("loads notification settings and saves telegram targets", async () => {
@@ -63,5 +67,20 @@ describe("notifications card", () => {
       telegram_targets: [{ chat_id: "-100123", topic_id: 99, name: "Ops" }],
     })
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
+  })
+
+  it("sends a test notification to the first telegram target", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByRole("button", { name: "Send test notification" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Send test notification" }))
+
+    await waitFor(() => expect(sendTestNotificationMock).toHaveBeenCalled())
+    expect(sendTestNotificationMock).toHaveBeenCalledWith({
+      telegram_bot_token: "",
+      target: { name: "Ops", chat_id: "-100123", topic_id: 99 },
+    })
+    expect(await screen.findByText("Test notification sent.")).toBeInTheDocument()
   })
 })

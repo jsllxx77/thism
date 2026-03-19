@@ -184,6 +184,15 @@ export type NotificationSettings = {
   cooldown_minutes: number
 }
 
+export type TestNotificationRequest = {
+  telegram_bot_token?: string
+  target?: TelegramTarget
+}
+
+export type TestNotificationResponse = {
+  ok: boolean
+}
+
 export type VersionMeta = {
   version: string
   commit: string
@@ -249,6 +258,11 @@ export const api = {
     req<NotificationSettings>("/api/settings/notifications", {
       method: "PUT",
       body: JSON.stringify(settings),
+    }),
+  sendTestNotification: (payload: TestNotificationRequest) =>
+    req<TestNotificationResponse>("/api/settings/notifications/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
   versionMeta: () => req<VersionMeta>("/api/meta/version"),
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),

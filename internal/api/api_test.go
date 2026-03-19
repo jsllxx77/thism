@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"github.com/thism-dev/thism/internal/api"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/notify"
 	"github.com/thism-dev/thism/internal/store"
 	sharedversion "github.com/thism-dev/thism/internal/version"
 	_ "modernc.org/sqlite"
@@ -1513,5 +1515,78 @@ func TestUpdateMetricsRetentionRejectsInvalidValue(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestNotificationSettingsRoundTripEndpoints(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/notifications", bytes.NewBufferString(`{"enabled":true,"channel":"telegram","telegram_bot_token":"123:abc","telegram_targets":[{"name":"Ops","chat_id":"-100123","topic_id":99}],"cpu_warning_percent":80,"cpu_critical_percent":90,"mem_warning_percent":81,"mem_critical_percent":91,"disk_warning_percent":82,"disk_critical_percent":92,"cooldown_minutes":15}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", putResp.Code, putResp.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/notifications", nil)
+	getReq.Header.Set("Authorization", "Bearer test-admin-token")
+	getResp := httptest.NewRecorder()
+	router.ServeHTTP(getResp, getReq)
+
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getResp.Code, getResp.Body.String())
+	}
+
+	var view map[string]any
+	if err := json.Unmarshal(getResp.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if view["telegram_bot_token_set"] != true {
+		t.Fatalf("expected token flag true, got %#v", view["telegram_bot_token_set"])
+	}
+}
+
+func TestSendTestNotificationRequiresTargetAndToken(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/notifications/test", bytes.NewBufferString(`{}`))
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+type testRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestTelegramSenderTestEndpointAcceptsTopicTarget(t *testing.T) {
+	client := &http.Client{Transport: testRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		text := string(body)
+		if !strings.Contains(text, `"message_thread_id":99`) {
+			t.Fatalf("expected topic id in payload, got %s", text)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Header: make(http.Header)}, nil
+	})}
+	sender := notify.NewTelegramSender(client)
+	err := sender.Send(models.NotificationSettings{TelegramBotToken: "123:abc", TelegramTargets: []models.TelegramTarget{{ChatID: "-100123", TopicID: 99}}}, models.AlertEvent{NodeName: "Thism Control Plane", Metric: models.ResourceMetricCPU, Severity: models.AlertSeverityWarning, Value: 42, Threshold: 80, ObservedAt: 1710000000})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
 	}
 }

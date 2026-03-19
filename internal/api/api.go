@@ -359,6 +359,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		r.Get("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
 			handleGetMetricsRetention(w, req, s)
 		})
+
+		r.Get("/api/settings/notifications", func(w http.ResponseWriter, req *http.Request) {
+			handleGetNotificationSettings(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -373,6 +377,14 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 		r.Put("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdateMetricsRetention(w, req, s)
+		})
+
+		r.Put("/api/settings/notifications", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateNotificationSettings(w, req, s)
+		})
+
+		r.Post("/api/settings/notifications/test", func(w http.ResponseWriter, req *http.Request) {
+			handleSendTestNotification(w, req, s)
 		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
@@ -1355,6 +1367,98 @@ func handleGetMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.
 		"retention_days": days,
 		"options":        store.MetricsRetentionOptions(),
 	})
+}
+
+func handleGetNotificationSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	view, err := s.NotificationSettingsView(false)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func handleUpdateNotificationSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	current, err := s.GetNotificationSettings()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	var reqBody models.NotificationSettings
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if strings.TrimSpace(reqBody.TelegramBotToken) == "" {
+		reqBody.TelegramBotToken = current.TelegramBotToken
+	}
+	if err := s.UpsertNotificationSettings(reqBody); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	view, err := s.NotificationSettingsView(false)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func handleSendTestNotification(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	stored, err := s.GetNotificationSettings()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	var reqBody struct {
+		TelegramBotToken string                 `json:"telegram_bot_token"`
+		Target           *models.TelegramTarget `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if strings.TrimSpace(reqBody.TelegramBotToken) != "" {
+		stored.TelegramBotToken = reqBody.TelegramBotToken
+	}
+	if reqBody.Target != nil {
+		stored.TelegramTargets = []models.TelegramTarget{reqBody.Target.Normalized()}
+	}
+	if strings.TrimSpace(stored.TelegramBotToken) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "telegram bot token is required"})
+		return
+	}
+	if len(stored.TelegramTargets) == 0 || strings.TrimSpace(stored.TelegramTargets[0].ChatID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one telegram target is required"})
+		return
+	}
+	sender := notify.NewTelegramSender(nil)
+	err = sender.Send(stored, models.AlertEvent{
+		NodeID:     "test-node",
+		NodeName:   "Thism Control Plane",
+		Metric:     models.ResourceMetricCPU,
+		Severity:   models.AlertSeverityWarning,
+		Value:      42,
+		Threshold:  80,
+		ObservedAt: time.Now().Unix(),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func handleGetVersionMetadata(w http.ResponseWriter, _ *http.Request) {
