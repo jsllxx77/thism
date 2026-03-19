@@ -7,6 +7,9 @@ const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const notificationSettingsMock = vi.fn()
+const updateNotificationSettingsMock = vi.fn()
+const versionMetaMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -15,6 +18,9 @@ vi.mock("../lib/api", () => ({
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
+    updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
+    versionMeta: (...args: unknown[]) => versionMetaMock(...args),
   },
 }))
 
@@ -35,9 +41,39 @@ describe("settings page states", () => {
     agentReleaseMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    notificationSettingsMock.mockReset()
+    updateNotificationSettingsMock.mockReset()
+    versionMetaMock.mockReset()
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    notificationSettingsMock.mockResolvedValue({
+      enabled: false,
+      channel: "telegram",
+      telegram_bot_token_set: false,
+      telegram_targets: [],
+      cpu_warning_percent: 85,
+      cpu_critical_percent: 95,
+      mem_warning_percent: 85,
+      mem_critical_percent: 95,
+      disk_warning_percent: 85,
+      disk_critical_percent: 95,
+      cooldown_minutes: 30,
+    })
+    updateNotificationSettingsMock.mockResolvedValue({
+      enabled: false,
+      channel: "telegram",
+      telegram_bot_token_set: false,
+      telegram_targets: [],
+      cpu_warning_percent: 85,
+      cpu_critical_percent: 95,
+      mem_warning_percent: 85,
+      mem_critical_percent: 95,
+      disk_warning_percent: 85,
+      disk_critical_percent: 95,
+      cooldown_minutes: 30,
+    })
+    versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
   })
 
   it("shows a loading state while settings data is pending", async () => {

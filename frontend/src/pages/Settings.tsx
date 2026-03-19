@@ -3,6 +3,7 @@ import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
+import { NotificationsCard } from "../components/settings/NotificationsCard"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { useLanguage } from "../i18n/language"
@@ -171,6 +172,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
       <AgentAutoUpdateCard />
       <MetricsRetentionCard />
+      <NotificationsCard />
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>

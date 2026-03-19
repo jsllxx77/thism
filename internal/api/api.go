@@ -22,8 +22,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	"github.com/thism-dev/thism/internal/alerting"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/notify"
 	"github.com/thism-dev/thism/internal/security"
 	"github.com/thism-dev/thism/internal/store"
 	sharedversion "github.com/thism-dev/thism/internal/version"
@@ -2100,6 +2102,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 // -----------------------------------------------------------------------
 
 func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	alertEvaluator := &alerting.Evaluator{Store: s, Sender: notify.NewTelegramSender(nil)}
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		// Also accept bearer token in header for agent connections.
@@ -2207,6 +2210,10 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			} else {
 				log.Printf("agent metrics: marshal docker snapshot for node %s failed: %v", node.ID, err)
 			}
+		}
+
+		if err := alertEvaluator.Process(node, &payload); err != nil {
+			log.Printf("agent metrics: evaluate alerts for node %s failed: %v", node.ID, err)
 		}
 
 		// Broadcast metrics to dashboard subscribers, wrapped with node_id.

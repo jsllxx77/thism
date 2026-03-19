@@ -1,0 +1,67 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { NotificationsCard } from "./NotificationsCard"
+
+const notificationSettingsMock = vi.fn()
+const updateNotificationSettingsMock = vi.fn()
+
+vi.mock("../../lib/api", () => ({
+  api: {
+    notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
+    updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
+  },
+}))
+
+describe("notifications card", () => {
+  beforeEach(() => {
+    notificationSettingsMock.mockReset()
+    updateNotificationSettingsMock.mockReset()
+    notificationSettingsMock.mockResolvedValue({
+      enabled: true,
+      channel: "telegram",
+      telegram_bot_token_set: true,
+      telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      cpu_warning_percent: 80,
+      cpu_critical_percent: 90,
+      mem_warning_percent: 81,
+      mem_critical_percent: 91,
+      disk_warning_percent: 82,
+      disk_critical_percent: 92,
+      cooldown_minutes: 15,
+    })
+    updateNotificationSettingsMock.mockResolvedValue({
+      enabled: true,
+      channel: "telegram",
+      telegram_bot_token_set: true,
+      telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      cpu_warning_percent: 80,
+      cpu_critical_percent: 90,
+      mem_warning_percent: 81,
+      mem_critical_percent: 91,
+      disk_warning_percent: 82,
+      disk_critical_percent: 92,
+      cooldown_minutes: 15,
+    })
+  })
+
+  it("loads notification settings and saves telegram targets", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
+    expect(screen.getByDisplayValue("-100123")).toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("Telegram bot token"))
+    await user.type(screen.getByLabelText("Telegram bot token"), "123:abc")
+    await user.click(screen.getByRole("button", { name: "Save notifications" }))
+
+    await waitFor(() => expect(updateNotificationSettingsMock).toHaveBeenCalled())
+    expect(updateNotificationSettingsMock.mock.calls[0][0]).toMatchObject({
+      channel: "telegram",
+      telegram_bot_token: "123:abc",
+      telegram_targets: [{ chat_id: "-100123", topic_id: 99, name: "Ops" }],
+    })
+    expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
+  })
+})

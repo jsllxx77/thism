@@ -373,3 +373,60 @@ func TestStoreMetricsRetentionRoundTrip(t *testing.T) {
 		t.Fatal("expected unsupported retention value to fail")
 	}
 }
+
+func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	settings := models.NotificationSettings{
+		Enabled:             true,
+		Channel:             string(models.NotificationChannelTelegram),
+		TelegramBotToken:    "secret-token",
+		TelegramTargets:     []models.TelegramTarget{{Name: "Ops", ChatID: "-100123", TopicID: 42}},
+		CPUWarningPercent:   80,
+		CPUCriticalPercent:  90,
+		MemWarningPercent:   81,
+		MemCriticalPercent:  91,
+		DiskWarningPercent:  82,
+		DiskCriticalPercent: 92,
+		CooldownMinutes:     15,
+	}
+	if err := s.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+	stored, err := s.GetNotificationSettings()
+	if err != nil {
+		t.Fatalf("GetNotificationSettings: %v", err)
+	}
+	if stored.TelegramBotToken != "secret-token" || len(stored.TelegramTargets) != 1 || stored.TelegramTargets[0].TopicID != 42 {
+		t.Fatalf("unexpected stored notification settings: %#v", stored)
+	}
+	view, err := s.NotificationSettingsView(false)
+	if err != nil {
+		t.Fatalf("NotificationSettingsView: %v", err)
+	}
+	if !view.TelegramBotTokenSet || view.TelegramBotToken != "" {
+		t.Fatalf("expected masked token in notification settings view, got %#v", view)
+	}
+	allowed, err := s.ShouldSendAlert("node-1", "cpu", "critical", 30*time.Minute, 1000)
+	if err != nil || !allowed {
+		t.Fatalf("expected first alert to be allowed, got allowed=%v err=%v", allowed, err)
+	}
+	if err := s.RecordAlertDelivery("node-1", "cpu", "critical", 95, 90, 1000); err != nil {
+		t.Fatalf("RecordAlertDelivery: %v", err)
+	}
+	allowed, err = s.ShouldSendAlert("node-1", "cpu", "critical", 30*time.Minute, 1200)
+	if err != nil {
+		t.Fatalf("ShouldSendAlert cooldown: %v", err)
+	}
+	if allowed {
+		t.Fatal("expected cooldown window to suppress duplicate alert")
+	}
+	allowed, err = s.ShouldSendAlert("node-1", "cpu", "critical", 30*time.Minute, 3000)
+	if err != nil || !allowed {
+		t.Fatalf("expected alert after cooldown to be allowed, got allowed=%v err=%v", allowed, err)
+	}
+}

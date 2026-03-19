@@ -223,6 +223,12 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ retention_days: retentionDays }),
     }),
+  notificationSettings: () => req<NotificationSettings>("/api/settings/notifications"),
+  updateNotificationSettings: (settings: Omit<NotificationSettings, "telegram_bot_token_set">) =>
+    req<NotificationSettings>("/api/settings/notifications", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
   versionMeta: () => req<VersionMeta>("/api/meta/version"),
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),
 }

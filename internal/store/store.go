@@ -21,6 +21,7 @@ type Store struct {
 const DefaultMetricsRetentionDays = 7
 
 const metricsRetentionSettingKey = "metrics_retention_days"
+const notificationSettingsKey = "notification_settings"
 
 var metricsRetentionOptions = []int{7, 30}
 
@@ -204,6 +205,16 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value      TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS alert_deliveries (
+    node_id      TEXT NOT NULL,
+    metric       TEXT NOT NULL,
+    severity     TEXT NOT NULL,
+    value        REAL NOT NULL DEFAULT 0,
+    threshold    REAL NOT NULL DEFAULT 0,
+    delivered_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (node_id, metric, severity)
+);
 `)
 	if err != nil {
 		return err
@@ -277,6 +288,159 @@ ON CONFLICT(key) DO UPDATE SET
 	value = excluded.value,
 	updated_at = excluded.updated_at
 `, metricsRetentionSettingKey, strconv.Itoa(days), time.Now().Unix())
+	return err
+}
+
+func defaultNotificationSettings() models.NotificationSettings {
+	return models.NotificationSettings{
+		Enabled:             false,
+		Channel:             string(models.NotificationChannelTelegram),
+		TelegramTargets:     []models.TelegramTarget{},
+		CPUWarningPercent:   85,
+		CPUCriticalPercent:  95,
+		MemWarningPercent:   85,
+		MemCriticalPercent:  95,
+		DiskWarningPercent:  85,
+		DiskCriticalPercent: 95,
+		CooldownMinutes:     30,
+	}
+}
+
+func normalizeNotificationSettings(settings models.NotificationSettings) models.NotificationSettings {
+	defaults := defaultNotificationSettings()
+	if strings.TrimSpace(settings.Channel) == "" {
+		settings.Channel = defaults.Channel
+	}
+	if settings.CPUWarningPercent <= 0 {
+		settings.CPUWarningPercent = defaults.CPUWarningPercent
+	}
+	if settings.CPUCriticalPercent <= 0 {
+		settings.CPUCriticalPercent = defaults.CPUCriticalPercent
+	}
+	if settings.MemWarningPercent <= 0 {
+		settings.MemWarningPercent = defaults.MemWarningPercent
+	}
+	if settings.MemCriticalPercent <= 0 {
+		settings.MemCriticalPercent = defaults.MemCriticalPercent
+	}
+	if settings.DiskWarningPercent <= 0 {
+		settings.DiskWarningPercent = defaults.DiskWarningPercent
+	}
+	if settings.DiskCriticalPercent <= 0 {
+		settings.DiskCriticalPercent = defaults.DiskCriticalPercent
+	}
+	if settings.CooldownMinutes <= 0 {
+		settings.CooldownMinutes = defaults.CooldownMinutes
+	}
+	cleanTargets := make([]models.TelegramTarget, 0, len(settings.TelegramTargets))
+	for _, target := range settings.TelegramTargets {
+		normalized := target.Normalized()
+		if normalized.ChatID == "" {
+			continue
+		}
+		cleanTargets = append(cleanTargets, normalized)
+	}
+	settings.TelegramTargets = cleanTargets
+	return settings
+}
+
+func (s *Store) GetNotificationSettings() (models.NotificationSettings, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, notificationSettingsKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return defaultNotificationSettings(), nil
+	}
+	if err != nil {
+		return models.NotificationSettings{}, err
+	}
+	var settings models.NotificationSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return defaultNotificationSettings(), nil
+	}
+	return normalizeNotificationSettings(settings), nil
+}
+
+func (s *Store) UpsertNotificationSettings(settings models.NotificationSettings) error {
+	settings = normalizeNotificationSettings(settings)
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, notificationSettingsKey, string(raw), time.Now().Unix())
+	return err
+}
+
+func (s *Store) NotificationSettingsView(includeSecret bool) (models.NotificationSettingsView, error) {
+	settings, err := s.GetNotificationSettings()
+	if err != nil {
+		return models.NotificationSettingsView{}, err
+	}
+	view := models.NotificationSettingsView{
+		Enabled:             settings.Enabled,
+		Channel:             settings.Channel,
+		TelegramBotTokenSet: strings.TrimSpace(settings.TelegramBotToken) != "",
+		TelegramTargets:     settings.TelegramTargets,
+		CPUWarningPercent:   settings.CPUWarningPercent,
+		CPUCriticalPercent:  settings.CPUCriticalPercent,
+		MemWarningPercent:   settings.MemWarningPercent,
+		MemCriticalPercent:  settings.MemCriticalPercent,
+		DiskWarningPercent:  settings.DiskWarningPercent,
+		DiskCriticalPercent: settings.DiskCriticalPercent,
+		CooldownMinutes:     settings.CooldownMinutes,
+	}
+	if includeSecret {
+		view.TelegramBotToken = settings.TelegramBotToken
+	}
+	return view, nil
+}
+
+func (s *Store) ShouldSendAlert(nodeID, metric, severity string, cooldown time.Duration, now int64) (bool, error) {
+	if cooldown <= 0 {
+		return true, nil
+	}
+	var deliveredAt int64
+	err := s.db.QueryRow(`SELECT delivered_at FROM alert_deliveries WHERE node_id = ? AND metric = ? AND severity = ?`, nodeID, metric, severity).Scan(&deliveredAt)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return now-deliveredAt >= int64(cooldown.Seconds()), nil
+}
+
+func (s *Store) RecordAlertDelivery(nodeID, metric, severity string, value, threshold float64, deliveredAt int64) error {
+	_, err := s.db.Exec(`
+INSERT INTO alert_deliveries (node_id, metric, severity, value, threshold, delivered_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(node_id, metric, severity) DO UPDATE SET
+	value = excluded.value,
+	threshold = excluded.threshold,
+	delivered_at = excluded.delivered_at
+`, nodeID, metric, severity, value, threshold, deliveredAt)
+	return err
+}
+
+func (s *Store) HasActiveAlertDelivery(nodeID, metric string) (bool, error) {
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM alert_deliveries WHERE node_id = ? AND metric = ? LIMIT 1`, nodeID, metric).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) ClearAlertDelivery(nodeID, metric string) error {
+	_, err := s.db.Exec(`DELETE FROM alert_deliveries WHERE node_id = ? AND metric = ?`, nodeID, metric)
 	return err
 }
 
@@ -757,6 +921,7 @@ func (s *Store) DeleteNode(nodeID string) error {
 		`DELETE FROM docker_containers WHERE node_id = ?`,
 		`DELETE FROM service_checks WHERE node_id = ?`,
 		`DELETE FROM update_job_targets WHERE node_id = ?`,
+		`DELETE FROM alert_deliveries WHERE node_id = ?`,
 		`DELETE FROM nodes WHERE id = ?`,
 	}
 	for _, stmt := range stmts {
