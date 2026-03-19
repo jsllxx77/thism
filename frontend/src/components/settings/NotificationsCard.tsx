@@ -225,6 +225,16 @@ export function NotificationsCard() {
               <input type="checkbox" checked={settings.notify_node_online} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, notify_node_online: event.target.checked }))} />
               {t("settingsPage.notifyNodeOnline")}
             </label>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              {t("settingsPage.nodeOfflineGraceMinutes")}
+              <Input
+                type="number"
+                min="0"
+                value={String(settings.node_offline_grace_minutes ?? 0)}
+                onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, node_offline_grace_minutes: Number(event.target.value) }))}
+                className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+              />
+            </label>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
