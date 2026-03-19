@@ -19,6 +19,9 @@ const defaultState: NotificationSettings = {
   disk_warning_percent: 85,
   disk_critical_percent: 95,
   cooldown_minutes: 30,
+  notify_node_offline: true,
+  notify_node_online: false,
+  node_offline_grace_minutes: 2,
 }
 
 export function NotificationsCard() {
