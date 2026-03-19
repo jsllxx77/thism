@@ -163,6 +163,27 @@ export type MetricsRetentionSettings = {
   options: number[]
 }
 
+export type TelegramTarget = {
+  name?: string
+  chat_id: string
+  topic_id?: number
+}
+
+export type NotificationSettings = {
+  enabled: boolean
+  channel: "telegram"
+  telegram_bot_token?: string
+  telegram_bot_token_set: boolean
+  telegram_targets: TelegramTarget[]
+  cpu_warning_percent: number
+  cpu_critical_percent: number
+  mem_warning_percent: number
+  mem_critical_percent: number
+  disk_warning_percent: number
+  disk_critical_percent: number
+  cooldown_minutes: number
+}
+
 export type VersionMeta = {
   version: string
   commit: string

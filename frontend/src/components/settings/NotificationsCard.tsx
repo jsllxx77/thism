@@ -60,9 +60,11 @@ export function NotificationsCard() {
   }, [t])
 
   const updateTarget = (index: number, patch: Partial<TelegramTarget>) => {
-    setSettings((current) => ({
+    setSettings((current: NotificationSettings) => ({
       ...current,
-      telegram_targets: current.telegram_targets.map((target, idx) => idx === index ? { ...target, ...patch } : target),
+      telegram_targets: current.telegram_targets.map((target: TelegramTarget, idx: number) =>
+        idx === index ? { ...target, ...patch } : target,
+      ),
     }))
   }
 
@@ -76,11 +78,13 @@ export function NotificationsCard() {
         enabled: settings.enabled,
         channel: settings.channel,
         telegram_bot_token: settings.telegram_bot_token,
-        telegram_targets: settings.telegram_targets.filter((target) => target.chat_id.trim() !== "").map((target) => ({
-          name: target.name?.trim() ?? "",
-          chat_id: target.chat_id.trim(),
-          topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
-        })),
+        telegram_targets: settings.telegram_targets
+          .filter((target: TelegramTarget) => target.chat_id.trim() !== "")
+          .map((target: TelegramTarget) => ({
+            name: target.name?.trim() ?? "",
+            chat_id: target.chat_id.trim(),
+            topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
+          })),
         cpu_warning_percent: Number(settings.cpu_warning_percent),
         cpu_critical_percent: Number(settings.cpu_critical_percent),
         mem_warning_percent: Number(settings.mem_warning_percent),
@@ -90,7 +94,7 @@ export function NotificationsCard() {
         cooldown_minutes: Number(settings.cooldown_minutes),
       }
       const response = await api.updateNotificationSettings(payload)
-      setSettings((current) => ({
+      setSettings((current: NotificationSettings) => ({
         ...current,
         ...response,
         telegram_bot_token: "",
@@ -121,7 +125,7 @@ export function NotificationsCard() {
       ) : (
         <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
           <label className="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-            <input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings((current) => ({ ...current, enabled: event.target.checked }))} />
+            <input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, enabled: event.target.checked }))} />
             {t("settingsPage.notificationsEnabled")}
           </label>
 
@@ -131,7 +135,7 @@ export function NotificationsCard() {
               type="password"
               aria-label={t("settingsPage.telegramBotToken")}
               value={settings.telegram_bot_token ?? ""}
-              onChange={(event) => setSettings((current) => ({ ...current, telegram_bot_token: event.target.value }))}
+              onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, telegram_bot_token: event.target.value }))}
               placeholder={settings.telegram_bot_token_set ? t("settingsPage.telegramBotTokenConfigured") : "123456:ABC..."}
               className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
             />
@@ -140,7 +144,7 @@ export function NotificationsCard() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.telegramTargets")}</p>
-              <Button type="button" className="h-9 rounded-xl px-3 text-xs" onClick={() => setSettings((current) => ({ ...current, telegram_targets: [...current.telegram_targets, defaultTarget()] }))}>
+              <Button type="button" className="h-9 rounded-xl px-3 text-xs" onClick={() => setSettings((current: NotificationSettings) => ({ ...current, telegram_targets: [...current.telegram_targets, defaultTarget()] }))}>
                 {t("settingsPage.addTelegramTarget")}
               </Button>
             </div>
@@ -177,7 +181,7 @@ export function NotificationsCard() {
                 <Input
                   type="number"
                   value={String(settings[field as keyof NotificationSettings] ?? "")}
-                  onChange={(event) => setSettings((current) => ({ ...current, [field]: Number(event.target.value) }))}
+                  onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, [field]: Number(event.target.value) }))}
                   className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
                 />
               </label>
