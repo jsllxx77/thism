@@ -145,4 +145,25 @@ describe("settings nodes table", () => {
     expect(screen.getByText("cda21ec8f20b")).toBeInTheDocument()
     expect(screen.getByText("—")).toBeInTheDocument()
   })
+
+  it("renders a recently seen offline node as online to match dashboard grace period", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1772755260000)
+
+    render(
+      <NodesTable
+        nodes={[
+          node({ id: "n1", name: "alpha", online: true, last_seen: 1772755260 }),
+          node({ id: "n2", name: "beta", online: false, last_seen: 1772755250 }),
+          node({ id: "n3", name: "gamma", online: false, last_seen: 1772755240 }),
+        ]}
+      />
+    )
+
+    await Promise.resolve()
+    expect(screen.getByText("beta")).toBeInTheDocument()
+    const onlineCells = screen.getAllByText("Online")
+    const offlineCells = screen.getAllByText("Offline")
+    expect(onlineCells.length).toBeGreaterThanOrEqual(2)
+    expect(offlineCells.length).toBeGreaterThanOrEqual(1)
+  })
 })

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { Settings } from "./Settings"
 
 const nodesMock = vi.fn()
@@ -142,5 +142,40 @@ describe("settings page states", () => {
     await waitFor(() => {
       expect(nodesMock).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it("shows recently seen nodes as online during the same grace period used by the dashboard", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-03-06T00:01:00Z"))
+
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "node-1",
+          name: "alpha",
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          created_at: 0,
+          last_seen: 1772755260,
+          online: false,
+        },
+      ],
+    })
+
+    render(<Settings />)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+    expect(screen.getAllByText("Online").length).toBeGreaterThanOrEqual(1)
+
+    act(() => {
+      vi.advanceTimersByTime(16_000)
+    })
+
+    expect(screen.getAllByText("Offline").length).toBeGreaterThanOrEqual(1)
   })
 })

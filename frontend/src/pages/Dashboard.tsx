@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { Activity } from "lucide-react"
 import { api, type AccessMode, type Node } from "../lib/api"
+import { withEffectiveNodeStatus } from "../lib/node-status"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeCard } from "../components/NodeCard"
@@ -20,7 +21,6 @@ type LiveMetricsSample = {
   lastNet?: LiveNetSample
 }
 type LiveMetrics = Record<string, LiveMetricsSample>
-const ONLINE_GRACE_PERIOD_SECONDS = 15
 const NodeTable = lazy(async () => ({ default: (await import("../components/dashboard/NodeTable")).NodeTable }))
 
 function snapshotToLive(node: Node): LiveMetrics[string] | null {
@@ -38,13 +38,6 @@ function snapshotToLive(node: Node): LiveMetrics[string] | null {
   }
 
   return entry
-}
-
-function isNodeEffectivelyOnline(node: Node, nowMs: number): boolean {
-  if (node.online) return true
-  if (node.last_seen <= 0) return false
-
-  return Math.max(0, Math.floor(nowMs / 1000) - node.last_seen) <= ONLINE_GRACE_PERIOD_SECONDS
 }
 
 type Props = {
@@ -163,7 +156,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   }, [loadNodes])
 
   const effectiveNodes = useMemo(
-    () => nodes.map((node) => ({ ...node, online: isNodeEffectivelyOnline(node, nowMs) })),
+    () => nodes.map((node) => withEffectiveNodeStatus(node, nowMs)),
     [nodes, nowMs],
   )
 

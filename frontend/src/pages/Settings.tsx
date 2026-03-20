@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
@@ -9,6 +9,7 @@ import { Input } from "../components/ui/input"
 import { useLanguage } from "../i18n/language"
 import { api } from "../lib/api"
 import type { Node, VersionMeta } from "../lib/api"
+import { withEffectiveNodeStatus } from "../lib/node-status"
 import { MotionSection } from "../motion/transitions"
 
 type Props = {
@@ -31,6 +32,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
   const [versionMeta, setVersionMeta] = useState<VersionMeta | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const fetchNodes = useCallback(async () => {
     setLoadingNodes(true)
@@ -54,6 +56,18 @@ export function Settings({ refreshNonce = 0 }: Props) {
     if (refreshNonce === 0) return
     void fetchNodes()
   }, [fetchNodes, refreshNonce])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
+  const effectiveNodes = useMemo(() => nodes.map((node) => withEffectiveNodeStatus(node, nowMs)), [nodes, nowMs])
 
   const fetchVersionMeta = useCallback(async () => {
     setVersionError(null)
@@ -166,7 +180,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
             {t("No nodes registered yet")}
           </div>
         ) : (
-          <NodesTable nodes={nodes} onUpdated={fetchNodes} />
+          <NodesTable nodes={effectiveNodes} onUpdated={fetchNodes} />
         )}
       </div>
 
