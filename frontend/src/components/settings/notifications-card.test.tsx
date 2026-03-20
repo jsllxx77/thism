@@ -6,12 +6,14 @@ import { NotificationsCard } from "./NotificationsCard"
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const sendTestNotificationMock = vi.fn()
+const nodesMock = vi.fn()
 
 vi.mock("../../lib/api", () => ({
   api: {
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     sendTestNotification: (...args: unknown[]) => sendTestNotificationMock(...args),
+    nodes: (...args: unknown[]) => nodesMock(...args),
   },
 }))
 
@@ -20,11 +22,13 @@ describe("notifications card", () => {
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     sendTestNotificationMock.mockReset()
+    nodesMock.mockReset()
     notificationSettingsMock.mockResolvedValue({
       enabled: true,
       channel: "telegram",
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      enabled_node_ids: ["node-1"],
       cpu_warning_percent: 80,
       cpu_critical_percent: 90,
       mem_warning_percent: 81,
@@ -41,6 +45,7 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      enabled_node_ids: ["node-1"],
       cpu_warning_percent: 80,
       cpu_critical_percent: 90,
       mem_warning_percent: 81,
@@ -53,6 +58,12 @@ describe("notifications card", () => {
       node_offline_grace_minutes: 2,
     })
     sendTestNotificationMock.mockResolvedValue({ ok: true })
+    nodesMock.mockResolvedValue({
+      nodes: [
+        { id: "node-1", name: "Alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        { id: "node-2", name: "Beta", ip: "2.2.2.2", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: false },
+      ],
+    })
   })
 
   it("loads notification settings and saves telegram targets", async () => {
@@ -61,7 +72,10 @@ describe("notifications card", () => {
 
     expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
     expect(screen.getByDisplayValue("-100123")).toBeInTheDocument()
+    expect(screen.getByLabelText("Enable notification for Alpha")).toBeChecked()
+    expect(screen.getByLabelText("Enable notification for Beta")).not.toBeChecked()
 
+    await user.click(screen.getByLabelText("Enable notification for Beta"))
     await user.clear(screen.getByLabelText("Telegram bot token"))
     await user.type(screen.getByLabelText("Telegram bot token"), "123:abc")
     await user.click(screen.getByRole("button", { name: "Save notifications" }))
@@ -71,6 +85,7 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token: "123:abc",
       telegram_targets: [{ chat_id: "-100123", topic_id: 99, name: "Ops" }],
+      enabled_node_ids: ["node-1", "node-2"],
       notify_node_offline: true,
       notify_node_online: true,
       node_offline_grace_minutes: 2,

@@ -45,6 +45,7 @@ type NotificationSettings struct {
 	Channel                             string           `json:"channel"`
 	TelegramBotToken                    string           `json:"telegram_bot_token,omitempty"`
 	TelegramTargets                     []TelegramTarget `json:"telegram_targets,omitempty"`
+	EnabledNodeIDs                      []string         `json:"enabled_node_ids,omitempty"`
 	CPUWarningPercent                   float64          `json:"cpu_warning_percent"`
 	CPUCriticalPercent                  float64          `json:"cpu_critical_percent"`
 	MemWarningPercent                   float64          `json:"mem_warning_percent"`
@@ -65,6 +66,7 @@ type NotificationSettingsView struct {
 	TelegramBotTokenSet                 bool             `json:"telegram_bot_token_set"`
 	TelegramBotToken                    string           `json:"telegram_bot_token,omitempty"`
 	TelegramTargets                     []TelegramTarget `json:"telegram_targets,omitempty"`
+	EnabledNodeIDs                      []string         `json:"enabled_node_ids,omitempty"`
 	CPUWarningPercent                   float64          `json:"cpu_warning_percent"`
 	CPUCriticalPercent                  float64          `json:"cpu_critical_percent"`
 	MemWarningPercent                   float64          `json:"mem_warning_percent"`

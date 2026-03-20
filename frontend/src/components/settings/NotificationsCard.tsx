@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
-import { api, type NotificationSettings, type TelegramTarget } from "../../lib/api"
+import { api, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
 import { Input } from "../ui/input"
 
@@ -12,6 +12,7 @@ const defaultState: NotificationSettings = {
   telegram_bot_token_set: false,
   telegram_bot_token: "",
   telegram_targets: [defaultTarget()],
+  enabled_node_ids: [],
   cpu_warning_percent: 85,
   cpu_critical_percent: 95,
   mem_warning_percent: 85,
@@ -27,6 +28,7 @@ const defaultState: NotificationSettings = {
 export function NotificationsCard() {
   const { t } = useLanguage()
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
+  const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -39,11 +41,13 @@ export function NotificationsCard() {
       setLoading(true)
       setError(null)
       try {
-        const response = await api.notificationSettings()
+        const [response, nodesResponse] = await Promise.all([api.notificationSettings(), api.nodes()])
         if (cancelled) return
+        setNodes(nodesResponse.nodes)
         setSettings({
           ...defaultState,
           ...response,
+          enabled_node_ids: response.enabled_node_ids ?? [],
           telegram_bot_token: "",
           telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
         })
@@ -81,6 +85,15 @@ export function NotificationsCard() {
         topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
       }))
 
+  const toggleNode = (nodeID: string) => {
+    setSettings((current: NotificationSettings) => ({
+      ...current,
+      enabled_node_ids: current.enabled_node_ids.includes(nodeID)
+        ? current.enabled_node_ids.filter((id: string) => id !== nodeID)
+        : [...current.enabled_node_ids, nodeID],
+    }))
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -92,6 +105,7 @@ export function NotificationsCard() {
         channel: settings.channel,
         telegram_bot_token: settings.telegram_bot_token,
         telegram_targets: buildTargetsPayload(settings.telegram_targets),
+        enabled_node_ids: settings.enabled_node_ids,
         cpu_warning_percent: Number(settings.cpu_warning_percent),
         cpu_critical_percent: Number(settings.cpu_critical_percent),
         mem_warning_percent: Number(settings.mem_warning_percent),
@@ -107,6 +121,7 @@ export function NotificationsCard() {
       setSettings((current: NotificationSettings) => ({
         ...current,
         ...response,
+        enabled_node_ids: response.enabled_node_ids ?? [],
         telegram_bot_token: "",
         telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
       }))
@@ -214,6 +229,36 @@ export function NotificationsCard() {
                 />
               </label>
             ))}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.notificationEnabledNodes")}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationEnabledNodesHint")}</p>
+              </div>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.selectedNodes", { count: settings.enabled_node_ids.length || nodes.length })}</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {nodes.map((node) => {
+                const checked = settings.enabled_node_ids.includes(node.id)
+                return (
+                  <label key={node.id} className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+                    <span className="flex flex-col">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{node.name || node.id}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{node.id}</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      aria-label={`${t("settingsPage.notificationEnableNodePrefix")}${node.name || node.id}`}
+                      onChange={() => toggleNode(node.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
+                    />
+                  </label>
+                )
+              })}
+            </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

@@ -177,6 +177,10 @@ export const messagesEn = {
       notifyNodeOffline: "Notify when a node goes offline",
       notifyNodeOnline: "Notify when a node comes back online",
       nodeOfflineGraceMinutes: "Offline grace (minutes)",
+      notificationEnabledNodes: "Enabled nodes for notifications",
+      notificationEnabledNodesHint: "Only selected nodes will trigger alerts. Leave all unchecked to enable for all nodes.",
+      notificationEnableNodePrefix: "Enable notification for ",
+      selectedNodes: "Selected: {count}",
     },
     addNodeModal: {
       title: "Add Node",

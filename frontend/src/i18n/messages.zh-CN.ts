@@ -177,6 +177,10 @@ export const messagesZhCN = {
       notifyNodeOffline: "节点离线时通知",
       notifyNodeOnline: "节点恢复在线时通知",
       nodeOfflineGraceMinutes: "离线宽限时间（分钟）",
+      notificationEnabledNodes: "启用通知的节点",
+      notificationEnabledNodesHint: "仅选中的节点会触发告警。全部不选则对所有节点启用。",
+      notificationEnableNodePrefix: "为",
+      selectedNodes: "已选: {count}",
     },
     addNodeModal: {
       title: "添加节点",

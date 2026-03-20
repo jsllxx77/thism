@@ -21,6 +21,7 @@ func testNotificationSettings() models.NotificationSettings {
 		Channel:                             string(models.NotificationChannelTelegram),
 		TelegramBotToken:                    "token",
 		TelegramTargets:                     []models.TelegramTarget{{ChatID: "-1001", TopicID: 22}},
+		EnabledNodeIDs:                      []string{},
 		CPUWarningPercent:                   80,
 		CPUCriticalPercent:                  90,
 		MemWarningPercent:                   80,
@@ -241,5 +242,54 @@ func TestEvaluatorSendsOfflineAndOnlineNotifications(t *testing.T) {
 	}
 	if stub.events[1].Metric != models.ResourceMetricNodeStatus || stub.events[1].Value != 1 {
 		t.Fatalf("expected online node status event, got %#v", stub.events[1])
+	}
+}
+
+func TestEvaluatorRespectsEnabledNodeIDs(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+	settings := testNotificationSettings()
+	settings.EnabledNodeIDs = []string{"node-1"}
+	if err := s.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+	stub := &senderStub{}
+	evaluator := &Evaluator{Store: s, Sender: stub}
+	node1 := &models.Node{ID: "node-1", Name: "alpha"}
+	node2 := &models.Node{ID: "node-2", Name: "beta"}
+	metrics := &models.MetricsPayload{TS: 1000, CPU: 95, Mem: models.MemStats{Used: 50, Total: 100}, Disk: []models.DiskStats{{Used: 50, Total: 100}}}
+
+	if err := evaluator.Process(node1, metrics); err != nil {
+		t.Fatalf("Process node-1: %v", err)
+	}
+	if len(stub.events) != 1 {
+		t.Fatalf("expected 1 alert for enabled node-1, got %d", len(stub.events))
+	}
+	if err := evaluator.Process(node2, metrics); err != nil {
+		t.Fatalf("Process node-2: %v", err)
+	}
+	if len(stub.events) != 1 {
+		t.Fatalf("expected node-2 to be suppressed, got %d events", len(stub.events))
+	}
+	if err := evaluator.ProcessHeartbeat(node1, true, 1050); err != nil {
+		t.Fatalf("ProcessHeartbeat node-1 online init: %v", err)
+	}
+	if err := evaluator.ProcessHeartbeat(node1, false, 1100); err != nil {
+		t.Fatalf("ProcessHeartbeat node-1 offline: %v", err)
+	}
+	if len(stub.events) != 2 {
+		t.Fatalf("expected offline notification for node-1, got %d events", len(stub.events))
+	}
+	if err := evaluator.ProcessHeartbeat(node2, true, 1150); err != nil {
+		t.Fatalf("ProcessHeartbeat node-2 online init: %v", err)
+	}
+	if err := evaluator.ProcessHeartbeat(node2, false, 1200); err != nil {
+		t.Fatalf("ProcessHeartbeat node-2 offline: %v", err)
+	}
+	if len(stub.events) != 2 {
+		t.Fatalf("expected node-2 offline to be suppressed, got %d events", len(stub.events))
 	}
 }

@@ -3,6 +3,7 @@ package alerting
 import (
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/thism-dev/thism/internal/models"
@@ -40,6 +41,9 @@ func (e *Evaluator) Process(node *models.Node, metrics *models.MetricsPayload) e
 		return err
 	}
 	if !settings.Enabled || settings.Channel != string(models.NotificationChannelTelegram) || len(settings.TelegramTargets) == 0 {
+		return nil
+	}
+	if !notificationsEnabledForNode(settings, node.ID) {
 		return nil
 	}
 
@@ -119,6 +123,9 @@ func (e *Evaluator) ProcessHeartbeat(node *models.Node, online bool, observedAt 
 		return err
 	}
 	if !settings.Enabled || settings.Channel != string(models.NotificationChannelTelegram) || len(settings.TelegramTargets) == 0 {
+		return nil
+	}
+	if !notificationsEnabledForNode(settings, node.ID) {
 		return nil
 	}
 	if e.statusState == nil {
@@ -244,6 +251,13 @@ func (e *Evaluator) now() time.Time {
 		return e.Now()
 	}
 	return time.Now()
+}
+
+func notificationsEnabledForNode(settings models.NotificationSettings, nodeID string) bool {
+	if len(settings.EnabledNodeIDs) == 0 {
+		return true
+	}
+	return slices.Contains(settings.EnabledNodeIDs, nodeID)
 }
 
 func firstNonEmpty(values ...string) string {

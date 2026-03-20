@@ -364,6 +364,20 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 		cleanTargets = append(cleanTargets, normalized)
 	}
 	settings.TelegramTargets = cleanTargets
+	cleanNodeIDs := make([]string, 0, len(settings.EnabledNodeIDs))
+	seenNodeIDs := make(map[string]struct{}, len(settings.EnabledNodeIDs))
+	for _, nodeID := range settings.EnabledNodeIDs {
+		normalized := strings.TrimSpace(nodeID)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seenNodeIDs[normalized]; ok {
+			continue
+		}
+		seenNodeIDs[normalized] = struct{}{}
+		cleanNodeIDs = append(cleanNodeIDs, normalized)
+	}
+	settings.EnabledNodeIDs = cleanNodeIDs
 	return settings
 }
 
@@ -409,6 +423,7 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		Channel:                             settings.Channel,
 		TelegramBotTokenSet:                 strings.TrimSpace(settings.TelegramBotToken) != "",
 		TelegramTargets:                     settings.TelegramTargets,
+		EnabledNodeIDs:                      settings.EnabledNodeIDs,
 		CPUWarningPercent:                   settings.CPUWarningPercent,
 		CPUCriticalPercent:                  settings.CPUCriticalPercent,
 		MemWarningPercent:                   settings.MemWarningPercent,

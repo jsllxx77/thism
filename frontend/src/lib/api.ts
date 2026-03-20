@@ -175,6 +175,7 @@ export type NotificationSettings = {
   telegram_bot_token?: string
   telegram_bot_token_set: boolean
   telegram_targets: TelegramTarget[]
+  enabled_node_ids: string[]
   cpu_warning_percent: number
   cpu_critical_percent: number
   mem_warning_percent: number
