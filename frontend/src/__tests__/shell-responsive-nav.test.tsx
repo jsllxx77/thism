@@ -54,7 +54,12 @@ describe("responsive shell nav", () => {
 
     expect(screen.queryByRole("navigation", { name: "Primary Navigation" })).not.toBeInTheDocument()
     expect(await screen.findByText("ThisM Console")).toBeInTheDocument()
-    expect(await screen.findByRole("button", { name: "中文" })).toBeInTheDocument()
+    const languageButton = await screen.findByRole("button", { name: "中文" })
+    expect(languageButton).toBeInTheDocument()
+    expect(languageButton.className).toContain("text-slate-900")
+    expect(languageButton.className).toContain("hover:text-slate-950")
+    expect(languageButton.className).toContain("dark:text-slate-100")
+    expect(languageButton.className).toContain("dark:hover:text-slate-50")
     expect(await screen.findByRole("button", { name: "Refresh data" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open settings" })).toBeInTheDocument()
