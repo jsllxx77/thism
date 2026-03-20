@@ -74,10 +74,11 @@ export function AppShell() {
                 href="/login"
                 aria-label={messages.shell.actions.returnToLogin}
                 title={messages.shell.actions.returnToLogin}
-                className="hidden items-center gap-1 rounded-full border border-amber-300/80 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60 sm:inline-flex"
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60"
               >
                 <LogIn className="h-3.5 w-3.5" aria-hidden />
-                <span>{messages.shell.actions.guestMode}</span>
+                <span className="hidden sm:inline">{messages.shell.actions.guestMode}</span>
+                <span className="sm:hidden">退出游客</span>
               </a>
             )}
           </div>
