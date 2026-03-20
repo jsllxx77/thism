@@ -89,7 +89,7 @@ export function AppShell() {
               size="sm"
               aria-label={labelForLanguageToggle}
               onClick={toggleLanguage}
-              className="h-11 min-w-[4.75rem] border-transparent bg-slate-900 px-3 text-white shadow-sm hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white active:bg-slate-950 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 dark:hover:text-slate-950 dark:focus-visible:ring-offset-slate-950 dark:active:bg-slate-200 sm:h-9"
+              className="h-11 min-w-[4.75rem] border-slate-300 bg-white px-3 text-slate-900 hover:bg-slate-50 hover:text-slate-950 focus-visible:ring-blue-500 focus-visible:ring-offset-white active:text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-50 dark:focus-visible:ring-offset-slate-950 dark:active:text-slate-50 sm:h-9"
             >
               {labelForLanguageToggle}
             </Button>

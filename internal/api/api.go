@@ -735,6 +735,17 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
         --surface-line: rgba(148, 163, 184, 0.18);
         --error: #fca5a5;
       }
+      .toolbar-button {
+        background: rgba(15, 23, 42, 0.72);
+        color: #f8fafc;
+        border-color: rgba(148, 163, 184, 0.35);
+        box-shadow: 0 10px 26px rgba(2, 6, 23, 0.38);
+      }
+      .toolbar-button:hover {
+        background: rgba(30, 41, 59, 0.92);
+        color: #ffffff;
+        border-color: rgba(148, 163, 184, 0.55);
+      }
     }
     * {
       box-sizing: border-box;
@@ -774,15 +785,16 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
     .toolbar-button {
       border: 1px solid var(--panel-border);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.84);
-      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--text-strong);
       padding: 8px 12px;
       font: inherit;
       font-size: 0.82rem;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
       backdrop-filter: blur(14px);
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
     }
     .brand {
       display: flex;
@@ -906,7 +918,16 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
     .submit-button:hover {
       transform: translateY(-1px);
     }
+    .toolbar-button:hover {
+      background: rgba(255, 255, 255, 0.98);
+      color: #020617;
+      border-color: #94a3b8;
+      transform: translateY(-1px);
+    }
     .submit-button:active {
+      transform: translateY(0);
+    }
+    .toolbar-button:active {
       transform: translateY(0);
     }
     .submit-button:focus-visible,
