@@ -736,15 +736,16 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
         --error: #fca5a5;
       }
       .toolbar-button {
-        background: rgba(15, 23, 42, 0.72);
+        background: rgba(15, 23, 42, 0.88);
         color: #f8fafc;
-        border-color: rgba(148, 163, 184, 0.35);
-        box-shadow: 0 10px 26px rgba(2, 6, 23, 0.38);
+        border-color: rgba(148, 163, 184, 0.4);
+        box-shadow: 0 10px 26px rgba(2, 6, 23, 0.42);
+        -webkit-text-fill-color: #f8fafc;
       }
       .toolbar-button:hover {
-        background: rgba(30, 41, 59, 0.92);
+        background: rgba(30, 41, 59, 0.98);
         color: #ffffff;
-        border-color: rgba(148, 163, 184, 0.55);
+        border-color: rgba(148, 163, 184, 0.6);
       }
     }
     * {
@@ -783,18 +784,21 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
       margin-bottom: 12px;
     }
     .toolbar-button {
-      border: 1px solid var(--panel-border);
+      border: 1px solid rgba(15, 23, 42, 0.14);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.92);
-      color: var(--text-strong);
+      background: #ffffff;
+      color: #0f172a;
       padding: 8px 12px;
       font: inherit;
       font-size: 0.82rem;
-      font-weight: 700;
+      font-weight: 800;
+      letter-spacing: 0.01em;
       cursor: pointer;
-      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+      -webkit-text-fill-color: #0f172a;
+      opacity: 1;
       backdrop-filter: blur(14px);
-      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
     }
     .brand {
       display: flex;
@@ -919,10 +923,11 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
       transform: translateY(-1px);
     }
     .toolbar-button:hover {
-      background: rgba(255, 255, 255, 0.98);
+      background: #f8fafc;
       color: #020617;
-      border-color: #94a3b8;
+      border-color: #64748b;
       transform: translateY(-1px);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
     }
     .submit-button:active {
       transform: translateY(0);
