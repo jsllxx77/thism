@@ -364,20 +364,43 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 		cleanTargets = append(cleanTargets, normalized)
 	}
 	settings.TelegramTargets = cleanTargets
-	cleanNodeIDs := make([]string, 0, len(settings.EnabledNodeIDs))
-	seenNodeIDs := make(map[string]struct{}, len(settings.EnabledNodeIDs))
-	for _, nodeID := range settings.EnabledNodeIDs {
-		normalized := strings.TrimSpace(nodeID)
-		if normalized == "" {
-			continue
+	normalizeNodeIDs := func(ids []string) []string {
+		clean := make([]string, 0, len(ids))
+		seen := make(map[string]struct{}, len(ids))
+		for _, nodeID := range ids {
+			normalized := strings.TrimSpace(nodeID)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			clean = append(clean, normalized)
 		}
-		if _, ok := seenNodeIDs[normalized]; ok {
-			continue
-		}
-		seenNodeIDs[normalized] = struct{}{}
-		cleanNodeIDs = append(cleanNodeIDs, normalized)
+		return clean
 	}
-	settings.EnabledNodeIDs = cleanNodeIDs
+	settings.EnabledNodeIDs = normalizeNodeIDs(settings.EnabledNodeIDs)
+	settings.NodeScopeNodeIDs = normalizeNodeIDs(settings.NodeScopeNodeIDs)
+	settings.NodeScopeMode = strings.TrimSpace(settings.NodeScopeMode)
+	if settings.NodeScopeMode == "" {
+		if len(settings.NodeScopeNodeIDs) > 0 {
+			settings.NodeScopeMode = "include"
+		} else if len(settings.EnabledNodeIDs) > 0 {
+			settings.NodeScopeMode = "include"
+			settings.NodeScopeNodeIDs = append([]string(nil), settings.EnabledNodeIDs...)
+		} else {
+			settings.NodeScopeMode = "all"
+		}
+	}
+	if settings.NodeScopeMode != "all" && settings.NodeScopeMode != "include" && settings.NodeScopeMode != "exclude" {
+		settings.NodeScopeMode = "all"
+		settings.NodeScopeNodeIDs = nil
+	}
+	if settings.NodeScopeMode == "all" && len(settings.NodeScopeNodeIDs) == 0 && len(settings.EnabledNodeIDs) > 0 {
+		settings.NodeScopeMode = "include"
+		settings.NodeScopeNodeIDs = append([]string(nil), settings.EnabledNodeIDs...)
+	}
 	return settings
 }
 
@@ -424,6 +447,8 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		TelegramBotTokenSet:                 strings.TrimSpace(settings.TelegramBotToken) != "",
 		TelegramTargets:                     settings.TelegramTargets,
 		EnabledNodeIDs:                      settings.EnabledNodeIDs,
+		NodeScopeMode:                       settings.NodeScopeMode,
+		NodeScopeNodeIDs:                    settings.NodeScopeNodeIDs,
 		CPUWarningPercent:                   settings.CPUWarningPercent,
 		CPUCriticalPercent:                  settings.CPUCriticalPercent,
 		MemWarningPercent:                   settings.MemWarningPercent,

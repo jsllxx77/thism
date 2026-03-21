@@ -29,6 +29,8 @@ describe("notifications card", () => {
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
       enabled_node_ids: ["node-1"],
+      node_scope_mode: "include",
+      node_scope_node_ids: ["node-1"],
       cpu_warning_percent: 80,
       cpu_critical_percent: 90,
       mem_warning_percent: 81,
@@ -45,7 +47,9 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
-      enabled_node_ids: ["node-1"],
+      enabled_node_ids: ["node-1", "node-2"],
+      node_scope_mode: "include",
+      node_scope_node_ids: ["node-1", "node-2"],
       cpu_warning_percent: 80,
       cpu_critical_percent: 90,
       mem_warning_percent: 81,
@@ -72,9 +76,12 @@ describe("notifications card", () => {
 
     expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
     expect(screen.getByDisplayValue("-100123")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Only selected nodes" })).toBeInTheDocument()
     expect(screen.getByLabelText("Enable notification for Alpha")).toBeChecked()
     expect(screen.getByLabelText("Enable notification for Beta")).not.toBeChecked()
 
+    await user.type(screen.getByLabelText("Search nodes by name or ID"), "Beta")
+    expect(screen.getByLabelText("Enable notification for Beta")).toBeInTheDocument()
     await user.click(screen.getByLabelText("Enable notification for Beta"))
     await user.clear(screen.getByLabelText("Telegram bot token"))
     await user.type(screen.getByLabelText("Telegram bot token"), "123:abc")
@@ -86,6 +93,8 @@ describe("notifications card", () => {
       telegram_bot_token: "123:abc",
       telegram_targets: [{ chat_id: "-100123", topic_id: 99, name: "Ops" }],
       enabled_node_ids: ["node-1", "node-2"],
+      node_scope_mode: "include",
+      node_scope_node_ids: ["node-1", "node-2"],
       notify_node_offline: true,
       notify_node_online: true,
       node_offline_grace_minutes: 2,

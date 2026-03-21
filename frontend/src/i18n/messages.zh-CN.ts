@@ -180,6 +180,12 @@ export const messagesZhCN = {
       notificationEnabledNodes: "启用通知的节点",
       notificationEnabledNodesHint: "仅选中的节点会触发告警。全部不选则对所有节点启用。",
       notificationEnableNodePrefix: "为",
+      notificationNodeScopeTitle: "通知节点范围",
+      notificationNodeScopeHint: "可选择对全部节点生效、仅对选中节点生效，或排除选中节点。",
+      notificationScopeAll: "全部节点",
+      notificationScopeInclude: "仅选中节点",
+      notificationScopeExclude: "除选中节点外全部",
+      notificationNodeSearchPlaceholder: "按节点名称或 ID 搜索",
       selectedNodes: "已选: {count}",
     },
     addNodeModal: {

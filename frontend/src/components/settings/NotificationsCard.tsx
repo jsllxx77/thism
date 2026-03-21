@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
 import { api, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
@@ -13,6 +13,8 @@ const defaultState: NotificationSettings = {
   telegram_bot_token: "",
   telegram_targets: [defaultTarget()],
   enabled_node_ids: [],
+  node_scope_mode: "all",
+  node_scope_node_ids: [],
   cpu_warning_percent: 85,
   cpu_critical_percent: 95,
   mem_warning_percent: 85,
@@ -29,6 +31,7 @@ export function NotificationsCard() {
   const { t } = useLanguage()
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
   const [nodes, setNodes] = useState<Node[]>([])
+  const [nodeSearch, setNodeSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -44,10 +47,14 @@ export function NotificationsCard() {
         const [response, nodesResponse] = await Promise.all([api.notificationSettings(), api.nodes()])
         if (cancelled) return
         setNodes(nodesResponse.nodes)
+        const scopeNodeIDs = response.node_scope_node_ids ?? response.enabled_node_ids ?? []
+        const scopeMode = response.node_scope_mode ?? (scopeNodeIDs.length > 0 ? "include" : "all")
         setSettings({
           ...defaultState,
           ...response,
           enabled_node_ids: response.enabled_node_ids ?? [],
+          node_scope_mode: scopeMode,
+          node_scope_node_ids: scopeNodeIDs,
           telegram_bot_token: "",
           telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
         })
@@ -85,12 +92,43 @@ export function NotificationsCard() {
         topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
       }))
 
+  const selectedNodeIDs = settings.node_scope_node_ids ?? []
+
+  const filteredNodes = useMemo(() => {
+    const keyword = nodeSearch.trim().toLowerCase()
+    if (!keyword) return nodes
+    return nodes.filter((node) => {
+      const name = (node.name || "").toLowerCase()
+      const id = node.id.toLowerCase()
+      return name.includes(keyword) || id.includes(keyword)
+    })
+  }, [nodeSearch, nodes])
+
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => selectedNodeIDs.includes(node.id)),
+    [nodes, selectedNodeIDs],
+  )
+
   const toggleNode = (nodeID: string) => {
+    setSettings((current: NotificationSettings) => {
+      const currentIDs = current.node_scope_node_ids ?? []
+      return {
+        ...current,
+        enabled_node_ids: currentIDs.includes(nodeID)
+          ? currentIDs.filter((id: string) => id !== nodeID)
+          : [...currentIDs, nodeID],
+        node_scope_node_ids: currentIDs.includes(nodeID)
+          ? currentIDs.filter((id: string) => id !== nodeID)
+          : [...currentIDs, nodeID],
+      }
+    })
+  }
+
+  const setScopeMode = (mode: "all" | "include" | "exclude") => {
     setSettings((current: NotificationSettings) => ({
       ...current,
-      enabled_node_ids: current.enabled_node_ids.includes(nodeID)
-        ? current.enabled_node_ids.filter((id: string) => id !== nodeID)
-        : [...current.enabled_node_ids, nodeID],
+      node_scope_mode: mode,
+      enabled_node_ids: mode === "include" ? current.node_scope_node_ids ?? [] : [],
     }))
   }
 
@@ -105,7 +143,9 @@ export function NotificationsCard() {
         channel: settings.channel,
         telegram_bot_token: settings.telegram_bot_token,
         telegram_targets: buildTargetsPayload(settings.telegram_targets),
-        enabled_node_ids: settings.enabled_node_ids,
+        enabled_node_ids: settings.node_scope_mode === "include" ? selectedNodeIDs : [],
+        node_scope_mode: settings.node_scope_mode,
+        node_scope_node_ids: selectedNodeIDs,
         cpu_warning_percent: Number(settings.cpu_warning_percent),
         cpu_critical_percent: Number(settings.cpu_critical_percent),
         mem_warning_percent: Number(settings.mem_warning_percent),
@@ -118,13 +158,19 @@ export function NotificationsCard() {
         node_offline_grace_minutes: Number(settings.node_offline_grace_minutes),
       }
       const response = await api.updateNotificationSettings(payload)
-      setSettings((current: NotificationSettings) => ({
-        ...current,
-        ...response,
-        enabled_node_ids: response.enabled_node_ids ?? [],
-        telegram_bot_token: "",
-        telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
-      }))
+      setSettings((current: NotificationSettings) => {
+        const scopeNodeIDs = response.node_scope_node_ids ?? response.enabled_node_ids ?? []
+        const scopeMode = response.node_scope_mode ?? (scopeNodeIDs.length > 0 ? "include" : "all")
+        return {
+          ...current,
+          ...response,
+          enabled_node_ids: response.enabled_node_ids ?? [],
+          node_scope_mode: scopeMode,
+          node_scope_node_ids: scopeNodeIDs,
+          telegram_bot_token: "",
+          telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
+        }
+      })
       setSuccess(t("settingsPage.notificationsSaved"))
     } catch (err) {
       setError(err instanceof Error ? err.message : t("settingsPage.notificationsSaveFailed"))
@@ -234,31 +280,72 @@ export function NotificationsCard() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.notificationEnabledNodes")}</p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationEnabledNodesHint")}</p>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.notificationNodeScopeTitle")}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationNodeScopeHint")}</p>
               </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.selectedNodes", { count: settings.enabled_node_ids.length || nodes.length })}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.selectedNodes", { count: selectedNodeIDs.length })}</span>
             </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {nodes.map((node) => {
-                const checked = settings.enabled_node_ids.includes(node.id)
-                return (
-                  <label key={node.id} className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
-                    <span className="flex flex-col">
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{node.name || node.id}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{node.id}</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      aria-label={`${t("settingsPage.notificationEnableNodePrefix")}${node.name || node.id}`}
-                      onChange={() => toggleNode(node.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
-                    />
-                  </label>
-                )
-              })}
+            <div className="grid gap-3 md:grid-cols-3">
+              {([
+                ["all", t("settingsPage.notificationScopeAll")],
+                ["include", t("settingsPage.notificationScopeInclude")],
+                ["exclude", t("settingsPage.notificationScopeExclude")],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setScopeMode(mode)}
+                  className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${settings.node_scope_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            {settings.node_scope_mode !== "all" && (
+              <div className="space-y-3 rounded-2xl border border-slate-200 px-4 py-4 dark:border-white/10">
+                <Input
+                  value={nodeSearch}
+                  onChange={(event) => setNodeSearch(event.target.value)}
+                  placeholder={t("settingsPage.notificationNodeSearchPlaceholder")}
+                  aria-label={t("settingsPage.notificationNodeSearchPlaceholder")}
+                  className="enterprise-outline-control rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+                />
+                {selectedNodes.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedNodes.map((node) => (
+                      <button
+                        key={node.id}
+                        type="button"
+                        onClick={() => toggleNode(node.id)}
+                        className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        {node.name || node.id} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="grid max-h-64 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
+                  {filteredNodes.map((node) => {
+                    const checked = selectedNodeIDs.includes(node.id)
+                    return (
+                      <label key={node.id} className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+                        <span className="flex flex-col">
+                          <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{node.name || node.id}</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">{node.id}</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          aria-label={`${t("settingsPage.notificationEnableNodePrefix")}${node.name || node.id}`}
+                          onChange={() => toggleNode(node.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-500"
+                        />
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

@@ -254,10 +254,29 @@ func (e *Evaluator) now() time.Time {
 }
 
 func notificationsEnabledForNode(settings models.NotificationSettings, nodeID string) bool {
-	if len(settings.EnabledNodeIDs) == 0 {
+	scopeMode := settings.NodeScopeMode
+	scopeNodeIDs := settings.NodeScopeNodeIDs
+	if scopeMode == "" {
+		if len(settings.EnabledNodeIDs) == 0 {
+			return true
+		}
+		scopeMode = "include"
+		scopeNodeIDs = settings.EnabledNodeIDs
+	}
+	switch scopeMode {
+	case "include":
+		if len(scopeNodeIDs) == 0 {
+			return true
+		}
+		return slices.Contains(scopeNodeIDs, nodeID)
+	case "exclude":
+		if len(scopeNodeIDs) == 0 {
+			return true
+		}
+		return !slices.Contains(scopeNodeIDs, nodeID)
+	default:
 		return true
 	}
-	return slices.Contains(settings.EnabledNodeIDs, nodeID)
 }
 
 func firstNonEmpty(values ...string) string {

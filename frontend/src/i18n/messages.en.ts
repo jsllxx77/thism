@@ -180,6 +180,12 @@ export const messagesEn = {
       notificationEnabledNodes: "Enabled nodes for notifications",
       notificationEnabledNodesHint: "Only selected nodes will trigger alerts. Leave all unchecked to enable for all nodes.",
       notificationEnableNodePrefix: "Enable notification for ",
+      notificationNodeScopeTitle: "Notification node scope",
+      notificationNodeScopeHint: "Choose whether notifications apply to all nodes, only selected nodes, or all except selected nodes.",
+      notificationScopeAll: "All nodes",
+      notificationScopeInclude: "Only selected nodes",
+      notificationScopeExclude: "All except selected nodes",
+      notificationNodeSearchPlaceholder: "Search nodes by name or ID",
       selectedNodes: "Selected: {count}",
     },
     addNodeModal: {
