@@ -76,9 +76,17 @@ type authManager struct {
 	sessions   *sessionManager
 }
 
+type sessionStore interface {
+	CreateAdminSession(sessionID string, expiresAt int64) error
+	HasAdminSession(sessionID string) (bool, error)
+	DeleteAdminSession(sessionID string) error
+	CleanupExpiredAdminSessions() error
+}
+
 type sessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]struct{}
+	store    sessionStore
 }
 
 var (
@@ -86,17 +94,21 @@ var (
 	errInvalidCurrentPass    = errors.New("invalid current password")
 )
 
-func newAuthManager(cfg AuthConfig) *authManager {
+func newAuthManager(cfg AuthConfig, sessionBackend sessionStore) *authManager {
 	return &authManager{
 		adminToken: cfg.AdminToken,
 		username:   strings.TrimSpace(cfg.Username),
 		password:   cfg.Password,
-		sessions:   newSessionManager(),
+		sessions:   newSessionManager(sessionBackend),
 	}
 }
 
-func newSessionManager() *sessionManager {
-	return &sessionManager{sessions: make(map[string]struct{})}
+func newSessionManager(sessionBackend sessionStore) *sessionManager {
+	m := &sessionManager{sessions: make(map[string]struct{}), store: sessionBackend}
+	if sessionBackend != nil {
+		_ = sessionBackend.CleanupExpiredAdminSessions()
+	}
+	return m
 }
 
 func (m *sessionManager) Create() (string, error) {
@@ -104,7 +116,12 @@ func (m *sessionManager) Create() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
+	expiresAt := time.Now().Add(30 * 24 * time.Hour).Unix()
+	if m.store != nil {
+		if err := m.store.CreateAdminSession(sessionID, expiresAt); err != nil {
+			return "", err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[sessionID] = struct{}{}
@@ -117,9 +134,22 @@ func (m *sessionManager) Has(sessionID string) bool {
 	}
 
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	_, ok := m.sessions[sessionID]
-	return ok
+	m.mu.RUnlock()
+	if ok {
+		return true
+	}
+	if m.store == nil {
+		return false
+	}
+	ok, err := m.store.HasAdminSession(sessionID)
+	if err != nil || !ok {
+		return false
+	}
+	m.mu.Lock()
+	m.sessions[sessionID] = struct{}{}
+	m.mu.Unlock()
+	return true
 }
 
 func (m *sessionManager) Delete(sessionID string) {
@@ -128,8 +158,11 @@ func (m *sessionManager) Delete(sessionID string) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	delete(m.sessions, sessionID)
+	m.mu.Unlock()
+	if m.store != nil {
+		_ = m.store.DeleteAdminSession(sessionID)
+	}
 }
 
 func (m *authManager) AdminToken() string {
@@ -288,7 +321,7 @@ func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler ht
 // NewRouterWithAuth builds and returns the HTTP router with configurable
 // admin login credentials.
 func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler) http.Handler {
-	authState := newAuthManager(auth)
+	authState := newAuthManager(auth, s)
 
 	// Load persisted credentials if present, otherwise bootstrap from startup
 	// configuration when password login is enabled.
@@ -489,6 +522,7 @@ func adminSessionID(r *http.Request) string {
 }
 
 func writeAdminSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string) {
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookieName,
 		Value:    sessionID,
@@ -496,6 +530,8 @@ func writeAdminSessionCookie(w http.ResponseWriter, r *http.Request, sessionID s
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   r.TLS != nil,
+		MaxAge:   int((30 * 24 * time.Hour).Seconds()),
+		Expires:  expiresAt,
 	})
 }
 

@@ -22,6 +22,7 @@ const DefaultMetricsRetentionDays = 7
 
 const metricsRetentionSettingKey = "metrics_retention_days"
 const notificationSettingsKey = "notification_settings"
+const adminSessionTTL = 30 * 24 * time.Hour
 
 var metricsRetentionOptions = []int{7, 30}
 
@@ -204,6 +205,12 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    session_id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS alert_deliveries (
@@ -598,6 +605,49 @@ ON CONFLICT(id) DO UPDATE SET
 	password   = excluded.password,
 	updated_at = excluded.updated_at
 `, username, password, time.Now().Unix())
+	return err
+}
+
+func (s *Store) CreateAdminSession(sessionID string, expiresAt int64) error {
+	_, err := s.db.Exec(`
+INSERT INTO admin_sessions (session_id, created_at, expires_at)
+VALUES (?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+	created_at = excluded.created_at,
+	expires_at = excluded.expires_at
+`, sessionID, time.Now().Unix(), expiresAt)
+	return err
+}
+
+func (s *Store) HasAdminSession(sessionID string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, nil
+	}
+	var expiresAt int64
+	err := s.db.QueryRow(`SELECT expires_at FROM admin_sessions WHERE session_id = ?`, sessionID).Scan(&expiresAt)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if expiresAt > 0 && expiresAt < time.Now().Unix() {
+		_, _ = s.db.Exec(`DELETE FROM admin_sessions WHERE session_id = ?`, sessionID)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *Store) DeleteAdminSession(sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM admin_sessions WHERE session_id = ?`, sessionID)
+	return err
+}
+
+func (s *Store) CleanupExpiredAdminSessions() error {
+	_, err := s.db.Exec(`DELETE FROM admin_sessions WHERE expires_at > 0 AND expires_at < ?`, time.Now().Unix())
 	return err
 }
 
