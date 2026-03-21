@@ -28,6 +28,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [changingPassword, setChangingPassword] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
   const [versionMeta, setVersionMeta] = useState<VersionMeta | null>(null)
@@ -126,6 +127,20 @@ export function Settings({ refreshNonce = 0 }: Props) {
     }
   }, [confirmPassword, currentPassword, newPassword, t, translateApiError])
 
+  const handleLogout = useCallback(async () => {
+    setPasswordError(null)
+    setPasswordSuccess(null)
+    setLoggingOut(true)
+    try {
+      await api.logout()
+      window.location.href = "/login"
+    } catch (error) {
+      const message = error instanceof Error ? translateApiError(error.message) : t("Failed to sign out.")
+      setPasswordError(message)
+      setLoggingOut(false)
+    }
+  }, [t, translateApiError])
+
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.03}>
       <section className="panel-card enterprise-hero rounded-[28px] px-5 py-5 sm:px-6">
@@ -221,6 +236,13 @@ export function Settings({ refreshNonce = 0 }: Props) {
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {t("Update the administrator password used on the login page.")}
           </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-b border-slate-200 pb-4 dark:border-white/10">
+            <Button type="button" onClick={() => void handleLogout()} disabled={loggingOut} className="h-10 rounded-xl px-4 text-sm font-medium">
+              {loggingOut ? t("Signing out...") : t("Sign out")}
+            </Button>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t("Use this to proactively end the current admin session on this browser.")}</p>
+          </div>
 
           <form className="mt-4 space-y-3" onSubmit={handleChangePassword}>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">

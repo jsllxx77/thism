@@ -242,6 +242,10 @@ export const api = {
         new_password: newPassword,
       }),
     }),
+  logout: () =>
+    req<{ ok: boolean }>("/api/auth/logout", {
+      method: "POST",
+    }),
   createAgentUpdateJob: (nodeIDs: string[], targetVersion: string, downloadURL: string, sha256: string) =>
     req<UpdateJobResponse>("/api/agent-updates", {
       method: "POST",
