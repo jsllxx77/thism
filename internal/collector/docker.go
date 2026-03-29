@@ -37,10 +37,11 @@ func newDockerUnixClient() *http.Client {
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return net.DialTimeout("unix", dockerSocketPath, dockerListTimeout)
 			},
-			MaxIdleConns:        1,
-			MaxIdleConnsPerHost: 1,
+			DisableKeepAlives:   true,
+			MaxIdleConns:        0,
+			MaxIdleConnsPerHost: -1,
 			MaxConnsPerHost:     1,
-			IdleConnTimeout:     30 * time.Second,
+			IdleConnTimeout:     0,
 		},
 	}
 }
