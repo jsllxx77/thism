@@ -21,6 +21,7 @@ type Store struct {
 const DefaultMetricsRetentionDays = 7
 
 const metricsRetentionSettingKey = "metrics_retention_days"
+const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
 const adminSessionTTL = 30 * 24 * time.Hour
 
@@ -328,6 +329,51 @@ func defaultNotificationSettings() models.NotificationSettings {
 		RecoverySuccessiveSamples:           3,
 		RecoveryNotificationCooldownMinutes: 30,
 	}
+}
+
+func defaultDashboardSettings() models.DashboardSettings {
+	return models.DashboardSettings{
+		ShowDashboardCardIP: true,
+	}
+}
+
+func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, dashboardSettingsKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return defaultDashboardSettings(), nil
+	}
+	if err != nil {
+		return models.DashboardSettings{}, err
+	}
+
+	var decoded struct {
+		ShowDashboardCardIP *bool `json:"show_dashboard_card_ip"`
+	}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return defaultDashboardSettings(), nil
+	}
+
+	settings := defaultDashboardSettings()
+	if decoded.ShowDashboardCardIP != nil {
+		settings.ShowDashboardCardIP = *decoded.ShowDashboardCardIP
+	}
+	return settings, nil
+}
+
+func (s *Store) UpsertDashboardSettings(settings models.DashboardSettings) error {
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, dashboardSettingsKey, string(raw), time.Now().Unix())
+	return err
 }
 
 func normalizeNotificationSettings(settings models.NotificationSettings) models.NotificationSettings {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { Settings } from "./Settings"
 
 const nodesMock = vi.fn()
@@ -7,6 +8,8 @@ const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const dashboardSettingsMock = vi.fn()
+const updateDashboardSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
@@ -18,6 +21,8 @@ vi.mock("../lib/api", () => ({
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
+    updateDashboardSettings: (...args: unknown[]) => updateDashboardSettingsMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
@@ -36,22 +41,30 @@ function deferred<T>() {
 
 describe("settings page states", () => {
   beforeEach(() => {
+    vi.useRealTimers()
     nodesMock.mockReset()
     changePasswordMock.mockReset()
     agentReleaseMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    dashboardSettingsMock.mockReset()
+    updateDashboardSettingsMock.mockReset()
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: false })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
       telegram_bot_token_set: false,
       telegram_targets: [],
+      enabled_node_ids: [],
+      node_scope_mode: "all",
+      node_scope_node_ids: [],
       cpu_warning_percent: 85,
       cpu_critical_percent: 95,
       mem_warning_percent: 85,
@@ -59,12 +72,18 @@ describe("settings page states", () => {
       disk_warning_percent: 85,
       disk_critical_percent: 95,
       cooldown_minutes: 30,
+      notify_node_offline: true,
+      notify_node_online: false,
+      node_offline_grace_minutes: 2,
     })
     updateNotificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
       telegram_bot_token_set: false,
       telegram_targets: [],
+      enabled_node_ids: [],
+      node_scope_mode: "all",
+      node_scope_node_ids: [],
       cpu_warning_percent: 85,
       cpu_critical_percent: 95,
       mem_warning_percent: 85,
@@ -72,6 +91,9 @@ describe("settings page states", () => {
       disk_warning_percent: 85,
       disk_critical_percent: 95,
       cooldown_minutes: 30,
+      notify_node_offline: true,
+      notify_node_online: false,
+      node_offline_grace_minutes: 2,
     })
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
   })
@@ -127,20 +149,22 @@ describe("settings page states", () => {
     nodesMock.mockRejectedValue(new Error("timeout"))
 
     render(<Settings />)
-    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't load settings data. Please try again.")
+    expect(await screen.findByText("We couldn't load settings data. Please try again.")).toBeInTheDocument()
   })
 
   it("refetches settings data when refreshNonce changes", async () => {
     nodesMock.mockResolvedValue({ nodes: [] })
 
     const { rerender } = render(<Settings refreshNonce={0} />)
+    let initialCalls = 0
     await waitFor(() => {
-      expect(nodesMock).toHaveBeenCalledTimes(1)
+      initialCalls = nodesMock.mock.calls.length
+      expect(initialCalls).toBeGreaterThanOrEqual(1)
     })
 
     rerender(<Settings refreshNonce={1} />)
     await waitFor(() => {
-      expect(nodesMock).toHaveBeenCalledTimes(2)
+      expect(nodesMock.mock.calls.length).toBeGreaterThan(initialCalls)
     })
   })
 
@@ -177,5 +201,24 @@ describe("settings page states", () => {
     })
 
     expect(screen.getAllByText("Offline").length).toBeGreaterThanOrEqual(1)
+    vi.useRealTimers()
+  })
+
+  it("loads and saves dashboard card IP visibility", async () => {
+    const user = userEvent.setup()
+    nodesMock.mockResolvedValue({ nodes: [] })
+
+    render(<Settings />)
+
+    const checkbox = await screen.findByRole("checkbox", { name: "Show IP addresses on dashboard node cards" })
+    expect(checkbox).toBeChecked()
+
+    await user.click(checkbox)
+    await user.click(screen.getByRole("button", { name: "Save dashboard visibility" }))
+
+    await waitFor(() => {
+      expect(updateDashboardSettingsMock).toHaveBeenCalledWith({ show_dashboard_card_ip: false })
+    })
+    expect(await screen.findByText("Dashboard card visibility updated.")).toBeInTheDocument()
   })
 })

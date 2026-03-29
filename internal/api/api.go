@@ -396,6 +396,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		r.Get("/api/settings/notifications", func(w http.ResponseWriter, req *http.Request) {
 			handleGetNotificationSettings(w, req, s)
 		})
+
+		r.Get("/api/settings/dashboard", func(w http.ResponseWriter, req *http.Request) {
+			handleGetDashboardSettings(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -414,6 +418,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 		r.Put("/api/settings/notifications", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdateNotificationSettings(w, req, s)
+		})
+
+		r.Put("/api/settings/dashboard", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateDashboardSettings(w, req, s)
 		})
 
 		r.Post("/api/settings/notifications/test", func(w http.ResponseWriter, req *http.Request) {
@@ -1444,6 +1452,19 @@ func handleGetNotificationSettings(w http.ResponseWriter, r *http.Request, s *st
 	writeJSON(w, http.StatusOK, view)
 }
 
+func handleGetDashboardSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	settings, err := s.GetDashboardSettings()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
 func handleUpdateNotificationSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	if s == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
@@ -1472,6 +1493,34 @@ func handleUpdateNotificationSettings(w http.ResponseWriter, r *http.Request, s 
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+
+	var reqBody struct {
+		ShowDashboardCardIP *bool `json:"show_dashboard_card_ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	if reqBody.ShowDashboardCardIP == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "show_dashboard_card_ip is required"})
+		return
+	}
+
+	settings := models.DashboardSettings{
+		ShowDashboardCardIP: *reqBody.ShowDashboardCardIP,
+	}
+	if err := s.UpsertDashboardSettings(settings); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
 }
 
 func handleSendTestNotification(w http.ResponseWriter, r *http.Request, s *store.Store) {

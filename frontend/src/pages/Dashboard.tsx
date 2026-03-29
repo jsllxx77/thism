@@ -50,6 +50,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   const { t } = useLanguage()
   const [nodes, setNodes] = useState<Node[]>([])
   const [live, setLive] = useState<LiveMetrics>({})
+  const [showDashboardCardIP, setShowDashboardCardIP] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
   const [searchFilter, setSearchFilter] = useState("")
@@ -101,6 +102,29 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
       window.clearInterval(intervalId)
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadDashboardSettings = async () => {
+      setShowDashboardCardIP(false)
+      try {
+        const response = await api.dashboardSettings()
+        if (!cancelled) {
+          setShowDashboardCardIP(Boolean(response.show_dashboard_card_ip))
+        }
+      } catch {
+        if (!cancelled) {
+          setShowDashboardCardIP(false)
+        }
+      }
+    }
+
+    void loadDashboardSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [refreshNonce])
 
   useEffect(() => {
     void loadNodes()
@@ -283,7 +307,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
                   memTotal={live[node.id]?.memTotal}
                   netRxSpeed={live[node.id]?.netRxSpeed}
                   netTxSpeed={live[node.id]?.netTxSpeed}
-                  showIP={accessMode !== "guest"}
+                  showIP={accessMode !== "guest" && showDashboardCardIP}
                   onClick={() => onSelectNode(node.id)}
                 />
               ))}

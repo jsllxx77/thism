@@ -461,3 +461,31 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 		t.Fatal("expected recovery cooldown window to suppress duplicate recovery")
 	}
 }
+
+func TestStoreDashboardSettingsDefaultsAndRoundTrip(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	defaults, err := s.GetDashboardSettings()
+	if err != nil {
+		t.Fatalf("GetDashboardSettings defaults: %v", err)
+	}
+	if !defaults.ShowDashboardCardIP {
+		t.Fatal("expected dashboard card IP visibility to default to true")
+	}
+
+	if err := s.UpsertDashboardSettings(models.DashboardSettings{ShowDashboardCardIP: false}); err != nil {
+		t.Fatalf("UpsertDashboardSettings: %v", err)
+	}
+
+	stored, err := s.GetDashboardSettings()
+	if err != nil {
+		t.Fatalf("GetDashboardSettings stored: %v", err)
+	}
+	if stored.ShowDashboardCardIP {
+		t.Fatal("expected stored dashboard card IP visibility to round-trip as false")
+	}
+}

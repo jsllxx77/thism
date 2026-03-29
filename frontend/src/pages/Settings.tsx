@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
+import { DashboardVisibilityCard } from "../components/settings/DashboardVisibilityCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
@@ -201,6 +202,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
       <AgentAutoUpdateCard />
       <MetricsRetentionCard />
+      <DashboardVisibilityCard />
       <NotificationsCard />
 
       <div className="space-y-3">

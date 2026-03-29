@@ -3,11 +3,13 @@ import { act, render, screen, waitFor, within } from "@testing-library/react"
 import { Dashboard } from "./Dashboard"
 
 const nodesMock = vi.fn()
+const dashboardSettingsMock = vi.fn()
 let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = null
 
 vi.mock("../lib/api", () => ({
   api: {
     nodes: (...args: unknown[]) => nodesMock(...args),
+    dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
   },
 }))
 
@@ -35,6 +37,8 @@ function deferred<T>() {
 describe("dashboard page states", () => {
   beforeEach(() => {
     nodesMock.mockReset()
+    dashboardSettingsMock.mockReset()
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     wsHandler = null
   })
 
@@ -151,6 +155,52 @@ describe("dashboard page states", () => {
 
     expect(await screen.findByText("alpha")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Table View" })).not.toBeInTheDocument()
+    expect(screen.queryByText("1.1.1.1")).not.toBeInTheDocument()
+    expect(screen.getByText("linux/amd64")).toBeInTheDocument()
+  })
+
+  it("shows node IP on admin cards when dashboard visibility allows it", async () => {
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "n1",
+          name: "alpha",
+          online: true,
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          last_seen: 0,
+        },
+      ],
+    })
+
+    render(<Dashboard onSelectNode={() => {}} accessMode="admin" />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/1\.1\.1\.1/)).toBeInTheDocument()
+    })
+  })
+
+  it("hides node IP on admin cards when dashboard visibility disables it", async () => {
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: false })
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "n1",
+          name: "alpha",
+          online: true,
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          last_seen: 0,
+        },
+      ],
+    })
+
+    render(<Dashboard onSelectNode={() => {}} accessMode="admin" />)
+
+    expect(await screen.findByText("alpha")).toBeInTheDocument()
     expect(screen.queryByText("1.1.1.1")).not.toBeInTheDocument()
     expect(screen.getByText("linux/amd64")).toBeInTheDocument()
   })

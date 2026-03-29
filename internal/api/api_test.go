@@ -1553,6 +1553,70 @@ func TestNotificationSettingsRoundTripEndpoints(t *testing.T) {
 	}
 }
 
+func TestDashboardSettingsDefaultsToShowIP(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		ShowDashboardCardIP bool `json:"show_dashboard_card_ip"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !body.ShowDashboardCardIP {
+		t.Fatal("expected dashboard card IP visibility to default to true")
+	}
+}
+
+func TestDashboardSettingsRoundTripEndpoints(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/dashboard", bytes.NewBufferString(`{"show_dashboard_card_ip":false}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", putResp.Code, putResp.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/dashboard", nil)
+	getReq.Header.Set("Authorization", "Bearer test-admin-token")
+	getResp := httptest.NewRecorder()
+	router.ServeHTTP(getResp, getReq)
+
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getResp.Code, getResp.Body.String())
+	}
+
+	var body struct {
+		ShowDashboardCardIP bool `json:"show_dashboard_card_ip"`
+	}
+	if err := json.Unmarshal(getResp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.ShowDashboardCardIP {
+		t.Fatal("expected dashboard card IP visibility to persist as false")
+	}
+}
+
 func TestSendTestNotificationRequiresTargetAndToken(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

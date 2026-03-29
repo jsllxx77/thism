@@ -163,6 +163,10 @@ export type MetricsRetentionSettings = {
   options: number[]
 }
 
+export type DashboardSettings = {
+  show_dashboard_card_ip: boolean
+}
+
 export type TelegramTarget = {
   name?: string
   chat_id: string
@@ -262,6 +266,12 @@ export const api = {
     req<MetricsRetentionSettings>("/api/settings/metrics-retention", {
       method: "PUT",
       body: JSON.stringify({ retention_days: retentionDays }),
+    }),
+  dashboardSettings: () => req<DashboardSettings>("/api/settings/dashboard"),
+  updateDashboardSettings: (settings: DashboardSettings) =>
+    req<DashboardSettings>("/api/settings/dashboard", {
+      method: "PUT",
+      body: JSON.stringify(settings),
     }),
   notificationSettings: () => req<NotificationSettings>("/api/settings/notifications"),
   updateNotificationSettings: (settings: Omit<NotificationSettings, "telegram_bot_token_set">) =>
