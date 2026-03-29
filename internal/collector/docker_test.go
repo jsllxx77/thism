@@ -126,33 +126,31 @@ func TestParseDockerContainers_NoNames(t *testing.T) {
 }
 
 func TestCollectDockerContainersUsesUnversionedEndpoint(t *testing.T) {
-	originalClientFactory := dockerSocketClient
+	originalClient := dockerSocketClient
 	t.Cleanup(func() {
-		dockerSocketClient = originalClientFactory
+		dockerSocketClient = originalClient
 	})
 
-	dockerSocketClient = func() *http.Client {
-		return &http.Client{
-			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-				if req.URL.Path != "/containers/json" {
-					return &http.Response{
-						StatusCode: http.StatusBadRequest,
-						Body: io.NopCloser(strings.NewReader(
-							`{"message":"client version 1.24 is too old. Minimum supported API version is 1.44"}`,
-						)),
-						Header: make(http.Header),
-					}, nil
-				}
-
+	dockerSocketClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/containers/json" {
 				return &http.Response{
-					StatusCode: http.StatusOK,
+					StatusCode: http.StatusBadRequest,
 					Body: io.NopCloser(strings.NewReader(
-						`[{"Id":"abc123def456789012345678","Names":["/my-app"],"Image":"nginx:latest","State":"running","Status":"Up 2 hours"}]`,
+						`{"message":"client version 1.24 is too old. Minimum supported API version is 1.44"}`,
 					)),
 					Header: make(http.Header),
 				}, nil
-			}),
-		}
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					`[{"Id":"abc123def456789012345678","Names":["/my-app"],"Image":"nginx:latest","State":"running","Status":"Up 2 hours"}]`,
+				)),
+				Header: make(http.Header),
+			}, nil
+		}),
 	}
 
 	containers, dockerAvailable, err := collectDockerContainers()

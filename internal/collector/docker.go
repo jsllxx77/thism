@@ -28,7 +28,7 @@ type dockerAPIContainer struct {
 
 // dockerSocketClient is the HTTP client used to talk to Docker via unix socket.
 // Overridable for tests.
-var dockerSocketClient = newDockerUnixClient
+var dockerSocketClient = newDockerUnixClient()
 
 func newDockerUnixClient() *http.Client {
 	return &http.Client{
@@ -37,6 +37,10 @@ func newDockerUnixClient() *http.Client {
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return net.DialTimeout("unix", dockerSocketPath, dockerListTimeout)
 			},
+			MaxIdleConns:        1,
+			MaxIdleConnsPerHost: 1,
+			MaxConnsPerHost:     1,
+			IdleConnTimeout:     30 * time.Second,
 		},
 	}
 }
@@ -45,7 +49,7 @@ func newDockerUnixClient() *http.Client {
 // and returns the container list. If Docker is not available or permission is denied,
 // it returns (nil, false, nil) — no error, just docker_available=false.
 func collectDockerContainers() ([]models.DockerContainer, bool, error) {
-	client := dockerSocketClient()
+	client := dockerSocketClient
 
 	// Use the unversioned endpoint so newer daemons with higher minimum API
 	// versions do not reject the request as "client version too old".
