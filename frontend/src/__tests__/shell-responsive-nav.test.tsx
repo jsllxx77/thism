@@ -93,4 +93,15 @@ describe("responsive shell nav", () => {
     await user.click(await screen.findByRole("button", { name: "Open settings" }))
     expect(await screen.findByText("Settings page")).toBeInTheDocument()
   })
+
+  it("returns to the dashboard when the brand icon is clicked", async () => {
+    const user = userEvent.setup()
+    renderApp("/nodes/node-1")
+
+    expect(await screen.findByText("node-1")).toBeInTheDocument()
+
+    await user.click(await screen.findByRole("link", { name: "Go to dashboard" }))
+
+    expect(await screen.findByText("Dashboard page")).toBeInTheDocument()
+  })
 })

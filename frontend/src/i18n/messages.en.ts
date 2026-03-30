@@ -50,6 +50,7 @@ export const messagesEn = {
         notFound: "Nothing here",
       },
       actions: {
+        goToDashboard: "Go to dashboard",
         refreshData: "Refresh data",
         toggleDarkMode: "Toggle dark mode",
         openSettings: "Open settings",

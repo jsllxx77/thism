@@ -50,6 +50,7 @@ export const messagesZhCN = {
         notFound: "这里什么也没有",
       },
       actions: {
+        goToDashboard: "返回首页",
         refreshData: "刷新数据",
         toggleDarkMode: "切换深色模式",
         openSettings: "打开设置",

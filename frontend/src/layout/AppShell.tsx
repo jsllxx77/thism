@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Outlet, useLocation, useNavigate } from "react-router-dom"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { BarChart3, LogIn, Moon, RefreshCw, Settings2, Sun } from "lucide-react"
 import { api, type AccessMode } from "../lib/api"
 import { Button } from "../components/ui/button"
@@ -62,9 +62,15 @@ export function AppShell() {
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/80">
         <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-4 md:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900 sm:h-9 sm:w-9">
+            <Link
+              to="/"
+              aria-label={messages.shell.actions.goToDashboard}
+              title={messages.shell.actions.goToDashboard}
+              aria-current={onRootPage ? "page" : undefined}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-950 sm:h-9 sm:w-9"
+            >
               <BarChart3 className="h-4 w-4 text-slate-700 dark:text-slate-200" aria-hidden />
-            </div>
+            </Link>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{messages.common.brand}</p>
               <p className="hidden truncate text-xs text-slate-500 dark:text-slate-400 sm:block">{pageTitle}</p>
