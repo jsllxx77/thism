@@ -1009,22 +1009,6 @@ func decodeHardware(raw string) *models.NodeHardware {
 	return &hardware
 }
 
-func sqlPlaceholders(count int) string {
-	if count <= 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	builder.Grow((count * 2) - 1)
-	for index := 0; index < count; index++ {
-		if index > 0 {
-			builder.WriteByte(',')
-		}
-		builder.WriteByte('?')
-	}
-	return builder.String()
-}
-
 func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
 	var used uint64
 	var total uint64
@@ -1033,6 +1017,18 @@ func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
 		total += disk.Total
 	}
 	return used, total
+}
+
+// Keep this lookup index-friendly: /api/nodes calls it for every node shown on
+// dashboard/settings, so scanning the full metrics history or using window
+// functions here quickly regresses page load time on real deployments.
+func latestMetricsLookupQuery() string {
+	return `
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
+FROM metrics
+WHERE node_id = ?
+ORDER BY ts DESC, id DESC
+LIMIT 1`
 }
 
 // UpsertNode inserts or updates a node record.
@@ -1367,7 +1363,6 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
 // LatestMetricsByNodeIDs returns the most recent metrics sample for each node ID.
 func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.NodeMetricsSnapshot, error) {
 	result := make(map[string]*models.NodeMetricsSnapshot, len(nodeIDs))
-	args := make([]any, 0, len(nodeIDs))
 	seen := make(map[string]struct{}, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
 		nodeID = strings.TrimSpace(nodeID)
@@ -1378,42 +1373,14 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 			continue
 		}
 		seen[nodeID] = struct{}{}
-		args = append(args, nodeID)
 	}
-	if len(args) == 0 {
+	if len(seen) == 0 {
 		return result, nil
 	}
 
-	rows, err := s.db.Query(fmt.Sprintf(`
-SELECT node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
-FROM (
-	SELECT
-		node_id,
-		ts,
-		cpu_percent,
-		mem_used,
-		mem_total,
-		disk_used,
-		disk_total,
-		net_rx,
-		net_tx,
-		uptime_seconds,
-		ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY ts DESC, id DESC) AS row_num
-	FROM metrics
-	WHERE node_id IN (%s)
-)
-WHERE row_num = 1
-`, sqlPlaceholders(len(args))), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var nodeID string
+	for nodeID := range seen {
 		var snapshot models.NodeMetricsSnapshot
-		if err := rows.Scan(
-			&nodeID,
+		err := s.db.QueryRow(latestMetricsLookupQuery(), nodeID).Scan(
 			&snapshot.TS,
 			&snapshot.CPU,
 			&snapshot.MemUsed,
@@ -1423,13 +1390,14 @@ WHERE row_num = 1
 			&snapshot.NetRx,
 			&snapshot.NetTx,
 			&snapshot.UptimeSeconds,
-		); err != nil {
+		)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
 		result[nodeID] = &snapshot
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 
 	return result, nil
