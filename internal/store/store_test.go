@@ -383,17 +383,19 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	defer s.Close()
 
 	settings := models.NotificationSettings{
-		Enabled:             true,
-		Channel:             string(models.NotificationChannelTelegram),
-		TelegramBotToken:    "secret-token",
-		TelegramTargets:     []models.TelegramTarget{{Name: "Ops", ChatID: "-100123", TopicID: 42}},
-		CPUWarningPercent:   80,
-		CPUCriticalPercent:  90,
-		MemWarningPercent:   81,
-		MemCriticalPercent:  91,
-		DiskWarningPercent:  82,
-		DiskCriticalPercent: 92,
-		CooldownMinutes:     15,
+		Enabled:                 true,
+		Channel:                 string(models.NotificationChannelTelegram),
+		TelegramBotToken:        "secret-token",
+		TelegramTargets:         []models.TelegramTarget{{Name: "Ops", ChatID: "-100123", TopicID: 42}},
+		CPUWarningPercent:       80,
+		CPUCriticalPercent:      90,
+		MemWarningPercent:       81,
+		MemCriticalPercent:      91,
+		DiskWarningPercent:      82,
+		DiskCriticalPercent:     92,
+		CooldownMinutes:         15,
+		DispatcherQueueCapacity: 512,
+		NotifyDispatcherDrops:   true,
 	}
 	if err := s.UpsertNotificationSettings(settings); err != nil {
 		t.Fatalf("UpsertNotificationSettings: %v", err)
@@ -405,12 +407,18 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	if stored.TelegramBotToken != "secret-token" || len(stored.TelegramTargets) != 1 || stored.TelegramTargets[0].TopicID != 42 {
 		t.Fatalf("unexpected stored notification settings: %#v", stored)
 	}
+	if stored.DispatcherQueueCapacity != 512 || !stored.NotifyDispatcherDrops {
+		t.Fatalf("expected dispatcher settings to round-trip, got %#v", stored)
+	}
 	view, err := s.NotificationSettingsView(false)
 	if err != nil {
 		t.Fatalf("NotificationSettingsView: %v", err)
 	}
 	if !view.TelegramBotTokenSet || view.TelegramBotToken != "" {
 		t.Fatalf("expected masked token in notification settings view, got %#v", view)
+	}
+	if view.DispatcherQueueCapacity != 512 || !view.NotifyDispatcherDrops {
+		t.Fatalf("expected dispatcher settings in masked view, got %#v", view)
 	}
 	allowed, err := s.ShouldSendAlert("node-1", "cpu", "critical", 30*time.Minute, 1000)
 	if err != nil || !allowed {
@@ -460,6 +468,25 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	}
 	if allowed {
 		t.Fatal("expected recovery cooldown window to suppress duplicate recovery")
+	}
+}
+
+func TestStoreNotificationSettingsDefaultDispatcherValues(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	settings, err := s.GetNotificationSettings()
+	if err != nil {
+		t.Fatalf("GetNotificationSettings: %v", err)
+	}
+	if settings.DispatcherQueueCapacity != models.DefaultDispatcherQueueCapacity {
+		t.Fatalf("expected default dispatcher queue capacity %d, got %d", models.DefaultDispatcherQueueCapacity, settings.DispatcherQueueCapacity)
+	}
+	if settings.NotifyDispatcherDrops {
+		t.Fatalf("expected dispatcher drop alerts disabled by default, got %#v", settings)
 	}
 }
 

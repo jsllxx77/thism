@@ -25,6 +25,26 @@ func (s *blockingSender) Send(_ models.NotificationSettings, event models.AlertE
 	return nil
 }
 
+type dropAwareSender struct {
+	started chan struct{}
+	release chan struct{}
+	events  chan models.AlertEvent
+}
+
+func (s *dropAwareSender) Send(_ models.NotificationSettings, event models.AlertEvent) error {
+	if event.Metric == models.ResourceMetricDispatcherQueue {
+		s.events <- event
+		return nil
+	}
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-s.release
+	s.events <- event
+	return nil
+}
+
 func TestDispatcherEnqueueMetricsDoesNotBlockOnSlowSender(t *testing.T) {
 	st, err := store.New(":memory:")
 	if err != nil {
@@ -39,7 +59,7 @@ func TestDispatcherEnqueueMetricsDoesNotBlockOnSlowSender(t *testing.T) {
 	sender := &blockingSender{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
-		events:  make(chan models.AlertEvent, 1),
+		events:  make(chan models.AlertEvent, 4),
 	}
 	dispatcher := NewDispatcher(st, sender)
 	defer dispatcher.Close()
@@ -96,7 +116,7 @@ func TestDispatcherDropsWhenQueueIsFullAndTracksStats(t *testing.T) {
 	sender := &blockingSender{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
-		events:  make(chan models.AlertEvent, 1),
+		events:  make(chan models.AlertEvent, 4),
 	}
 	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
 
@@ -159,7 +179,7 @@ func TestDispatcherRateLimitsDroppedQueueLogs(t *testing.T) {
 	sender := &blockingSender{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
-		events:  make(chan models.AlertEvent, 1),
+		events:  make(chan models.AlertEvent, 4),
 	}
 	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
 
@@ -240,7 +260,7 @@ func TestDispatcherRuntimeStatsSnapshotTracksAggregateDeltas(t *testing.T) {
 	sender := &blockingSender{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
-		events:  make(chan models.AlertEvent, 1),
+		events:  make(chan models.AlertEvent, 4),
 	}
 	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
 
@@ -282,6 +302,129 @@ func TestDispatcherRuntimeStatsSnapshotTracksAggregateDeltas(t *testing.T) {
 	}
 	if stats.Dropped < baseline.Dropped+1 {
 		t.Fatalf("expected aggregate dropped count to increase by 1, baseline=%+v current=%+v", baseline, stats)
+	}
+
+	close(sender.release)
+	dispatcher.Close()
+}
+
+func TestDispatcherRefreshesQueueCapacityFromNotificationSettings(t *testing.T) {
+	st, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+
+	settings := testNotificationSettings()
+	settings.DispatcherQueueCapacity = 1
+	if err := st.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+
+	sender := &blockingSender{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		events:  make(chan models.AlertEvent, 4),
+	}
+	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
+
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+	metrics := &models.MetricsPayload{
+		TS:   1000,
+		CPU:  95,
+		Mem:  models.MemStats{Used: 10, Total: 100},
+		Disk: []models.DiskStats{{Used: 10, Total: 100}},
+	}
+
+	if ok := dispatcher.EnqueueMetrics(node, metrics); !ok {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected worker to begin first send")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, false, 1001); !ok {
+		t.Fatal("expected second enqueue to fill queue successfully")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1002); ok {
+		t.Fatal("expected third enqueue to be dropped before capacity update")
+	}
+
+	settings.DispatcherQueueCapacity = 2
+	if err := st.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings update: %v", err)
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1003); !ok {
+		t.Fatal("expected enqueue to succeed after runtime capacity update")
+	}
+
+	stats := dispatcher.Stats()
+	if stats.Capacity != 2 {
+		t.Fatalf("expected dispatcher capacity 2 after settings refresh, got %d", stats.Capacity)
+	}
+	if stats.QueueDepth != 2 {
+		t.Fatalf("expected queue depth 2 after capacity refresh, got %d", stats.QueueDepth)
+	}
+
+	close(sender.release)
+	dispatcher.Close()
+}
+
+func TestDispatcherSendsDropAlertWhenConfigured(t *testing.T) {
+	st, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+
+	settings := testNotificationSettings()
+	settings.DispatcherQueueCapacity = 1
+	settings.NotifyDispatcherDrops = true
+	if err := st.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+
+	sender := &dropAwareSender{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		events:  make(chan models.AlertEvent, 4),
+	}
+	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
+
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+	metrics := &models.MetricsPayload{
+		TS:   1000,
+		CPU:  95,
+		Mem:  models.MemStats{Used: 10, Total: 100},
+		Disk: []models.DiskStats{{Used: 10, Total: 100}},
+	}
+
+	if ok := dispatcher.EnqueueMetrics(node, metrics); !ok {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected worker to begin first send")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, false, 1001); !ok {
+		t.Fatal("expected second enqueue to fill queue successfully")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1002); ok {
+		t.Fatal("expected third enqueue to be dropped")
+	}
+
+	select {
+	case event := <-sender.events:
+		if event.Metric != models.ResourceMetricDispatcherQueue {
+			t.Fatalf("expected dispatcher queue alert, got %#v", event)
+		}
+		if event.Severity != models.AlertSeverityWarning {
+			t.Fatalf("expected warning severity for dispatcher drop alert, got %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected dispatcher drop alert to be emitted")
 	}
 
 	close(sender.release)

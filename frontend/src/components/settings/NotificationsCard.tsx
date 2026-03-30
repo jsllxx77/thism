@@ -25,6 +25,8 @@ const defaultState: NotificationSettings = {
   notify_node_offline: true,
   notify_node_online: false,
   node_offline_grace_minutes: 2,
+  dispatcher_queue_capacity: 256,
+  notify_dispatcher_drops: false,
 }
 
 export function NotificationsCard() {
@@ -156,6 +158,8 @@ export function NotificationsCard() {
         notify_node_offline: settings.notify_node_offline,
         notify_node_online: settings.notify_node_online,
         node_offline_grace_minutes: Number(settings.node_offline_grace_minutes),
+        dispatcher_queue_capacity: Number(settings.dispatcher_queue_capacity),
+        notify_dispatcher_drops: settings.notify_dispatcher_drops,
       }
       const response = await api.updateNotificationSettings(payload)
       setSettings((current: NotificationSettings) => {
@@ -264,11 +268,14 @@ export function NotificationsCard() {
               ["disk_warning_percent", "settingsPage.diskWarningThreshold"],
               ["disk_critical_percent", "settingsPage.diskCriticalThreshold"],
               ["cooldown_minutes", "settingsPage.notificationCooldownMinutes"],
+              ["dispatcher_queue_capacity", "settingsPage.dispatcherQueueCapacity"],
             ].map(([field, label]) => (
               <label key={field} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
                 {t(label)}
                 <Input
                   type="number"
+                  min={field === "dispatcher_queue_capacity" ? "1" : undefined}
+                  aria-label={t(label)}
                   value={String(settings[field as keyof NotificationSettings] ?? "")}
                   onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, [field]: Number(event.target.value) }))}
                   className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
@@ -382,6 +389,24 @@ export function NotificationsCard() {
               >
                 <span
                   className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_node_online ? "translate-x-5" : "translate-x-1"}`}
+                />
+              </button>
+            </label>
+            <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+              <span className="flex flex-col">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyDispatcherDrops")}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_dispatcher_drops ? "已开启" : "已关闭"}</span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.notify_dispatcher_drops}
+                aria-label={t("settingsPage.notifyDispatcherDrops")}
+                onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_dispatcher_drops: !current.notify_dispatcher_drops }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_dispatcher_drops ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_dispatcher_drops ? "translate-x-5" : "translate-x-1"}`}
                 />
               </button>
             </label>

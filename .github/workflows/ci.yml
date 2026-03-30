@@ -64,6 +64,20 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  agent-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build agent release artifacts
+        run: make build-agent-all
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -79,4 +93,3 @@ jobs:
           context: .
           push: false
           load: false
-

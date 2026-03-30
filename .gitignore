@@ -4,6 +4,8 @@ frontend/dist/
 frontend/node_modules/
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 .env*
 !.env.example
 .worktrees/

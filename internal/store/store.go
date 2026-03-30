@@ -351,6 +351,8 @@ func defaultNotificationSettings() models.NotificationSettings {
 		CooldownMinutes:                     30,
 		RecoverySuccessiveSamples:           3,
 		RecoveryNotificationCooldownMinutes: 30,
+		DispatcherQueueCapacity:             models.DefaultDispatcherQueueCapacity,
+		NotifyDispatcherDrops:               false,
 	}
 }
 
@@ -430,6 +432,9 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 	}
 	if settings.RecoveryNotificationCooldownMinutes <= 0 {
 		settings.RecoveryNotificationCooldownMinutes = defaults.RecoveryNotificationCooldownMinutes
+	}
+	if settings.DispatcherQueueCapacity <= 0 {
+		settings.DispatcherQueueCapacity = defaults.DispatcherQueueCapacity
 	}
 	cleanTargets := make([]models.TelegramTarget, 0, len(settings.TelegramTargets))
 	for _, target := range settings.TelegramTargets {
@@ -537,6 +542,8 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		NotifyNodeOffline:                   settings.NotifyNodeOffline,
 		NotifyNodeOnline:                    settings.NotifyNodeOnline,
 		NodeOfflineGraceMinutes:             settings.NodeOfflineGraceMinutes,
+		DispatcherQueueCapacity:             settings.DispatcherQueueCapacity,
+		NotifyDispatcherDrops:               settings.NotifyDispatcherDrops,
 	}
 	if includeSecret {
 		view.TelegramBotToken = settings.TelegramBotToken

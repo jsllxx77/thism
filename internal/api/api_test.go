@@ -1488,6 +1488,8 @@ func TestGetDispatcherRuntimeStats(t *testing.T) {
 		NotifyNodeOffline:                   true,
 		NotifyNodeOnline:                    true,
 		NodeOfflineGraceMinutes:             2,
+		DispatcherQueueCapacity:             1,
+		NotifyDispatcherDrops:               false,
 	}); err != nil {
 		t.Fatalf("UpsertNotificationSettings: %v", err)
 	}

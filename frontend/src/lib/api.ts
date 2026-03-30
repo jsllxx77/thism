@@ -192,6 +192,8 @@ export type NotificationSettings = {
   notify_node_offline: boolean
   notify_node_online: boolean
   node_offline_grace_minutes: number
+  dispatcher_queue_capacity: number
+  notify_dispatcher_drops: boolean
 }
 
 export type TestNotificationRequest = {

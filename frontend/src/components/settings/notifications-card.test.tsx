@@ -41,6 +41,8 @@ describe("notifications card", () => {
       notify_node_offline: true,
       notify_node_online: true,
       node_offline_grace_minutes: 2,
+      dispatcher_queue_capacity: 32,
+      notify_dispatcher_drops: true,
     })
     updateNotificationSettingsMock.mockResolvedValue({
       enabled: true,
@@ -60,6 +62,8 @@ describe("notifications card", () => {
       notify_node_offline: true,
       notify_node_online: true,
       node_offline_grace_minutes: 2,
+      dispatcher_queue_capacity: 64,
+      notify_dispatcher_drops: false,
     })
     sendTestNotificationMock.mockResolvedValue({ ok: true })
     nodesMock.mockResolvedValue({
@@ -79,10 +83,15 @@ describe("notifications card", () => {
     expect(screen.getByRole("button", { name: "Only selected nodes" })).toBeInTheDocument()
     expect(screen.getByLabelText("Enable notification for Alpha")).toBeChecked()
     expect(screen.getByLabelText("Enable notification for Beta")).not.toBeChecked()
+    expect(screen.getByLabelText("Dispatcher queue capacity")).toHaveValue(32)
+    expect(screen.getByRole("switch", { name: "Notify when dispatcher drops queued alerts" })).toHaveAttribute("aria-checked", "true")
 
     await user.type(screen.getByLabelText("Search nodes by name or ID"), "Beta")
     expect(screen.getByLabelText("Enable notification for Beta")).toBeInTheDocument()
     await user.click(screen.getByLabelText("Enable notification for Beta"))
+    await user.clear(screen.getByLabelText("Dispatcher queue capacity"))
+    await user.type(screen.getByLabelText("Dispatcher queue capacity"), "64")
+    await user.click(screen.getByRole("switch", { name: "Notify when dispatcher drops queued alerts" }))
     await user.clear(screen.getByLabelText("Telegram bot token"))
     await user.type(screen.getByLabelText("Telegram bot token"), "123:abc")
     await user.click(screen.getByRole("button", { name: "Save notifications" }))
@@ -98,6 +107,8 @@ describe("notifications card", () => {
       notify_node_offline: true,
       notify_node_online: true,
       node_offline_grace_minutes: 2,
+      dispatcher_queue_capacity: 64,
+      notify_dispatcher_drops: false,
     })
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
   })

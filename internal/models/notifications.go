@@ -12,6 +12,8 @@ const (
 	NotificationChannelTelegram NotificationChannel = "telegram"
 )
 
+const DefaultDispatcherQueueCapacity = 256
+
 const (
 	AlertSeverityWarning  AlertSeverity = "warning"
 	AlertSeverityCritical AlertSeverity = "critical"
@@ -20,10 +22,11 @@ const (
 )
 
 const (
-	ResourceMetricCPU        ResourceMetric = "cpu"
-	ResourceMetricMemory     ResourceMetric = "memory"
-	ResourceMetricDisk       ResourceMetric = "disk"
-	ResourceMetricNodeStatus ResourceMetric = "node_status"
+	ResourceMetricCPU             ResourceMetric = "cpu"
+	ResourceMetricMemory          ResourceMetric = "memory"
+	ResourceMetricDisk            ResourceMetric = "disk"
+	ResourceMetricNodeStatus      ResourceMetric = "node_status"
+	ResourceMetricDispatcherQueue ResourceMetric = "dispatcher_queue"
 )
 
 type TelegramTarget struct {
@@ -60,6 +63,8 @@ type NotificationSettings struct {
 	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
 	NotifyNodeOnline                    bool             `json:"notify_node_online"`
 	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
+	DispatcherQueueCapacity             int              `json:"dispatcher_queue_capacity"`
+	NotifyDispatcherDrops               bool             `json:"notify_dispatcher_drops"`
 }
 
 type NotificationSettingsView struct {
@@ -83,6 +88,8 @@ type NotificationSettingsView struct {
 	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
 	NotifyNodeOnline                    bool             `json:"notify_node_online"`
 	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
+	DispatcherQueueCapacity             int              `json:"dispatcher_queue_capacity"`
+	NotifyDispatcherDrops               bool             `json:"notify_dispatcher_drops"`
 }
 
 type AlertEvent struct {
@@ -93,4 +100,5 @@ type AlertEvent struct {
 	Value      float64        `json:"value"`
 	Threshold  float64        `json:"threshold"`
 	ObservedAt int64          `json:"observed_at"`
+	Details    string         `json:"details,omitempty"`
 }

@@ -46,10 +46,11 @@ func (s *TelegramSender) Send(settings models.NotificationSettings, event models
 
 func formatTelegramMessage(event models.AlertEvent) string {
 	metricLabel := map[models.ResourceMetric]string{
-		models.ResourceMetricCPU:        "CPU",
-		models.ResourceMetricMemory:     "Memory",
-		models.ResourceMetricDisk:       "Disk",
-		models.ResourceMetricNodeStatus: "Node status",
+		models.ResourceMetricCPU:             "CPU",
+		models.ResourceMetricMemory:          "Memory",
+		models.ResourceMetricDisk:            "Disk",
+		models.ResourceMetricNodeStatus:      "Node status",
+		models.ResourceMetricDispatcherQueue: "Dispatcher queue",
 	}[event.Metric]
 	severityLabel := map[models.AlertSeverity]string{
 		models.AlertSeverityWarning:  "Warning",
@@ -76,6 +77,19 @@ func formatTelegramMessage(event models.AlertEvent) string {
 			emoji,
 			escapeTelegramMarkdown(status),
 			escapeTelegramMarkdown(event.NodeName),
+			timestamp,
+		)
+	}
+	if event.Metric == models.ResourceMetricDispatcherQueue {
+		details := strings.TrimSpace(event.Details)
+		if details == "" {
+			details = fmt.Sprintf("Dropped jobs: %.0f\nQueue capacity: %.0f", event.Value, event.Threshold)
+		}
+		return fmt.Sprintf(
+			"🚨 *%s dispatcher alert*\nComponent: *%s*\n%s\nTime: `%s`",
+			escapeTelegramMarkdown(severityLabel),
+			escapeTelegramMarkdown(event.NodeName),
+			escapeTelegramMarkdown(details),
 			timestamp,
 		)
 	}

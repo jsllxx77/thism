@@ -34,6 +34,8 @@ func testNotificationSettings() models.NotificationSettings {
 		NotifyNodeOffline:                   true,
 		NotifyNodeOnline:                    true,
 		NodeOfflineGraceMinutes:             2,
+		DispatcherQueueCapacity:             1,
+		NotifyDispatcherDrops:               false,
 	}
 }
 

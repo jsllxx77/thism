@@ -1,6 +1,7 @@
 package alerting
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -24,8 +25,16 @@ type dispatchJob struct {
 	observedAt int64
 }
 
-const DefaultDispatcherQueueCapacity = 256
 const DefaultDispatcherDropLogInterval = time.Minute
+
+const dispatcherAlertNodeID = "dispatcher"
+const dispatcherAlertComponentName = "Alert Dispatcher"
+
+type dispatcherRuntimeConfig struct {
+	queueCapacity         int
+	notifyDispatcherDrops bool
+	settings              models.NotificationSettings
+}
 
 type DispatcherStats struct {
 	Capacity      int
@@ -71,13 +80,11 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(st *store.Store, sender Sender) *Dispatcher {
-	return NewDispatcherWithCapacity(st, sender, DefaultDispatcherQueueCapacity)
+	return NewDispatcherWithCapacity(st, sender, resolveDispatcherQueueCapacity(st, models.DefaultDispatcherQueueCapacity))
 }
 
 func NewDispatcherWithCapacity(st *store.Store, sender Sender, capacity int) *Dispatcher {
-	if capacity <= 0 {
-		capacity = DefaultDispatcherQueueCapacity
-	}
+	capacity = normalizeDispatcherQueueCapacity(capacity)
 
 	dispatcher := &Dispatcher{
 		queueCapacity:   capacity,
@@ -105,9 +112,10 @@ func (d *Dispatcher) Close() {
 		d.mu.Lock()
 		d.closed = true
 		d.cond.Broadcast()
+		capacity := d.queueCapacity
 		d.mu.Unlock()
 		d.wg.Wait()
-		recordDispatcherClosed(d.queueCapacity)
+		recordDispatcherClosed(capacity)
 	})
 }
 
@@ -137,6 +145,9 @@ func (d *Dispatcher) EnqueueHeartbeat(node *models.Node, online bool, observedAt
 }
 
 func (d *Dispatcher) enqueue(job dispatchJob) bool {
+	config := d.loadRuntimeConfig()
+	d.applyQueueCapacity(config.queueCapacity)
+
 	d.mu.Lock()
 	if d.closed {
 		d.stats.Dropped += 1
@@ -153,6 +164,9 @@ func (d *Dispatcher) enqueue(job dispatchJob) bool {
 		if shouldLog && logf != nil {
 			logf("alert dispatcher: dropping queued jobs due to full queue (dropped_since_last_log=%d total_dropped=%d queue_depth=%d capacity=%d)", droppedSinceLastLog, totalDropped, queueDepth, capacity)
 		}
+		if config.notifyDispatcherDrops {
+			go d.sendDropAlert(config.settings, totalDropped, queueDepth, capacity)
+		}
 		return false
 	}
 
@@ -168,10 +182,7 @@ func (d *Dispatcher) enqueue(job dispatchJob) bool {
 }
 
 func (d *Dispatcher) shouldLogDropLocked() (bool, uint64, uint64, int, int) {
-	now := time.Now()
-	if d != nil && d.now != nil {
-		now = d.now()
-	}
+	now := d.currentTime()
 	interval := d.dropLogInterval
 	if interval <= 0 {
 		interval = DefaultDispatcherDropLogInterval
@@ -275,6 +286,16 @@ func recordDispatcherClosed(capacity int) {
 	}
 }
 
+func recordDispatcherCapacityChanged(previous, current int) {
+	dispatcherRuntimeStats.mu.Lock()
+	defer dispatcherRuntimeStats.mu.Unlock()
+	delta := current - previous
+	dispatcherRuntimeStats.stats.TotalCapacity += delta
+	if dispatcherRuntimeStats.stats.TotalCapacity < 0 {
+		dispatcherRuntimeStats.stats.TotalCapacity = 0
+	}
+}
+
 func recordDispatcherEnqueue(queueDepth int) {
 	dispatcherRuntimeStats.mu.Lock()
 	defer dispatcherRuntimeStats.mu.Unlock()
@@ -327,4 +348,139 @@ func cloneAlertMetrics(metrics *models.MetricsPayload) models.MetricsPayload {
 		cloned.Disk = append([]models.DiskStats(nil), metrics.Disk...)
 	}
 	return cloned
+}
+
+func resolveDispatcherQueueCapacity(st *store.Store, fallback int) int {
+	if fallback <= 0 {
+		fallback = models.DefaultDispatcherQueueCapacity
+	}
+	if st == nil {
+		return fallback
+	}
+	settings, err := st.GetNotificationSettings()
+	if err != nil {
+		return fallback
+	}
+	return normalizeDispatcherQueueCapacity(settings.DispatcherQueueCapacity)
+}
+
+func normalizeDispatcherQueueCapacity(capacity int) int {
+	if capacity <= 0 {
+		return models.DefaultDispatcherQueueCapacity
+	}
+	return capacity
+}
+
+func (d *Dispatcher) currentTime() time.Time {
+	if d != nil && d.now != nil {
+		return d.now()
+	}
+	return time.Now()
+}
+
+func (d *Dispatcher) currentQueueCapacity() int {
+	if d == nil {
+		return models.DefaultDispatcherQueueCapacity
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return normalizeDispatcherQueueCapacity(d.queueCapacity)
+}
+
+func (d *Dispatcher) loadRuntimeConfig() dispatcherRuntimeConfig {
+	fallbackCapacity := d.currentQueueCapacity()
+	config := dispatcherRuntimeConfig{
+		queueCapacity: fallbackCapacity,
+		settings: models.NotificationSettings{
+			DispatcherQueueCapacity: fallbackCapacity,
+		},
+	}
+	if d == nil || d.evaluator == nil || d.evaluator.Store == nil {
+		return config
+	}
+	settings, err := d.evaluator.Store.GetNotificationSettings()
+	if err != nil {
+		if d.logf != nil {
+			d.logf("alert dispatcher: load notification settings failed: %v", err)
+		}
+		return config
+	}
+	config.settings = settings
+	config.queueCapacity = normalizeDispatcherQueueCapacity(settings.DispatcherQueueCapacity)
+	config.notifyDispatcherDrops = settings.NotifyDispatcherDrops
+	return config
+}
+
+func (d *Dispatcher) applyQueueCapacity(capacity int) {
+	if d == nil {
+		return
+	}
+	capacity = normalizeDispatcherQueueCapacity(capacity)
+	previous := 0
+	changed := false
+	d.mu.Lock()
+	previous = d.queueCapacity
+	if d.queueCapacity != capacity {
+		d.queueCapacity = capacity
+		d.stats.Capacity = capacity
+		changed = true
+	}
+	d.mu.Unlock()
+	if changed {
+		recordDispatcherCapacityChanged(previous, capacity)
+	}
+}
+
+func (d *Dispatcher) sendDropAlert(settings models.NotificationSettings, totalDropped uint64, queueDepth, capacity int) {
+	if d == nil || d.evaluator == nil || d.evaluator.Store == nil || d.evaluator.Sender == nil {
+		return
+	}
+	if !settings.Enabled || settings.Channel != string(models.NotificationChannelTelegram) || len(settings.TelegramTargets) == 0 {
+		return
+	}
+
+	observedAt := d.currentTime().Unix()
+	allowed, err := d.evaluator.Store.ShouldSendAlert(
+		dispatcherAlertNodeID,
+		string(models.ResourceMetricDispatcherQueue),
+		string(models.AlertSeverityWarning),
+		time.Duration(settings.CooldownMinutes)*time.Minute,
+		observedAt,
+	)
+	if err != nil {
+		if d.logf != nil {
+			d.logf("alert dispatcher: check dispatcher drop alert cooldown failed: %v", err)
+		}
+		return
+	}
+	if !allowed {
+		return
+	}
+
+	event := models.AlertEvent{
+		NodeID:     dispatcherAlertNodeID,
+		NodeName:   dispatcherAlertComponentName,
+		Metric:     models.ResourceMetricDispatcherQueue,
+		Severity:   models.AlertSeverityWarning,
+		Value:      float64(totalDropped),
+		Threshold:  float64(capacity),
+		ObservedAt: observedAt,
+		Details:    fmt.Sprintf("Dropped jobs: %d\nQueue depth: %d / %d", totalDropped, queueDepth, capacity),
+	}
+	if err := d.evaluator.Sender.Send(settings, event); err != nil {
+		if d.logf != nil {
+			d.logf("alert dispatcher: send dispatcher drop alert failed: %v", err)
+		}
+		return
+	}
+	if err := d.evaluator.Store.RecordAlertDelivery(
+		dispatcherAlertNodeID,
+		string(models.ResourceMetricDispatcherQueue),
+		string(models.AlertSeverityWarning),
+		event.Value,
+		event.Threshold,
+		observedAt,
+	); err != nil && d.logf != nil {
+		d.logf("alert dispatcher: record dispatcher drop alert failed: %v", err)
+	}
 }
