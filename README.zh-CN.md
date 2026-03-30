@@ -53,6 +53,11 @@ docker compose up -d
 
 ### 从源码构建
 
+前置条件：
+
+- Go 1.24 或更高版本
+- Node.js 和 npm，因为 `make build` 会先构建内嵌前端，再构建 Go 二进制
+
 ```bash
 make build
 
@@ -83,8 +88,11 @@ curl -X POST http://localhost:8080/api/nodes/register \
 ### 3. 或直接使用服务端提供的安装脚本
 
 ```bash
-curl -fsSL "http://your-host:8080/install.sh?token=NODE_TOKEN&name=web-1" | bash
+curl -fsSL -H "Authorization: Bearer NODE_TOKEN" \
+  "http://your-host:8080/install.sh?name=web-1" | sudo bash
 ```
+
+这个安装命令需要以 root 身份执行，因为它会把 `thism-agent` 安装到 `/usr/local/bin`，写入 `/etc/systemd/system/thism-agent.service`，并通过 `systemctl` 重启服务。
 
 安装脚本会自动识别 `linux/amd64` 与 `linux/arm64`，将 `thism-agent` 安装到 `/usr/local/bin/thism-agent`，并写入 `systemd` 服务，便于后续自动重启与重连。
 
@@ -181,12 +189,14 @@ sudo cp deploy/thism-server.service /etc/systemd/system/
 
 # 先把 YOUR_ADMIN_TOKEN / YOUR_ADMIN_USER / YOUR_ADMIN_PASSWORD 等占位符改成真实值，
 # 并确保 `thism` 用户和 /var/lib/thism 目录已存在。
+sudo systemctl daemon-reload
 sudo systemctl enable --now thism-server
 
 # Agent（部署在每台被监控机器上）
 sudo cp deploy/thism-agent.service /etc/systemd/system/
 
 # 启动前请先替换 YOUR_SERVER_HOST / YOUR_NODE_TOKEN / YOUR_NODE_NAME。
+sudo systemctl daemon-reload
 sudo systemctl enable --now thism-agent
 ```
 

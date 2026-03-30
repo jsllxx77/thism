@@ -53,6 +53,11 @@ The `.env` file contains the API token and web login credentials. Keep it privat
 
 ### Build from source
 
+Prerequisites:
+
+- Go 1.24 or newer
+- Node.js and npm, because `make build` compiles the embedded frontend before building the Go binaries
+
 ```bash
 make build
 
@@ -83,8 +88,11 @@ curl -X POST http://localhost:8080/api/nodes/register \
 ### 3. Or install the agent from the server-hosted script
 
 ```bash
-curl -fsSL "http://your-host:8080/install.sh?token=NODE_TOKEN&name=web-1" | bash
+curl -fsSL -H "Authorization: Bearer NODE_TOKEN" \
+  "http://your-host:8080/install.sh?name=web-1" | sudo bash
 ```
+
+Run the install command as root because it installs `thism-agent` into `/usr/local/bin`, writes `/etc/systemd/system/thism-agent.service`, and restarts the service with `systemctl`.
 
 The install script detects `linux/amd64` and `linux/arm64`, installs `thism-agent` to `/usr/local/bin/thism-agent`, and writes a `systemd` unit that reconnects to the server after restart.
 
@@ -181,12 +189,14 @@ sudo cp deploy/thism-server.service /etc/systemd/system/
 
 # Edit placeholders such as YOUR_ADMIN_TOKEN / YOUR_ADMIN_USER / YOUR_ADMIN_PASSWORD
 # and ensure the `thism` user plus /var/lib/thism exist before starting.
+sudo systemctl daemon-reload
 sudo systemctl enable --now thism-server
 
 # Agent (on each monitored machine)
 sudo cp deploy/thism-agent.service /etc/systemd/system/
 
 # Edit YOUR_SERVER_HOST / YOUR_NODE_TOKEN / YOUR_NODE_NAME before starting.
+sudo systemctl daemon-reload
 sudo systemctl enable --now thism-agent
 ```
 
