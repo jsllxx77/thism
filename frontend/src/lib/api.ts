@@ -209,6 +209,16 @@ export type VersionMeta = {
   build_time: string
 }
 
+export type DispatcherRuntimeStats = {
+  active_dispatchers: number
+  total_capacity: number
+  queue_depth: number
+  high_watermark: number
+  enqueued: number
+  processed: number
+  dropped: number
+}
+
 export const api = {
   session: () => req<SessionInfo>("/api/auth/session"),
   nodes: () => req<{ nodes: Node[] }>("/api/nodes"),
@@ -285,5 +295,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   versionMeta: () => req<VersionMeta>("/api/meta/version"),
+  dispatcherRuntimeStats: () => req<DispatcherRuntimeStats>("/api/meta/dispatcher"),
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),
 }

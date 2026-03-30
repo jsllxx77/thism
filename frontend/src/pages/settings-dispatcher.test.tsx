@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { Settings } from "./Settings"
 
 const nodesMock = vi.fn()
@@ -13,6 +12,7 @@ const updateDashboardSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
+const dispatcherRuntimeStatsMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -26,10 +26,11 @@ vi.mock("../lib/api", () => ({
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
+    dispatcherRuntimeStats: (...args: unknown[]) => dispatcherRuntimeStatsMock(...args),
   },
 }))
 
-describe("settings change password", () => {
+describe("settings dispatcher diagnostics", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
@@ -41,7 +42,8 @@ describe("settings change password", () => {
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
-    agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
+    dispatcherRuntimeStatsMock.mockReset()
+
     nodesMock.mockResolvedValue({ nodes: [] })
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
@@ -88,48 +90,55 @@ describe("settings change password", () => {
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
   })
 
-  it("validates password confirmation before submitting", async () => {
-    const user = userEvent.setup()
+  it("renders dispatcher runtime diagnostics", async () => {
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 2,
+      total_capacity: 512,
+      queue_depth: 7,
+      high_watermark: 12,
+      enqueued: 120,
+      processed: 119,
+      dropped: 1,
+    })
+
     render(<Settings />)
 
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass")
-    await user.type(screen.getByLabelText(/confirm new password/i), "different-pass")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
-
-    expect(screen.getByRole("alert")).toHaveTextContent("New password and confirmation do not match.")
-    expect(changePasswordMock).not.toHaveBeenCalled()
+    expect(await screen.findByRole("heading", { name: "Dispatcher Diagnostics", level: 3 })).toBeInTheDocument()
+    expect(screen.getByText("512")).toBeInTheDocument()
+    expect(screen.getByText("12")).toBeInTheDocument()
+    expect(screen.getByText("119")).toBeInTheDocument()
+    expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
   })
 
-  it("submits change password request and shows success state", async () => {
-    const user = userEvent.setup()
-    changePasswordMock.mockResolvedValue({ ok: true })
+  it("shows an error state when dispatcher diagnostics fail to load", async () => {
+    dispatcherRuntimeStatsMock.mockRejectedValue(new Error("boom"))
+
     render(<Settings />)
 
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+    expect(await screen.findByText("Dispatcher diagnostics are currently unavailable.")).toBeInTheDocument()
+  })
+
+  it("refreshes dispatcher diagnostics on refreshNonce changes", async () => {
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 1,
+      total_capacity: 256,
+      queue_depth: 0,
+      high_watermark: 0,
+      enqueued: 0,
+      processed: 0,
+      dropped: 0,
+    })
+
+    const { rerender } = render(<Settings refreshNonce={0} />)
 
     await waitFor(() => {
-      expect(changePasswordMock).toHaveBeenCalledWith("old-pass", "new-pass-123")
+      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
     })
-    expect(await screen.findByText("Password updated successfully.")).toBeInTheDocument()
 
-    expect(screen.getByLabelText(/current password/i).className).toContain("rounded-xl")
-    expect(screen.getByRole("button", { name: /update password/i }).className).toContain("rounded-xl")
-  })
+    rerender(<Settings refreshNonce={1} />)
 
-  it("shows backend error when password change fails", async () => {
-    const user = userEvent.setup()
-    changePasswordMock.mockRejectedValue(new Error("invalid current password"))
-    render(<Settings />)
-
-    await user.type(screen.getByLabelText(/current password/i), "bad-old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("invalid current password")
+    await waitFor(() => {
+      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(2)
+    })
   })
 })

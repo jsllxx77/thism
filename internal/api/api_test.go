@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/thism-dev/thism/internal/alerting"
 	"github.com/thism-dev/thism/internal/api"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
@@ -22,6 +23,20 @@ import (
 	sharedversion "github.com/thism-dev/thism/internal/version"
 	_ "modernc.org/sqlite"
 )
+
+type blockingAlertSender struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingAlertSender) Send(_ models.NotificationSettings, _ models.AlertEvent) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-s.release
+	return nil
+}
 
 func TestGetNodesEmpty(t *testing.T) {
 	s, _ := store.New(":memory:")
@@ -1448,6 +1463,107 @@ func TestGetVersionMetadata(t *testing.T) {
 	}
 	if body.BuildTime != "2026-03-18T04:00:00Z" {
 		t.Fatalf("expected build time to round-trip, got %q", body.BuildTime)
+	}
+}
+
+func TestGetDispatcherRuntimeStats(t *testing.T) {
+	baseline := alerting.DispatcherRuntimeStatsSnapshot()
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	if err := s.UpsertNotificationSettings(models.NotificationSettings{
+		Enabled:                             true,
+		Channel:                             string(models.NotificationChannelTelegram),
+		TelegramBotToken:                    "token",
+		TelegramTargets:                     []models.TelegramTarget{{ChatID: "-1001"}},
+		CPUWarningPercent:                   80,
+		CPUCriticalPercent:                  90,
+		MemWarningPercent:                   80,
+		MemCriticalPercent:                  90,
+		DiskWarningPercent:                  80,
+		DiskCriticalPercent:                 90,
+		CooldownMinutes:                     30,
+		RecoverySuccessiveSamples:           3,
+		RecoveryNotificationCooldownMinutes: 30,
+		NotifyNodeOffline:                   true,
+		NotifyNodeOnline:                    true,
+		NodeOfflineGraceMinutes:             2,
+	}); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+
+	sender := &blockingAlertSender{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	dispatcher := alerting.NewDispatcherWithCapacity(s, sender, 1)
+
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+	metrics := &models.MetricsPayload{
+		TS:   1000,
+		CPU:  95,
+		Mem:  models.MemStats{Used: 10, Total: 100},
+		Disk: []models.DiskStats{{Used: 10, Total: 100}},
+	}
+
+	if ok := dispatcher.EnqueueMetrics(node, metrics); !ok {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected dispatcher worker to begin processing")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, false, 1001); !ok {
+		t.Fatal("expected second enqueue to succeed")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1002); ok {
+		t.Fatal("expected third enqueue to be dropped")
+	}
+	defer func() {
+		close(sender.release)
+		dispatcher.Close()
+	}()
+
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/meta/dispatcher", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		ActiveDispatchers int    `json:"active_dispatchers"`
+		TotalCapacity     int    `json:"total_capacity"`
+		QueueDepth        int    `json:"queue_depth"`
+		HighWatermark     int    `json:"high_watermark"`
+		Enqueued          uint64 `json:"enqueued"`
+		Processed         uint64 `json:"processed"`
+		Dropped           uint64 `json:"dropped"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.ActiveDispatchers < baseline.ActiveDispatchers+1 {
+		t.Fatalf("expected active_dispatchers to increase, baseline=%+v body=%+v", baseline, body)
+	}
+	if body.TotalCapacity < baseline.TotalCapacity+1 {
+		t.Fatalf("expected total_capacity to increase, baseline=%+v body=%+v", baseline, body)
+	}
+	if body.QueueDepth < baseline.QueueDepth+1 {
+		t.Fatalf("expected queue_depth to increase, baseline=%+v body=%+v", baseline, body)
+	}
+	if body.Enqueued < baseline.Enqueued+2 {
+		t.Fatalf("expected enqueued to increase by at least 2, baseline=%+v body=%+v", baseline, body)
+	}
+	if body.Dropped < baseline.Dropped+1 {
+		t.Fatalf("expected dropped to increase by at least 1, baseline=%+v body=%+v", baseline, body)
 	}
 }
 

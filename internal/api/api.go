@@ -412,6 +412,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 			handleChangePassword(w, req, s, authState)
 		})
 
+		r.Get("/api/meta/dispatcher", func(w http.ResponseWriter, req *http.Request) {
+			handleGetDispatcherRuntimeStats(w, req)
+		})
+
 		r.Put("/api/settings/metrics-retention", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdateMetricsRetention(w, req, s)
 		})
@@ -1580,6 +1584,10 @@ func handleGetVersionMetadata(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func handleGetDispatcherRuntimeStats(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, alerting.DispatcherRuntimeStatsSnapshot())
+}
+
 func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	if s == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
@@ -1648,18 +1656,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // -----------------------------------------------------------------------
 
 func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
-	nodes, err := s.ListNodes()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	nodeIDs := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		nodeIDs = append(nodeIDs, n.ID)
-	}
-
-	latestMetrics, err := s.LatestMetricsByNodeIDs(nodeIDs)
+	nodes, err := s.ListNodesWithLatestMetrics()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1675,7 +1672,6 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 	for _, n := range nodes {
 		current := *n
 		_, current.Online = onlineSet[current.ID]
-		current.LatestMetrics = latestMetrics[current.ID]
 		if role == accessRoleGuest {
 			current.IP = ""
 		}
@@ -2317,7 +2313,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 // -----------------------------------------------------------------------
 
 func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
-	alertEvaluator := &alerting.Evaluator{Store: s, Sender: notify.NewTelegramSender(nil)}
+	alertDispatcher := alerting.NewDispatcher(s, notify.NewTelegramSender(nil))
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		// Also accept bearer token in header for agent connections.
@@ -2342,9 +2338,10 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 	}
 
 	h.Register(node.ID, conn)
-	_ = alertEvaluator.ProcessHeartbeat(node, true, time.Now().Unix())
+	alertDispatcher.EnqueueHeartbeat(node, true, time.Now().Unix())
 	defer func() {
-		_ = alertEvaluator.ProcessHeartbeat(node, false, time.Now().Unix())
+		alertDispatcher.EnqueueHeartbeat(node, false, time.Now().Unix())
+		alertDispatcher.Close()
 		conn.Close()
 		h.Unregister(node.ID)
 	}()
@@ -2379,12 +2376,8 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 
 		// Persist metrics before broadcasting them so the dashboard does not
 		// show data that failed to land in storage.
-		if err := s.InsertMetrics(node.ID, &payload); err != nil {
-			log.Printf("agent metrics: persist sample for node %s failed: %v", node.ID, err)
-			continue
-		}
-		if err := s.UpdateNodeMetadata(node.ID, resolveNodeIP(r, payload.IP), payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
-			log.Printf("agent metrics: update node metadata for node %s failed: %v", node.ID, err)
+		if err := s.ApplyAgentSnapshot(node.ID, &payload, resolveNodeIP(r, payload.IP), lastSeen); err != nil {
+			log.Printf("agent metrics: persist snapshot for node %s failed: %v", node.ID, err)
 			continue
 		}
 		if strings.TrimSpace(payload.AgentVersion) != "" {
@@ -2393,45 +2386,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			}
 		}
 
-		// Persist processes as a JSON string.
-		if len(payload.Processes) > 0 {
-			procJSON, err := json.Marshal(payload.Processes)
-			if err == nil {
-				if err := s.UpsertProcesses(node.ID, payload.TS, string(procJSON)); err != nil {
-					log.Printf("agent metrics: persist processes for node %s failed: %v", node.ID, err)
-				}
-			} else {
-				log.Printf("agent metrics: marshal processes for node %s failed: %v", node.ID, err)
-			}
-		}
-
-		// Persist service checks.
-		for _, svc := range payload.Services {
-			if err := s.UpsertServiceCheck(node.ID, svc.Name, svc.Status); err != nil {
-				log.Printf("agent metrics: persist service check %q for node %s failed: %v", svc.Name, node.ID, err)
-			}
-		}
-
-		// Persist docker availability and container snapshot when the agent reports it.
-		if payload.DockerAvailable != nil {
-			available := *payload.DockerAvailable
-			containers := payload.Containers
-			if containers == nil || !available {
-				containers = []models.DockerContainer{}
-			}
-			containersJSON, err := json.Marshal(containers)
-			if err == nil {
-				if err := s.UpsertDockerContainers(node.ID, payload.TS, available, string(containersJSON)); err != nil {
-					log.Printf("agent metrics: persist docker snapshot for node %s failed: %v", node.ID, err)
-				}
-			} else {
-				log.Printf("agent metrics: marshal docker snapshot for node %s failed: %v", node.ID, err)
-			}
-		}
-
-		if err := alertEvaluator.Process(node, &payload); err != nil {
-			log.Printf("agent metrics: evaluate alerts for node %s failed: %v", node.ID, err)
-		}
+		alertDispatcher.EnqueueMetrics(node, &payload)
 
 		// Broadcast metrics to dashboard subscribers, wrapped with node_id.
 		h.Broadcast(models.WSMessage{
@@ -2607,17 +2562,7 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h
 }
 
 func dashboardInitialMessages(s *store.Store, h *hub.Hub) ([]models.WSMessage, error) {
-	nodes, err := s.ListNodes()
-	if err != nil {
-		return nil, err
-	}
-
-	nodeIDs := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		nodeIDs = append(nodeIDs, n.ID)
-	}
-
-	latestMetrics, err := s.LatestMetricsByNodeIDs(nodeIDs)
+	nodes, err := s.ListNodesWithLatestMetrics()
 	if err != nil {
 		return nil, err
 	}
@@ -2638,7 +2583,7 @@ func dashboardInitialMessages(s *store.Store, h *hub.Hub) ([]models.WSMessage, e
 			},
 		})
 
-		snapshot := latestMetrics[node.ID]
+		snapshot := node.LatestMetrics
 		if snapshot == nil {
 			continue
 		}

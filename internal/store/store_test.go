@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -487,5 +488,182 @@ func TestStoreDashboardSettingsDefaultsAndRoundTrip(t *testing.T) {
 	}
 	if stored.ShowDashboardCardIP {
 		t.Fatal("expected stored dashboard card IP visibility to round-trip as false")
+	}
+}
+
+func TestStoreListNodesWithLatestMetrics(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-b", Name: "beta", Token: "token-b", CreatedAt: 1700000001}); err != nil {
+		t.Fatalf("UpsertNode beta: %v", err)
+	}
+	if err := s.UpsertNode(&models.Node{ID: "node-a", Name: "alpha", Token: "token-a", CreatedAt: 1700000000}); err != nil {
+		t.Fatalf("UpsertNode alpha: %v", err)
+	}
+
+	if err := s.InsertMetrics("node-a", &models.MetricsPayload{
+		TS:            1700000010,
+		CPU:           11.5,
+		UptimeSeconds: 123,
+		Mem:           models.MemStats{Used: 512, Total: 1024},
+		Net:           models.NetStats{RxBytes: 100, TxBytes: 200},
+	}); err != nil {
+		t.Fatalf("InsertMetrics alpha old: %v", err)
+	}
+	if err := s.InsertMetrics("node-a", &models.MetricsPayload{
+		TS:            1700000020,
+		CPU:           23.5,
+		UptimeSeconds: 456,
+		Mem:           models.MemStats{Used: 768, Total: 1024},
+		Net:           models.NetStats{RxBytes: 300, TxBytes: 400},
+	}); err != nil {
+		t.Fatalf("InsertMetrics alpha latest: %v", err)
+	}
+	if err := s.InsertMetrics("node-b", &models.MetricsPayload{
+		TS:            1700000030,
+		CPU:           44.0,
+		UptimeSeconds: 789,
+		Mem:           models.MemStats{Used: 2048, Total: 4096},
+		Net:           models.NetStats{RxBytes: 500, TxBytes: 600},
+	}); err != nil {
+		t.Fatalf("InsertMetrics beta latest: %v", err)
+	}
+
+	nodes, err := s.ListNodesWithLatestMetrics()
+	if err != nil {
+		t.Fatalf("ListNodesWithLatestMetrics: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	if nodes[0].Name != "alpha" || nodes[1].Name != "beta" {
+		t.Fatalf("expected nodes ordered by name, got %q then %q", nodes[0].Name, nodes[1].Name)
+	}
+	if nodes[0].LatestMetrics == nil {
+		t.Fatal("expected alpha latest metrics to be populated")
+	}
+	if nodes[0].LatestMetrics.CPU != 23.5 || nodes[0].LatestMetrics.UptimeSeconds != 456 {
+		t.Fatalf("unexpected alpha latest metrics: %#v", nodes[0].LatestMetrics)
+	}
+	if nodes[1].LatestMetrics == nil {
+		t.Fatal("expected beta latest metrics to be populated")
+	}
+	if nodes[1].LatestMetrics.CPU != 44.0 || nodes[1].LatestMetrics.NetTx != 600 {
+		t.Fatalf("unexpected beta latest metrics: %#v", nodes[1].LatestMetrics)
+	}
+}
+
+func TestStoreApplyAgentSnapshot(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{
+		ID:        "node-1",
+		Name:      "agent-node",
+		Token:     "agent-token",
+		CreatedAt: 1700000000,
+	}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	dockerAvailable := true
+	payload := &models.MetricsPayload{
+		TS:            1700000100,
+		CPU:           31.25,
+		OS:            "linux",
+		Arch:          "amd64",
+		AgentVersion:  "v1.2.3",
+		UptimeSeconds: 900,
+		Hardware: &models.NodeHardware{
+			CPUModel:    "EPYC",
+			MemoryTotal: 17179869184,
+		},
+		Mem: models.MemStats{Used: 2048, Total: 8192},
+		Disk: []models.DiskStats{
+			{Mount: "/", Used: 4096, Total: 16384},
+		},
+		Net: models.NetStats{RxBytes: 555, TxBytes: 777},
+		Processes: []models.Process{
+			{PID: 10, Name: "nginx", CPUPercent: 1.2, MemRSS: 1234},
+		},
+		Services: []models.Service{
+			{Name: "nginx", Status: "running"},
+			{Name: "sshd", Status: "running"},
+		},
+		DockerAvailable: &dockerAvailable,
+		Containers: []models.DockerContainer{
+			{ID: "abcdef123456", Name: "web", Image: "nginx:latest", State: "running", Status: "Up 1 hour"},
+		},
+	}
+
+	if err := s.ApplyAgentSnapshot("node-1", payload, "198.51.100.10", 1700000101); err != nil {
+		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+
+	rows, err := s.QueryMetrics("node-1", 1700000000, 1700000200)
+	if err != nil {
+		t.Fatalf("QueryMetrics: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 metrics row, got %d", len(rows))
+	}
+	if rows[0].CPU != 31.25 || rows[0].DiskTotal != 16384 || rows[0].NetTx != 777 {
+		t.Fatalf("unexpected metrics row: %#v", rows[0])
+	}
+
+	node, err := s.GetNodeByID("node-1")
+	if err != nil {
+		t.Fatalf("GetNodeByID: %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node to exist")
+	}
+	if node.IP != "198.51.100.10" || node.AgentVersion != "v1.2.3" || node.LastSeen != 1700000101 {
+		t.Fatalf("unexpected node metadata after snapshot: %#v", node)
+	}
+	if node.Hardware == nil || node.Hardware.CPUModel != "EPYC" {
+		t.Fatalf("expected hardware metadata to persist, got %#v", node.Hardware)
+	}
+
+	processesJSON, err := s.GetProcesses("node-1")
+	if err != nil {
+		t.Fatalf("GetProcesses: %v", err)
+	}
+	var processes []models.Process
+	if err := json.Unmarshal([]byte(processesJSON), &processes); err != nil {
+		t.Fatalf("unmarshal processes: %v", err)
+	}
+	if len(processes) != 1 || processes[0].Name != "nginx" {
+		t.Fatalf("unexpected processes snapshot: %#v", processes)
+	}
+
+	services, err := s.GetServiceChecks("node-1")
+	if err != nil {
+		t.Fatalf("GetServiceChecks: %v", err)
+	}
+	if len(services) != 2 {
+		t.Fatalf("expected 2 service checks, got %d", len(services))
+	}
+
+	dockerReady, containersJSON, err := s.GetDockerContainers("node-1")
+	if err != nil {
+		t.Fatalf("GetDockerContainers: %v", err)
+	}
+	if !dockerReady {
+		t.Fatal("expected docker availability to persist")
+	}
+	var containers []models.DockerContainer
+	if err := json.Unmarshal([]byte(containersJSON), &containers); err != nil {
+		t.Fatalf("unmarshal containers: %v", err)
+	}
+	if len(containers) != 1 || containers[0].Name != "web" {
+		t.Fatalf("unexpected docker snapshot: %#v", containers)
 	}
 }

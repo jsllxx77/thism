@@ -34,6 +34,7 @@ import (
 
 const DefaultReportInterval = 5 * time.Second
 const DefaultAutoUpdateInterval = 30 * time.Minute
+const DefaultHeavySnapshotInterval = time.Minute
 
 const (
 	ipv4DefaultRoutePath = "/proc/net/route"
@@ -57,33 +58,41 @@ type websocketConn interface {
 type websocketDialFunc func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error)
 
 var (
-	cpuInfoFunc        = cpu.Info
-	cpuCountsFunc      = cpu.Counts
-	virtualMemoryFunc  = mem.VirtualMemory
-	hostInfoFunc       = host.Info
-	diskPartitionsFunc = disk.Partitions
-	diskUsageFunc      = disk.Usage
-	ioCountersFunc     = psnet.IOCounters
-	netInterfacesFunc  = net.Interfaces
-	readFileFunc       = os.ReadFile
-	httpClient         = &http.Client{Timeout: 2 * time.Minute}
+	cpuInfoFunc                 = cpu.Info
+	cpuPercentFunc              = cpu.Percent
+	cpuCountsFunc               = cpu.Counts
+	virtualMemoryFunc           = mem.VirtualMemory
+	hostInfoFunc                = host.Info
+	diskPartitionsFunc          = disk.Partitions
+	diskUsageFunc               = disk.Usage
+	ioCountersFunc              = psnet.IOCounters
+	netInterfacesFunc           = net.Interfaces
+	readFileFunc                = os.ReadFile
+	nowFunc                     = time.Now
+	collectProcessSamplesFunc   = collectProcessSamples
+	collectDockerContainersFunc = collectDockerContainers
+	httpClient                  = &http.Client{Timeout: 2 * time.Minute}
 )
 
 // Collector gathers system metrics and pushes them to the ThisM server via WebSocket.
 type Collector struct {
-	serverURL          string
-	token              string
-	name               string
-	nodeIP             string
-	agentVersion       string
-	reportInterval     time.Duration
-	preferIPv4Fallback bool
-	dialWebsocket      websocketDialFunc
-	hardwareProfile    *models.NodeHardware
-	selfUpdateFunc     func(models.AgentCommandPayload, func(models.UpdateJobTargetStatus, string, string) error) error
-	updateMu           sync.Mutex
-	updateInProgress   bool
-	autoUpdateInterval time.Duration
+	serverURL             string
+	token                 string
+	name                  string
+	nodeIP                string
+	agentVersion          string
+	reportInterval        time.Duration
+	preferIPv4Fallback    bool
+	dialWebsocket         websocketDialFunc
+	hardwareProfile       *models.NodeHardware
+	heavySnapshotInterval time.Duration
+	lastHeavySnapshotAt   time.Time
+	heavySnapshotSent     bool
+	now                   func() time.Time
+	selfUpdateFunc        func(models.AgentCommandPayload, func(models.UpdateJobTargetStatus, string, string) error) error
+	updateMu              sync.Mutex
+	updateInProgress      bool
+	autoUpdateInterval    time.Duration
 }
 
 // New creates a new Collector with the default report interval.
@@ -98,15 +107,17 @@ func NewWithInterval(serverURL, token, name, nodeIP string, reportInterval time.
 	}
 
 	c := &Collector{
-		serverURL:          serverURL,
-		token:              token,
-		name:               name,
-		nodeIP:             strings.TrimSpace(nodeIP),
-		agentVersion:       "dev",
-		reportInterval:     reportInterval,
-		dialWebsocket:      defaultWebsocketDial,
-		preferIPv4Fallback: false,
-		autoUpdateInterval: DefaultAutoUpdateInterval,
+		serverURL:             serverURL,
+		token:                 token,
+		name:                  name,
+		nodeIP:                strings.TrimSpace(nodeIP),
+		agentVersion:          "dev",
+		reportInterval:        reportInterval,
+		dialWebsocket:         defaultWebsocketDial,
+		preferIPv4Fallback:    false,
+		heavySnapshotInterval: DefaultHeavySnapshotInterval,
+		now:                   nowFunc,
+		autoUpdateInterval:    DefaultAutoUpdateInterval,
 	}
 	c.selfUpdateFunc = c.runSelfUpdate
 	c.SetAgentVersion(c.agentVersion)
@@ -348,6 +359,7 @@ func collectNetworkStats() models.NetStats {
 
 // Collect gathers a single snapshot of system metrics.
 func (c *Collector) Collect() (*models.MetricsPayload, error) {
+	currentTime := c.currentTime()
 	ip := c.nodeIP
 	if net.ParseIP(ip) == nil {
 		ip = detectLocalIP()
@@ -355,22 +367,19 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 
 	payload := &models.MetricsPayload{
 		Type:         "metrics",
-		TS:           time.Now().Unix(),
+		TS:           currentTime.Unix(),
 		IP:           ip,
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		AgentVersion: c.agentVersion,
 		Services:     []models.Service{},
 	}
-	if payload.Hardware = c.hardware(); payload.Hardware != nil && payload.Hardware.IsEmpty() {
-		payload.Hardware = nil
-	}
 	if hostInfo, err := hostInfoFunc(); err == nil && hostInfo != nil {
 		payload.UptimeSeconds = hostInfo.Uptime
 	}
 
 	// CPU — blocks for 1 second for an accurate reading.
-	cpuPercents, err := cpu.Percent(time.Second, false)
+	cpuPercents, err := cpuPercentFunc(time.Second, false)
 	if err == nil && len(cpuPercents) > 0 {
 		payload.CPU = cpuPercents[0]
 	}
@@ -403,53 +412,91 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	// Network — aggregate across non-loopback interfaces only.
 	payload.Net = collectNetworkStats()
 
-	// Processes — collect up to 30 processes.
-	procs, err := process.Processes()
-	processSamples := make([]models.Process, 0, 64)
-	if err == nil {
-		for _, p := range procs {
-			name, err := p.Name()
-			if err != nil {
-				continue
+	if c.shouldCollectHeavySnapshot(currentTime) {
+		if !c.heavySnapshotSent {
+			if payload.Hardware = c.hardware(); payload.Hardware != nil && payload.Hardware.IsEmpty() {
+				payload.Hardware = nil
 			}
-			memInfo, err := p.MemoryInfo()
-			if err != nil {
-				continue
-			}
-			var rss uint64
-			if memInfo != nil {
-				rss = memInfo.RSS
-			}
-			// Kernel/system helper threads are typically memory-less and add mostly
-			// noisy 0.0 CPU rows in the UI; skip them to keep the snapshot useful.
-			if rss == 0 {
-				continue
-			}
-			cpuPct, err := p.CPUPercent()
-			if err != nil {
-				continue
-			}
-			processSamples = append(processSamples, models.Process{
-				PID:        p.Pid,
-				Name:       name,
-				CPUPercent: cpuPct,
-				MemRSS:     rss,
-			})
 		}
-	}
-	payload.Processes = selectTopProcesses(processSamples, 30)
-	if payload.Processes == nil {
-		payload.Processes = []models.Process{}
-	}
+		processSamples, err := collectProcessSamplesFunc()
+		if err == nil {
+			payload.Processes = selectTopProcesses(processSamples, 30)
+			if payload.Processes == nil {
+				payload.Processes = []models.Process{}
+			}
+		}
 
-	// Docker containers — graceful degradation when Docker is unavailable.
-	containers, dockerAvailable, _ := collectDockerContainers()
-	payload.DockerAvailable = &dockerAvailable
-	if dockerAvailable {
-		payload.Containers = containers
+		// Docker containers — graceful degradation when Docker is unavailable.
+		containers, dockerAvailable, _ := collectDockerContainersFunc()
+		payload.DockerAvailable = &dockerAvailable
+		if dockerAvailable {
+			payload.Containers = containers
+		}
+		c.lastHeavySnapshotAt = currentTime
+		c.heavySnapshotSent = true
 	}
 
 	return payload, nil
+}
+
+func (c *Collector) currentTime() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return nowFunc()
+}
+
+func (c *Collector) shouldCollectHeavySnapshot(currentTime time.Time) bool {
+	if c == nil {
+		return true
+	}
+	if !c.heavySnapshotSent {
+		return true
+	}
+	interval := c.heavySnapshotInterval
+	if interval <= 0 {
+		interval = DefaultHeavySnapshotInterval
+	}
+	return currentTime.Sub(c.lastHeavySnapshotAt) >= interval
+}
+
+func collectProcessSamples() ([]models.Process, error) {
+	procs, err := process.Processes()
+	if err != nil {
+		return nil, err
+	}
+
+	processSamples := make([]models.Process, 0, 64)
+	for _, p := range procs {
+		name, err := p.Name()
+		if err != nil {
+			continue
+		}
+		memInfo, err := p.MemoryInfo()
+		if err != nil {
+			continue
+		}
+		var rss uint64
+		if memInfo != nil {
+			rss = memInfo.RSS
+		}
+		// Kernel/system helper threads are typically memory-less and add mostly
+		// noisy 0.0 CPU rows in the UI; skip them to keep the snapshot useful.
+		if rss == 0 {
+			continue
+		}
+		cpuPct, err := p.CPUPercent()
+		if err != nil {
+			continue
+		}
+		processSamples = append(processSamples, models.Process{
+			PID:        p.Pid,
+			Name:       name,
+			CPUPercent: cpuPct,
+			MemRSS:     rss,
+		})
+	}
+	return processSamples, nil
 }
 
 func (c *Collector) hardware() *models.NodeHardware {
@@ -547,6 +594,8 @@ func (c *Collector) connect() error {
 	} else {
 		log.Printf("collector: connected to %s", targetURL)
 	}
+	c.heavySnapshotSent = false
+	c.lastHeavySnapshotAt = time.Time{}
 
 	ticker := time.NewTicker(c.reportInterval)
 	defer ticker.Stop()
@@ -938,4 +987,3 @@ func detectLocalIP() string {
 
 	return ""
 }
-

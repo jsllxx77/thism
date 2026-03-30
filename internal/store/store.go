@@ -18,12 +18,17 @@ type Store struct {
 	db *sql.DB
 }
 
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 const DefaultMetricsRetentionDays = 7
 
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
 const adminSessionTTL = 30 * 24 * time.Hour
+const sqliteBusyTimeout = 5000
 
 var metricsRetentionOptions = []int{7, 30}
 
@@ -84,11 +89,29 @@ func New(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 
 	s := &Store{db: db}
+	if err := s.configureConnectionPragmas(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite pragmas: %w", err)
+	}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return s, nil
+}
+
+func (s *Store) configureConnectionPragmas() error {
+	pragmas := []string{
+		`PRAGMA journal_mode = WAL`,
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteBusyTimeout),
+		`PRAGMA synchronous = NORMAL`,
+	}
+	for _, pragma := range pragmas {
+		if _, err := s.db.Exec(pragma); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close releases the underlying database connection.
@@ -979,6 +1002,32 @@ func decodeHardware(raw string) *models.NodeHardware {
 	return &hardware
 }
 
+func sqlPlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.Grow((count * 2) - 1)
+	for index := 0; index < count; index++ {
+		if index > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteByte('?')
+	}
+	return builder.String()
+}
+
+func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
+	var used uint64
+	var total uint64
+	for _, disk := range disks {
+		used += disk.Used
+		total += disk.Total
+	}
+	return used, total
+}
+
 // UpsertNode inserts or updates a node record.
 func (s *Store) UpsertNode(node *models.Node) error {
 	hardwareJSON, err := encodeHardware(node.Hardware)
@@ -1014,6 +1063,10 @@ func (s *Store) UpdateLastSeen(nodeID string) error {
 // UpdateNodeMetadata updates node network/system metadata from live agent signals.
 // Empty values are ignored so we never overwrite existing data with blanks.
 func (s *Store) UpdateNodeMetadata(nodeID, ip, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
+	return updateNodeMetadataWith(s.db, nodeID, ip, osName, arch, agentVersion, hardware, lastSeen)
+}
+
+func updateNodeMetadataWith(db sqlExecer, nodeID, ip, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
 	updates := make([]string, 0, 4)
 	args := make([]any, 0, 6)
 	hardwareJSON, err := encodeHardware(hardware)
@@ -1050,7 +1103,7 @@ func (s *Store) UpdateNodeMetadata(nodeID, ip, osName, arch, agentVersion string
 	args = append(args, nodeID)
 
 	query := "UPDATE nodes SET " + strings.Join(updates, ", ") + " WHERE id = ?"
-	_, err = s.db.Exec(query, args...)
+	_, err = db.Exec(query, args...)
 	return err
 }
 
@@ -1157,13 +1210,16 @@ func (s *Store) DeleteNode(nodeID string) error {
 // InsertMetrics inserts a single metrics sample for a node.
 // Disk partitions are aggregated into a single used/total pair.
 func (s *Store) InsertMetrics(nodeID string, m *models.MetricsPayload) error {
-	var diskUsed, diskTotal uint64
-	for _, d := range m.Disk {
-		diskUsed += d.Used
-		diskTotal += d.Total
+	return insertMetricsWith(s.db, nodeID, m)
+}
+
+func insertMetricsWith(db sqlExecer, nodeID string, m *models.MetricsPayload) error {
+	if m == nil {
+		return fmt.Errorf("metrics payload is nil")
 	}
 
-	_, err := s.db.Exec(`
+	diskUsed, diskTotal := aggregateDiskTotals(m.Disk)
+	_, err := db.Exec(`
 INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nodeID, m.TS, m.CPU,
@@ -1304,15 +1360,53 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
 // LatestMetricsByNodeIDs returns the most recent metrics sample for each node ID.
 func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.NodeMetricsSnapshot, error) {
 	result := make(map[string]*models.NodeMetricsSnapshot, len(nodeIDs))
-
+	args := make([]any, 0, len(nodeIDs))
+	seen := make(map[string]struct{}, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		args = append(args, nodeID)
+	}
+	if len(args) == 0 {
+		return result, nil
+	}
+
+	rows, err := s.db.Query(fmt.Sprintf(`
+SELECT node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
+FROM (
+	SELECT
+		node_id,
+		ts,
+		cpu_percent,
+		mem_used,
+		mem_total,
+		disk_used,
+		disk_total,
+		net_rx,
+		net_tx,
+		uptime_seconds,
+		ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY ts DESC, id DESC) AS row_num
+	FROM metrics
+	WHERE node_id IN (%s)
+)
+WHERE row_num = 1
+`, sqlPlaceholders(len(args))), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var nodeID string
 		var snapshot models.NodeMetricsSnapshot
-		err := s.db.QueryRow(`
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
-FROM metrics
-WHERE node_id = ?
-ORDER BY ts DESC, id DESC
-LIMIT 1`, nodeID).Scan(
+		if err := rows.Scan(
+			&nodeID,
 			&snapshot.TS,
 			&snapshot.CPU,
 			&snapshot.MemUsed,
@@ -1322,17 +1416,40 @@ LIMIT 1`, nodeID).Scan(
 			&snapshot.NetRx,
 			&snapshot.NetTx,
 			&snapshot.UptimeSeconds,
-		)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
+		); err != nil {
 			return nil, err
 		}
 		result[nodeID] = &snapshot
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return result, nil
+}
+
+func (s *Store) ListNodesWithLatestMetrics() ([]*models.Node, error) {
+	nodes, err := s.ListNodes()
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) == 0 {
+		return nodes, nil
+	}
+
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.ID)
+	}
+
+	latestMetrics, err := s.LatestMetricsByNodeIDs(nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		node.LatestMetrics = latestMetrics[node.ID]
+	}
+	return nodes, nil
 }
 
 // PruneOldMetrics deletes metrics rows older than retentionDays days.
@@ -1361,7 +1478,11 @@ func (s *Store) PruneOldMetrics(retentionDays int) error {
 // UpsertProcesses stores a pre-serialized JSON process list for a node,
 // overwriting any existing record.
 func (s *Store) UpsertProcesses(nodeID string, ts int64, data string) error {
-	_, err := s.db.Exec(`
+	return upsertProcessesWith(s.db, nodeID, ts, data)
+}
+
+func upsertProcessesWith(db sqlExecer, nodeID string, ts int64, data string) error {
+	_, err := db.Exec(`
 		INSERT INTO processes (node_id, ts, data) VALUES (?, ?, ?)
 		ON CONFLICT(node_id) DO UPDATE SET ts=excluded.ts, data=excluded.data
 	`, nodeID, ts, data)
@@ -1389,6 +1510,10 @@ func (s *Store) GetProcesses(nodeID string) (string, error) {
 // UpsertDockerContainers stores Docker availability and a pre-serialized JSON
 // container list for a node, overwriting any existing record.
 func (s *Store) UpsertDockerContainers(nodeID string, ts int64, dockerAvailable bool, data string) error {
+	return upsertDockerContainersWith(s.db, nodeID, ts, dockerAvailable, data)
+}
+
+func upsertDockerContainersWith(db sqlExecer, nodeID string, ts int64, dockerAvailable bool, data string) error {
 	if strings.TrimSpace(data) == "" {
 		data = "[]"
 	}
@@ -1398,7 +1523,7 @@ func (s *Store) UpsertDockerContainers(nodeID string, ts int64, dockerAvailable 
 		available = 1
 	}
 
-	_, err := s.db.Exec(`
+	_, err := db.Exec(`
 		INSERT INTO docker_containers (node_id, ts, docker_available, data) VALUES (?, ?, ?, ?)
 		ON CONFLICT(node_id) DO UPDATE SET ts=excluded.ts, docker_available=excluded.docker_available, data=excluded.data
 	`, nodeID, ts, available, data)
@@ -1426,11 +1551,68 @@ func (s *Store) GetDockerContainers(nodeID string) (bool, string, error) {
 
 // UpsertServiceCheck inserts or updates a service check result for a node.
 func (s *Store) UpsertServiceCheck(nodeID, name, status string) error {
-	_, err := s.db.Exec(`
+	return upsertServiceCheckWith(s.db, nodeID, name, status, time.Now().Unix())
+}
+
+func upsertServiceCheckWith(db sqlExecer, nodeID, name, status string, checkedAt int64) error {
+	if checkedAt <= 0 {
+		checkedAt = time.Now().Unix()
+	}
+
+	_, err := db.Exec(`
 		INSERT INTO service_checks (node_id, name, status, last_checked) VALUES (?, ?, ?, ?)
 		ON CONFLICT(node_id, name) DO UPDATE SET status=excluded.status, last_checked=excluded.last_checked
-	`, nodeID, name, status, time.Now().Unix())
+	`, nodeID, name, status, checkedAt)
 	return err
+}
+
+func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload, resolvedIP string, lastSeen int64) error {
+	if payload == nil {
+		return fmt.Errorf("metrics payload is nil")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := insertMetricsWith(tx, nodeID, payload); err != nil {
+		return err
+	}
+	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
+		return err
+	}
+	if len(payload.Processes) > 0 {
+		processesJSON, err := json.Marshal(payload.Processes)
+		if err != nil {
+			return err
+		}
+		if err := upsertProcessesWith(tx, nodeID, payload.TS, string(processesJSON)); err != nil {
+			return err
+		}
+	}
+	for _, service := range payload.Services {
+		if err := upsertServiceCheckWith(tx, nodeID, service.Name, service.Status, payload.TS); err != nil {
+			return err
+		}
+	}
+	if payload.DockerAvailable != nil {
+		dockerAvailable := *payload.DockerAvailable
+		containers := payload.Containers
+		if containers == nil || !dockerAvailable {
+			containers = []models.DockerContainer{}
+		}
+		containersJSON, err := json.Marshal(containers)
+		if err != nil {
+			return err
+		}
+		if err := upsertDockerContainersWith(tx, nodeID, payload.TS, dockerAvailable, string(containersJSON)); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // GetServiceChecks returns all service checks for a node as a slice of maps.
