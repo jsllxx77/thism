@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
-import { api, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
+import { api, type DispatcherRuntimeStats, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
 import { Input } from "../ui/input"
 
 const defaultTarget = (): TelegramTarget => ({ chat_id: "", topic_id: undefined, name: "" })
+const DISPATCHER_HEALTH_REFRESH_INTERVAL_MS = 5000
 
 const defaultState: NotificationSettings = {
   enabled: false,
@@ -31,8 +32,11 @@ const defaultState: NotificationSettings = {
 
 export function NotificationsCard() {
   const { t } = useLanguage()
+  const dispatcherHealthRequest = (api as { dispatcherRuntimeStats?: () => Promise<DispatcherRuntimeStats> }).dispatcherRuntimeStats
+  const dispatcherHealthSupported = typeof dispatcherHealthRequest === "function"
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
   const [nodes, setNodes] = useState<Node[]>([])
+  const [dispatcherStats, setDispatcherStats] = useState<DispatcherRuntimeStats | null>(null)
   const [nodeSearch, setNodeSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -76,6 +80,36 @@ export function NotificationsCard() {
     }
   }, [t])
 
+  useEffect(() => {
+    if (!dispatcherHealthSupported) {
+      return
+    }
+
+    let cancelled = false
+    const load = async () => {
+      try {
+        const response = await dispatcherHealthRequest?.()
+        if (!cancelled && response) {
+          setDispatcherStats(response)
+        }
+      } catch {
+        if (!cancelled) {
+          setDispatcherStats(null)
+        }
+      }
+    }
+
+    void load()
+    const intervalId = window.setInterval(() => {
+      void load()
+    }, DISPATCHER_HEALTH_REFRESH_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [dispatcherHealthRequest, dispatcherHealthSupported])
+
   const updateTarget = (index: number, patch: Partial<TelegramTarget>) => {
     setSettings((current: NotificationSettings) => ({
       ...current,
@@ -110,6 +144,19 @@ export function NotificationsCard() {
     () => nodes.filter((node) => selectedNodeIDs.includes(node.id)),
     [nodes, selectedNodeIDs],
   )
+
+  const dispatcherHealthState = useMemo<"normal" | "backlogged" | "dropped" | null>(() => {
+    if (!dispatcherStats) {
+      return null
+    }
+    if (dispatcherStats.dropped > 0) {
+      return "dropped"
+    }
+    if (dispatcherStats.queue_depth > 0) {
+      return "backlogged"
+    }
+    return "normal"
+  }, [dispatcherStats])
 
   const toggleNode = (nodeID: string) => {
     setSettings((current: NotificationSettings) => {
@@ -284,6 +331,27 @@ export function NotificationsCard() {
             ))}
           </div>
 
+          {dispatcherHealthSupported && dispatcherHealthState ? (
+            <div className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.dispatcherHealthLabel")}</span>
+              <span
+                className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                  dispatcherHealthState === "dropped"
+                    ? "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                    : dispatcherHealthState === "backlogged"
+                      ? "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                }`}
+              >
+                {dispatcherHealthState === "dropped"
+                  ? t("settingsPage.dispatcherHealthDropped")
+                  : dispatcherHealthState === "backlogged"
+                    ? t("settingsPage.dispatcherHealthBacklogged")
+                    : t("settingsPage.dispatcherHealthNormal")}
+              </span>
+            </div>
+          ) : null}
+
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -355,7 +423,7 @@ export function NotificationsCard() {
             )}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div data-testid="notification-toggle-grid" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
               <span className="flex flex-col">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOffline")}</span>
@@ -410,7 +478,9 @@ export function NotificationsCard() {
                 />
               </button>
             </label>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+          </div>
+
+          <label data-testid="offline-grace-field" className="block text-xs font-medium text-slate-600 dark:text-slate-300">
               {t("settingsPage.nodeOfflineGraceMinutes")}
               <Input
                 type="number"
@@ -419,8 +489,7 @@ export function NotificationsCard() {
                 onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, node_offline_grace_minutes: Number(event.target.value) }))}
                 className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
               />
-            </label>
-          </div>
+          </label>
 
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={saving || testing} className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium">

@@ -7,6 +7,7 @@ const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const sendTestNotificationMock = vi.fn()
 const nodesMock = vi.fn()
+const dispatcherRuntimeStatsMock = vi.fn()
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -14,6 +15,7 @@ vi.mock("../../lib/api", () => ({
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     sendTestNotification: (...args: unknown[]) => sendTestNotificationMock(...args),
     nodes: (...args: unknown[]) => nodesMock(...args),
+    dispatcherRuntimeStats: (...args: unknown[]) => dispatcherRuntimeStatsMock(...args),
   },
 }))
 
@@ -23,6 +25,7 @@ describe("notifications card", () => {
     updateNotificationSettingsMock.mockReset()
     sendTestNotificationMock.mockReset()
     nodesMock.mockReset()
+    dispatcherRuntimeStatsMock.mockReset()
     notificationSettingsMock.mockResolvedValue({
       enabled: true,
       channel: "telegram",
@@ -71,6 +74,15 @@ describe("notifications card", () => {
         { id: "node-1", name: "Alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
         { id: "node-2", name: "Beta", ip: "2.2.2.2", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: false },
       ],
+    })
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 1,
+      total_capacity: 256,
+      queue_depth: 0,
+      high_watermark: 0,
+      enqueued: 0,
+      processed: 0,
+      dropped: 0,
     })
   })
 
@@ -126,5 +138,57 @@ describe("notifications card", () => {
       target: { name: "Ops", chat_id: "-100123", topic_id: 99 },
     })
     expect(await screen.findByText("Test notification sent.")).toBeInTheDocument()
+  })
+
+  it("shows a normal dispatcher health summary when the queue is clear", async () => {
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("Alert delivery status")).toBeInTheDocument()
+    expect(screen.getByText("Normal")).toBeInTheDocument()
+  })
+
+  it("shows a backlogged dispatcher health summary when alerts are queued", async () => {
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 1,
+      total_capacity: 256,
+      queue_depth: 3,
+      high_watermark: 4,
+      enqueued: 9,
+      processed: 6,
+      dropped: 0,
+    })
+
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("Alert delivery status")).toBeInTheDocument()
+    expect(screen.getByText("Backlogged")).toBeInTheDocument()
+  })
+
+  it("shows drops detected when dispatcher jobs were dropped", async () => {
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 1,
+      total_capacity: 256,
+      queue_depth: 8,
+      high_watermark: 8,
+      enqueued: 15,
+      processed: 7,
+      dropped: 2,
+    })
+
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("Alert delivery status")).toBeInTheDocument()
+    expect(screen.getByText("Drops detected")).toBeInTheDocument()
+  })
+
+  it("renders offline grace input in a separate block from the toggle buttons", async () => {
+    render(<NotificationsCard />)
+
+    const graceInput = await screen.findByLabelText("Offline grace (minutes)")
+    const toggleGrid = screen.getByTestId("notification-toggle-grid")
+    const graceField = screen.getByTestId("offline-grace-field")
+
+    expect(toggleGrid).not.toContainElement(graceInput)
+    expect(graceField).toContainElement(graceInput)
   })
 })

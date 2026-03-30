@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEve
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { DashboardVisibilityCard } from "../components/settings/DashboardVisibilityCard"
-import { DispatcherDiagnosticsCard } from "../components/settings/DispatcherDiagnosticsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
@@ -205,7 +204,6 @@ export function Settings({ refreshNonce = 0 }: Props) {
       <MetricsRetentionCard />
       <DashboardVisibilityCard />
       <NotificationsCard />
-      <DispatcherDiagnosticsCard refreshNonce={refreshNonce} />
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>

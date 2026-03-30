@@ -30,7 +30,7 @@ vi.mock("../lib/api", () => ({
   },
 }))
 
-describe("settings dispatcher diagnostics", () => {
+describe("settings dispatcher health", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
@@ -90,7 +90,7 @@ describe("settings dispatcher diagnostics", () => {
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
   })
 
-  it("renders dispatcher runtime diagnostics", async () => {
+  it("renders dispatcher health inside notifications without a standalone diagnostics card", async () => {
     dispatcherRuntimeStatsMock.mockResolvedValue({
       active_dispatchers: 2,
       total_capacity: 512,
@@ -103,22 +103,25 @@ describe("settings dispatcher diagnostics", () => {
 
     render(<Settings />)
 
-    expect(await screen.findByRole("heading", { name: "Dispatcher Diagnostics", level: 3 })).toBeInTheDocument()
-    expect(screen.getByText("512")).toBeInTheDocument()
-    expect(screen.getByText("12")).toBeInTheDocument()
-    expect(screen.getByText("119")).toBeInTheDocument()
+    expect(await screen.findByText("Alert delivery status")).toBeInTheDocument()
+    expect(screen.getByText("Drops detected")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Dispatcher Diagnostics", level: 3 })).not.toBeInTheDocument()
     expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
   })
 
-  it("shows an error state when dispatcher diagnostics fail to load", async () => {
+  it("does not render dispatcher health when diagnostics fail to load", async () => {
     dispatcherRuntimeStatsMock.mockRejectedValue(new Error("boom"))
 
     render(<Settings />)
 
-    expect(await screen.findByText("Dispatcher diagnostics are currently unavailable.")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.queryByText("Alert delivery status")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Dispatcher Diagnostics", level: 3 })).not.toBeInTheDocument()
   })
 
-  it("refreshes dispatcher diagnostics on refreshNonce changes", async () => {
+  it("loads dispatcher health once through the notifications card", async () => {
     dispatcherRuntimeStatsMock.mockResolvedValue({
       active_dispatchers: 1,
       total_capacity: 256,
@@ -129,16 +132,10 @@ describe("settings dispatcher diagnostics", () => {
       dropped: 0,
     })
 
-    const { rerender } = render(<Settings refreshNonce={0} />)
+    render(<Settings refreshNonce={0} />)
 
     await waitFor(() => {
       expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
-    })
-
-    rerender(<Settings refreshNonce={1} />)
-
-    await waitFor(() => {
-      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(2)
     })
   })
 })
