@@ -318,6 +318,9 @@ func TestFrontendQueryTokenCreatesSessionCookie(t *testing.T) {
 	if sessionCookie.Value == "admin-token" {
 		t.Fatalf("expected thism_admin cookie to avoid exposing the admin token, got %q", sessionCookie.Value)
 	}
+	if sessionCookie.Secure {
+		t.Fatalf("expected plain HTTP bootstrap cookie to be non-secure by default")
+	}
 
 	secondReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	secondReq.AddCookie(sessionCookie)
@@ -329,6 +332,76 @@ func TestFrontendQueryTokenCreatesSessionCookie(t *testing.T) {
 	}
 	if strings.TrimSpace(secondResp.Body.String()) != "frontend" {
 		t.Fatalf("expected frontend handler body, got %q", secondResp.Body.String())
+	}
+}
+
+func TestPasswordLoginSetsSecureCookieBehindHTTPSProxy(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	if err := s.UpsertAdminAuth("admin", "secret-pass"); err != nil {
+		t.Fatalf("UpsertAdminAuth: %v", err)
+	}
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	loginReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/login",
+		strings.NewReader(`{"username":"admin","password":"secret-pass"}`),
+	)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Forwarded-Proto", "https")
+	loginResp := httptest.NewRecorder()
+	router.ServeHTTP(loginResp, loginReq)
+
+	if loginResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for password login, got %d: %s", loginResp.Code, loginResp.Body.String())
+	}
+
+	var sessionCookie *http.Cookie
+	for _, cookie := range loginResp.Result().Cookies() {
+		if cookie.Name == "thism_admin" {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected thism_admin cookie to be set on successful password login")
+	}
+	if !sessionCookie.Secure {
+		t.Fatal("expected admin session cookie to be Secure behind HTTPS proxy")
+	}
+}
+
+func TestGuestLoginSetsSecureCookieBehindHTTPSProxy(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	guestReq := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
+	guestReq.Header.Set("X-Forwarded-Proto", "https")
+	guestResp := httptest.NewRecorder()
+	router.ServeHTTP(guestResp, guestReq)
+
+	if guestResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for guest login, got %d: %s", guestResp.Code, guestResp.Body.String())
+	}
+
+	var guestCookie *http.Cookie
+	for _, cookie := range guestResp.Result().Cookies() {
+		if cookie.Name == "thism_guest" {
+			guestCookie = cookie
+			break
+		}
+	}
+	if guestCookie == nil {
+		t.Fatal("expected thism_guest cookie to be set on guest login")
+	}
+	if !guestCookie.Secure {
+		t.Fatal("expected guest session cookie to be Secure behind HTTPS proxy")
 	}
 }
 

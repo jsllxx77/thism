@@ -541,7 +541,7 @@ func writeAdminSessionCookie(w http.ResponseWriter, r *http.Request, sessionID s
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		MaxAge:   int((30 * 24 * time.Hour).Seconds()),
 		Expires:  expiresAt,
 	})
@@ -554,7 +554,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})
@@ -572,7 +572,7 @@ func setGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 	})
 }
 
@@ -583,7 +583,7 @@ func clearGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})
@@ -2123,14 +2123,7 @@ func handleGetServices(w http.ResponseWriter, r *http.Request, s *store.Store) {
 }
 
 func buildInstallCommand(r *http.Request, token, name string) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
-		scheme = fwd
-	}
-	baseURL := scheme + "://" + r.Host
+	baseURL := buildBaseURL(r)
 
 	query := url.Values{}
 	query.Set("name", name)
@@ -2153,15 +2146,8 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
-		scheme = fwd
-	}
 	host := r.Host
-	baseURL := scheme + "://" + host
+	baseURL := requestScheme(r) + "://" + host
 	targetVersion := sharedversion.Version
 	if strings.TrimSpace(targetVersion) == "" {
 		targetVersion = "dev"
@@ -2281,14 +2267,7 @@ func resolveAgentBinaryPath(filename string) (string, error) {
 }
 
 func buildBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
-		scheme = fwd
-	}
-	return scheme + "://" + r.Host
+	return requestScheme(r) + "://" + r.Host
 }
 
 func buildDownloadURL(r *http.Request, filename string) string {
@@ -2475,6 +2454,33 @@ func sameOriginWebsocketRequest(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(originURL.Host, r.Host)
+}
+
+func requestIsSecure(r *http.Request) bool {
+	return requestScheme(r) == "https"
+}
+
+func requestScheme(r *http.Request) string {
+	if r == nil {
+		return "http"
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	if proto := forwardedProto(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		return proto
+	}
+	return "http"
+}
+
+func forwardedProto(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		proto := strings.ToLower(strings.TrimSpace(part))
+		if proto == "http" || proto == "https" {
+			return proto
+		}
+	}
+	return ""
 }
 
 func isPublicIP(value string) bool {
