@@ -90,4 +90,24 @@ describe("agent auto update status card", () => {
     expect(createAgentUpdateJobMock).toHaveBeenNthCalledWith(2, ["node-2"], "cccc2222dddd", "https://example.com/arm64", "sha-arm64")
     expect(screen.getByText("Queued updates for 2 nodes.")).toBeInTheDocument()
   })
+
+  it("disables immediate updates when all online agents already run the latest version", async () => {
+    const user = userEvent.setup()
+    nodesMock.mockResolvedValue({
+      nodes: [
+        { id: "node-1", name: "alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", agent_version: "aaaa1111bbbb", created_at: 0, last_seen: 0, online: true },
+        { id: "node-2", name: "beta", ip: "2.2.2.2", os: "linux", arch: "arm64", agent_version: "cccc2222dddd", created_at: 0, last_seen: 0, online: true },
+      ],
+    })
+
+    render(<Settings />)
+
+    const button = await screen.findByRole("button", { name: "Update now" })
+    expect(button).toBeDisabled()
+    expect(screen.getByText("0 online agents can update now")).toBeInTheDocument()
+
+    await user.click(button)
+
+    expect(createAgentUpdateJobMock).not.toHaveBeenCalled()
+  })
 })

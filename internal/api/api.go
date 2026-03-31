@@ -2148,10 +2148,8 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 
 	host := r.Host
 	baseURL := requestScheme(r) + "://" + host
-	targetVersion := sharedversion.Version
-	if strings.TrimSpace(targetVersion) == "" {
-		targetVersion = "dev"
-	}
+	amd64TargetVersion := resolveAgentTargetVersion("linux", "amd64")
+	arm64TargetVersion := resolveAgentTargetVersion("linux", "arm64")
 
 	script := "#!/bin/bash\nset -e\n\n" +
 		"TOKEN=\"" + token + "\"\n" +
@@ -2163,8 +2161,8 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"trap 'rm -f \"${TMP_BIN}\"' EXIT\n\n" +
 		"ARCH=$(uname -m)\n" +
 		"case \"$ARCH\" in\n" +
-		"  x86_64|amd64) ARCH=\"amd64\" ;;\n" +
-		"  aarch64|arm64) ARCH=\"arm64\" ;;\n" +
+		"  x86_64|amd64) ARCH=\"amd64\"; TARGET_VERSION=\"" + amd64TargetVersion + "\" ;;\n" +
+		"  aarch64|arm64) ARCH=\"arm64\"; TARGET_VERSION=\"" + arm64TargetVersion + "\" ;;\n" +
 		"  *) echo \"Unsupported architecture: $ARCH\"; exit 1 ;;\n" +
 		"esac\n\n" +
 		"OS=$(uname -s | tr '[:upper:]' '[:lower:]')\n" +
@@ -2177,7 +2175,6 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"curl -fsSL \"${BASE}/dl/${BINARY}\" -o \"${TMP_BIN}\"\n" +
 		"chmod +x \"${TMP_BIN}\"\n" +
 		"mv -f \"${TMP_BIN}\" \"${TARGET_BIN}\"\n" +
-		"TARGET_VERSION=\"" + targetVersion + "\"\n" +
 		"printf \"%s\\n\" \"${TARGET_VERSION}\" > \"${VERSION_FILE}\"\n" +
 		"trap - EXIT\n\n" +
 		"WS_SCHEME=\"ws\"\n" +
@@ -2226,10 +2223,7 @@ func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	digest := sha256.Sum256(raw)
 	checksum := strings.ToLower(hex.EncodeToString(digest[:]))
-	targetVersion := sharedversion.Version
-	if strings.TrimSpace(targetVersion) == "" {
-		targetVersion = "dev"
-	}
+	targetVersion := resolveAgentTargetVersion(osName, arch)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"target_version":         targetVersion,
 		"download_url":           buildDownloadURL(r, filename),
@@ -2264,6 +2258,48 @@ func resolveAgentBinaryPath(filename string) (string, error) {
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+func defaultAgentTargetVersion() string {
+	targetVersion := strings.TrimSpace(sharedversion.Version)
+	if targetVersion == "" {
+		return "dev"
+	}
+	return targetVersion
+}
+
+func resolveAgentBinaryVersionPath(filename string) (string, error) {
+	candidates := []string{
+		"dist/" + filename + ".version",
+		"../dist/" + filename + ".version",
+		"../../dist/" + filename + ".version",
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func resolveAgentTargetVersion(osName, arch string) string {
+	filename, ok := resolveAgentBinaryFilename(osName, arch)
+	if !ok {
+		return defaultAgentTargetVersion()
+	}
+	versionPath, err := resolveAgentBinaryVersionPath(filename)
+	if err != nil {
+		return defaultAgentTargetVersion()
+	}
+	raw, err := os.ReadFile(versionPath)
+	if err != nil {
+		return defaultAgentTargetVersion()
+	}
+	targetVersion := strings.TrimSpace(string(raw))
+	if targetVersion == "" {
+		return defaultAgentTargetVersion()
+	}
+	return targetVersion
 }
 
 func buildBaseURL(r *http.Request) string {

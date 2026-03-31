@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,6 +204,18 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 		sharedversion.Version = originalVersion
 	})
 
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
 	s, _ := store.New(":memory:")
 	defer s.Close()
 	h := hub.New(s)
@@ -276,6 +289,61 @@ func TestFrontendRequiresAdminAuth(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthenticated frontend request, got %d", w.Code)
+	}
+}
+
+func TestInstallScriptPrefersArtifactVersionFiles(t *testing.T) {
+	originalVersion := sharedversion.Version
+	sharedversion.Version = "v1.2.3"
+	t.Cleanup(func() {
+		sharedversion.Version = originalVersion
+	})
+
+	tempDir := t.TempDir()
+	distDir := filepath.Join(tempDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("create dist dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "thism-agent-linux-amd64.version"), []byte("v9.9.9-amd64\n"), 0o644); err != nil {
+		t.Fatalf("write amd64 version sidecar: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "thism-agent-linux-arm64.version"), []byte("v9.9.9-arm64\n"), 0o644); err != nil {
+		t.Fatalf("write arm64 version sidecar: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/install.sh?token=node-token-1&name=Bitsflow", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	script := w.Body.String()
+	if !strings.Contains(script, `TARGET_VERSION="v9.9.9-amd64"`) {
+		t.Fatalf("expected install script to embed amd64 artifact version, got: %s", script)
+	}
+	if !strings.Contains(script, `TARGET_VERSION="v9.9.9-arm64"`) {
+		t.Fatalf("expected install script to embed arm64 artifact version, got: %s", script)
 	}
 }
 

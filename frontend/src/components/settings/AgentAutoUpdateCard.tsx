@@ -29,6 +29,20 @@ function normalizeArch(arch?: string): SupportedArch | null {
   return null
 }
 
+function needsUpdate(node: Node, manifest: AgentReleaseManifest): boolean {
+  const targetVersion = manifest.target_version.trim()
+  const reportedVersion = node.agent_version?.trim() ?? ""
+
+  if (targetVersion === "") {
+    return true
+  }
+  if (reportedVersion === "") {
+    return true
+  }
+
+  return reportedVersion !== targetVersion
+}
+
 export function AgentAutoUpdateCard({ nodes }: Props) {
   const { t, translateApiError } = useLanguage()
   const [releaseState, setReleaseState] = useState<ReleaseState>({ amd64: null, arm64: null })
@@ -81,7 +95,7 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
     }
 
     const nodeIDs = nodes
-      .filter((node) => node.online && node.os === "linux" && normalizeArch(node.arch) === arch)
+      .filter((node) => node.online && node.os === "linux" && normalizeArch(node.arch) === arch && needsUpdate(node, manifest))
       .map((node) => node.id)
 
     if (nodeIDs.length === 0) {

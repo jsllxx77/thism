@@ -26,10 +26,13 @@ build-server: build-frontend
 
 build-agent:
 	GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(LDFLAGS)" -o bin/thism-agent ./cmd/agent
+	printf "%s\n" "$(VERSION)" > bin/thism-agent.version
 
 build-agent-all:
 	GOOS=linux GOARCH=amd64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(LDFLAGS)" -o dist/thism-agent-linux-amd64 ./cmd/agent
+	printf "%s\n" "$(VERSION)" > dist/thism-agent-linux-amd64.version
 	GOOS=linux GOARCH=arm64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(LDFLAGS)" -o dist/thism-agent-linux-arm64 ./cmd/agent
+	printf "%s\n" "$(VERSION)" > dist/thism-agent-linux-arm64.version
 
 dev-ui:
 	cd frontend && npm run dev -- --host 0.0.0.0 --port 5173
