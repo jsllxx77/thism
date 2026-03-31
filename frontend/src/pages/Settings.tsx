@@ -200,7 +200,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
         )}
       </div>
 
-      <AgentAutoUpdateCard />
+      <AgentAutoUpdateCard nodes={effectiveNodes} />
       <MetricsRetentionCard />
       <DashboardVisibilityCard />
       <NotificationsCard />

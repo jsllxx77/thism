@@ -141,3 +141,111 @@ func TestCollectDoesNotDoubleCountSharedDefaultInterface(t *testing.T) {
 		t.Fatalf("expected shared default interface to be counted once, got %d", payload.Net.TxBytes)
 	}
 }
+
+func TestCollectIncludesPointToPointTunnelInterfaceAlongsideDefaultRoute(t *testing.T) {
+	originalIOCountersFunc := ioCountersFunc
+	originalNetInterfacesFunc := netInterfacesFunc
+	originalReadFileFunc := readFileFunc
+	defer func() {
+		ioCountersFunc = originalIOCountersFunc
+		netInterfacesFunc = originalNetInterfacesFunc
+		readFileFunc = originalReadFileFunc
+	}()
+
+	ioCountersFunc = func(pernic bool) ([]psnet.IOCountersStat, error) {
+		if !pernic {
+			t.Fatalf("expected per-interface network counters")
+		}
+		return []psnet.IOCountersStat{
+			{Name: "eth0", BytesRecv: 1200, BytesSent: 3400},
+			{Name: "wg0", BytesRecv: 2200, BytesSent: 4400},
+			{Name: "docker0", BytesRecv: 9000, BytesSent: 11000},
+		}, nil
+	}
+
+	netInterfacesFunc = func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Name: "eth0", Flags: net.FlagUp},
+			{Name: "wg0", Flags: net.FlagUp | net.FlagPointToPoint},
+			{Name: "docker0", Flags: net.FlagUp},
+		}, nil
+	}
+
+	readFileFunc = func(path string) ([]byte, error) {
+		switch path {
+		case ipv4DefaultRoutePath:
+			return []byte("Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"), nil
+		case ipv6DefaultRoutePath:
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("unexpected path %s", path)
+		}
+	}
+
+	collector := New("ws://localhost:9999", "token", "test", "")
+	payload, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if payload.Net.RxBytes != 3400 {
+		t.Fatalf("expected default plus point-to-point tunnel rx bytes, got %d", payload.Net.RxBytes)
+	}
+	if payload.Net.TxBytes != 7800 {
+		t.Fatalf("expected default plus point-to-point tunnel tx bytes, got %d", payload.Net.TxBytes)
+	}
+}
+
+func TestCollectIncludesNamedTunnelInterfaceAlongsideDefaultRoute(t *testing.T) {
+	originalIOCountersFunc := ioCountersFunc
+	originalNetInterfacesFunc := netInterfacesFunc
+	originalReadFileFunc := readFileFunc
+	defer func() {
+		ioCountersFunc = originalIOCountersFunc
+		netInterfacesFunc = originalNetInterfacesFunc
+		readFileFunc = originalReadFileFunc
+	}()
+
+	ioCountersFunc = func(pernic bool) ([]psnet.IOCountersStat, error) {
+		if !pernic {
+			t.Fatalf("expected per-interface network counters")
+		}
+		return []psnet.IOCountersStat{
+			{Name: "eth0", BytesRecv: 1200, BytesSent: 3400},
+			{Name: "tun0", BytesRecv: 3200, BytesSent: 5400},
+			{Name: "veth123", BytesRecv: 7000, BytesSent: 8000},
+		}, nil
+	}
+
+	netInterfacesFunc = func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Name: "eth0", Flags: net.FlagUp},
+			{Name: "tun0", Flags: net.FlagUp},
+			{Name: "veth123", Flags: net.FlagUp},
+		}, nil
+	}
+
+	readFileFunc = func(path string) ([]byte, error) {
+		switch path {
+		case ipv4DefaultRoutePath:
+			return []byte("Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"), nil
+		case ipv6DefaultRoutePath:
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("unexpected path %s", path)
+		}
+	}
+
+	collector := New("ws://localhost:9999", "token", "test", "")
+	payload, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if payload.Net.RxBytes != 4400 {
+		t.Fatalf("expected default plus named tunnel rx bytes, got %d", payload.Net.RxBytes)
+	}
+	if payload.Net.TxBytes != 8800 {
+		t.Fatalf("expected default plus named tunnel tx bytes, got %d", payload.Net.TxBytes)
+	}
+}

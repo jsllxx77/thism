@@ -236,6 +236,16 @@ func isLoopbackInterfaceName(name string) bool {
 	return normalized == "lo" || strings.HasPrefix(normalized, "lo")
 }
 
+func isTunnelInterfaceName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{"tun", "tap", "wg", "tailscale", "zt", "ppp", "ipsec", "utun"} {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseIPv4DefaultRouteInterfaceNames(raw []byte) map[string]struct{} {
 	names := map[string]struct{}{}
 	for index, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
@@ -326,8 +336,35 @@ func nonLoopbackInterfaceNames() map[string]struct{} {
 	return names
 }
 
+func supplementalLinuxInterfaceNames() map[string]struct{} {
+	names := map[string]struct{}{}
+	if runtime.GOOS != "linux" {
+		return names
+	}
+
+	interfaces, err := netInterfacesFunc()
+	if err != nil {
+		return names
+	}
+
+	for _, iface := range interfaces {
+		interfaceName := strings.TrimSpace(iface.Name)
+		if interfaceName == "" || iface.Flags&net.FlagLoopback != 0 || isLoopbackInterfaceName(interfaceName) {
+			continue
+		}
+		if iface.Flags&net.FlagPointToPoint != 0 || isTunnelInterfaceName(interfaceName) {
+			names[interfaceName] = struct{}{}
+		}
+	}
+
+	return names
+}
+
 func collectNetworkStats() models.NetStats {
 	selectedInterfaces := defaultRouteInterfaceNames()
+	for interfaceName := range supplementalLinuxInterfaceNames() {
+		selectedInterfaces[interfaceName] = struct{}{}
+	}
 	if len(selectedInterfaces) == 0 && runtime.GOOS != "linux" {
 		selectedInterfaces = nonLoopbackInterfaceNames()
 	}
@@ -409,7 +446,7 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 		}
 	}
 
-	// Network — aggregate across non-loopback interfaces only.
+	// Network — aggregate across default egress interfaces plus tunnel links.
 	payload.Net = collectNetworkStats()
 
 	if c.shouldCollectHeavySnapshot(currentTime) {
