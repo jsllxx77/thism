@@ -337,7 +337,7 @@ func nonLoopbackInterfaceNames() map[string]struct{} {
 	}
 	for _, iface := range interfaces {
 		interfaceName := strings.TrimSpace(iface.Name)
-		if interfaceName == "" || iface.Flags&net.FlagLoopback != 0 || isLoopbackInterfaceName(interfaceName) {
+		if interfaceName == "" || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || isLoopbackInterfaceName(interfaceName) {
 			continue
 		}
 		names[interfaceName] = struct{}{}
@@ -370,13 +370,7 @@ func supplementalLinuxInterfaceNames() map[string]struct{} {
 }
 
 func collectNetworkStats() models.NetStats {
-	selectedInterfaces := defaultRouteInterfaceNames()
-	for interfaceName := range supplementalLinuxInterfaceNames() {
-		selectedInterfaces[interfaceName] = struct{}{}
-	}
-	if len(selectedInterfaces) == 0 && runtime.GOOS != "linux" {
-		selectedInterfaces = nonLoopbackInterfaceNames()
-	}
+	selectedInterfaces := nonLoopbackInterfaceNames()
 	if len(selectedInterfaces) == 0 {
 		return models.NetStats{}
 	}

@@ -32,7 +32,7 @@ func TestParseIPv6DefaultRouteInterfaceNames(t *testing.T) {
 	}
 }
 
-func TestCollectUsesDefaultIPv4AndIPv6EgressInterfacesOnly(t *testing.T) {
+func TestCollectUsesAllActiveNonLoopbackInterfaces(t *testing.T) {
 	originalIOCountersFunc := ioCountersFunc
 	originalNetInterfacesFunc := netInterfacesFunc
 	originalReadFileFunc := readFileFunc
@@ -82,15 +82,15 @@ func TestCollectUsesDefaultIPv4AndIPv6EgressInterfacesOnly(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 
-	if payload.Net.RxBytes != 3400 {
-		t.Fatalf("expected only default IPv4+IPv6 ingress totals, got %d", payload.Net.RxBytes)
+	if payload.Net.RxBytes != 19400 {
+		t.Fatalf("expected all active non-loopback ingress totals, got %d", payload.Net.RxBytes)
 	}
-	if payload.Net.TxBytes != 7800 {
-		t.Fatalf("expected only default IPv4+IPv6 egress totals, got %d", payload.Net.TxBytes)
+	if payload.Net.TxBytes != 26800 {
+		t.Fatalf("expected all active non-loopback egress totals, got %d", payload.Net.TxBytes)
 	}
 }
 
-func TestCollectDoesNotDoubleCountSharedDefaultInterface(t *testing.T) {
+func TestCollectSkipsDownInterfacesWhenSummingActiveTraffic(t *testing.T) {
 	originalIOCountersFunc := ioCountersFunc
 	originalNetInterfacesFunc := netInterfacesFunc
 	originalReadFileFunc := readFileFunc
@@ -106,6 +106,7 @@ func TestCollectDoesNotDoubleCountSharedDefaultInterface(t *testing.T) {
 		}
 		return []psnet.IOCountersStat{
 			{Name: "eth0", BytesRecv: 1200, BytesSent: 3400},
+			{Name: "eth1", BytesRecv: 2200, BytesSent: 4400},
 			{Name: "docker0", BytesRecv: 9000, BytesSent: 11000},
 		}, nil
 	}
@@ -113,6 +114,7 @@ func TestCollectDoesNotDoubleCountSharedDefaultInterface(t *testing.T) {
 	netInterfacesFunc = func() ([]net.Interface, error) {
 		return []net.Interface{
 			{Name: "eth0", Flags: net.FlagUp},
+			{Name: "eth1", Flags: 0},
 			{Name: "docker0", Flags: net.FlagUp},
 		}, nil
 	}
@@ -134,15 +136,15 @@ func TestCollectDoesNotDoubleCountSharedDefaultInterface(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 
-	if payload.Net.RxBytes != 1200 {
-		t.Fatalf("expected shared default interface to be counted once, got %d", payload.Net.RxBytes)
+	if payload.Net.RxBytes != 10200 {
+		t.Fatalf("expected only active interfaces to be counted, got %d", payload.Net.RxBytes)
 	}
-	if payload.Net.TxBytes != 3400 {
-		t.Fatalf("expected shared default interface to be counted once, got %d", payload.Net.TxBytes)
+	if payload.Net.TxBytes != 14400 {
+		t.Fatalf("expected only active interfaces to be counted, got %d", payload.Net.TxBytes)
 	}
 }
 
-func TestCollectIncludesPointToPointTunnelInterfaceAlongsideDefaultRoute(t *testing.T) {
+func TestCollectIncludesPointToPointTunnelInterfaceAlongsideOtherActiveInterfaces(t *testing.T) {
 	originalIOCountersFunc := ioCountersFunc
 	originalNetInterfacesFunc := netInterfacesFunc
 	originalReadFileFunc := readFileFunc
@@ -188,15 +190,15 @@ func TestCollectIncludesPointToPointTunnelInterfaceAlongsideDefaultRoute(t *test
 		t.Fatalf("Collect: %v", err)
 	}
 
-	if payload.Net.RxBytes != 3400 {
-		t.Fatalf("expected default plus point-to-point tunnel rx bytes, got %d", payload.Net.RxBytes)
+	if payload.Net.RxBytes != 12400 {
+		t.Fatalf("expected all active non-loopback rx bytes including tunnel, got %d", payload.Net.RxBytes)
 	}
-	if payload.Net.TxBytes != 7800 {
-		t.Fatalf("expected default plus point-to-point tunnel tx bytes, got %d", payload.Net.TxBytes)
+	if payload.Net.TxBytes != 18800 {
+		t.Fatalf("expected all active non-loopback tx bytes including tunnel, got %d", payload.Net.TxBytes)
 	}
 }
 
-func TestCollectIncludesNamedTunnelInterfaceAlongsideDefaultRoute(t *testing.T) {
+func TestCollectIncludesNamedTunnelInterfaceAlongsideOtherActiveInterfaces(t *testing.T) {
 	originalIOCountersFunc := ioCountersFunc
 	originalNetInterfacesFunc := netInterfacesFunc
 	originalReadFileFunc := readFileFunc
@@ -242,10 +244,10 @@ func TestCollectIncludesNamedTunnelInterfaceAlongsideDefaultRoute(t *testing.T) 
 		t.Fatalf("Collect: %v", err)
 	}
 
-	if payload.Net.RxBytes != 4400 {
-		t.Fatalf("expected default plus named tunnel rx bytes, got %d", payload.Net.RxBytes)
+	if payload.Net.RxBytes != 11400 {
+		t.Fatalf("expected all active non-loopback rx bytes including named tunnel, got %d", payload.Net.RxBytes)
 	}
-	if payload.Net.TxBytes != 8800 {
-		t.Fatalf("expected default plus named tunnel tx bytes, got %d", payload.Net.TxBytes)
+	if payload.Net.TxBytes != 16800 {
+		t.Fatalf("expected all active non-loopback tx bytes including named tunnel, got %d", payload.Net.TxBytes)
 	}
 }
