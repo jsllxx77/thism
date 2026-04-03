@@ -9,8 +9,6 @@ type ValueFormatter = (value: number) => string
 
 type Props = {
   range: number
-  onRangeChange: (seconds: number) => void
-  retentionDays: number
   cpuData: DataPoint[]
   memData: DataPoint[]
   netRxData: DataPoint[]
@@ -27,8 +25,6 @@ type Props = {
 
 export function MetricTabs({
   range,
-  onRangeChange,
-  retentionDays,
   cpuData,
   memData,
   netRxData,
@@ -43,13 +39,6 @@ export function MetricTabs({
   networkSummary,
 }: Props) {
   const { t, language } = useLanguage()
-  const ranges = [
-    { label: t("nodeDetail.range1h"), seconds: 3600 },
-    { label: t("nodeDetail.range6h"), seconds: 21600 },
-    { label: t("nodeDetail.range24h"), seconds: 86400 },
-    { label: t("nodeDetail.range7d"), seconds: 604800 },
-    ...(retentionDays >= 30 ? [{ label: t("nodeDetail.range30d"), seconds: 2592000 }] : []),
-  ]
   const [activeTab, setActiveTab] = useState<MetricTab>("cpu")
 
   const showDateInTimeLabels = range >= 86400
@@ -79,11 +68,11 @@ export function MetricTabs({
   return (
     <section className="space-y-4">
       <div className="panel-card enterprise-surface rounded-[24px] p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3">
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as MetricTab)}
-            className="w-full lg:w-auto"
+            className="w-full"
           >
             <div className="-mx-1 overflow-x-auto pb-1 md:mx-0 md:pb-0" data-testid="metric-tabs-scroll">
               <TabsList className="enterprise-inner-surface h-11 w-max min-w-full rounded-2xl p-1.5 shadow-none md:h-10 md:w-auto md:min-w-0">
@@ -98,23 +87,6 @@ export function MetricTabs({
             <TabsContent value="network" className="hidden" />
             <TabsContent value="disk" className="hidden" />
           </Tabs>
-
-          <div className="flex flex-wrap gap-1.5">
-            {ranges.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => onRangeChange(item.seconds)}
-                className={`h-10 rounded-lg border px-3 py-1.5 text-xs font-medium ${
-                  range === item.seconds
-                    ? "border-slate-300 bg-slate-100 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:shadow-none"
-                    : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:bg-slate-900"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

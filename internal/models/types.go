@@ -54,18 +54,18 @@ type NodeMetricsSnapshot struct {
 
 // MetricsPayload is the JSON message sent by agents over WebSocket.
 type MetricsPayload struct {
-	Type          string        `json:"type"`
-	TS            int64         `json:"ts"`
-	CPU           float64       `json:"cpu"`
-	IP            string        `json:"ip,omitempty"`
-	OS            string        `json:"os,omitempty"`
-	Arch          string        `json:"arch,omitempty"`
-	AgentVersion  string        `json:"agent_version,omitempty"`
-	UptimeSeconds uint64        `json:"uptime_seconds,omitempty"`
-	Hardware      *NodeHardware `json:"hardware,omitempty"`
-	Mem           MemStats      `json:"mem"`
-	Disk          []DiskStats   `json:"disk"`
-	Net           NetStats      `json:"net"`
+	Type            string            `json:"type"`
+	TS              int64             `json:"ts"`
+	CPU             float64           `json:"cpu"`
+	IP              string            `json:"ip,omitempty"`
+	OS              string            `json:"os,omitempty"`
+	Arch            string            `json:"arch,omitempty"`
+	AgentVersion    string            `json:"agent_version,omitempty"`
+	UptimeSeconds   uint64            `json:"uptime_seconds,omitempty"`
+	Hardware        *NodeHardware     `json:"hardware,omitempty"`
+	Mem             MemStats          `json:"mem"`
+	Disk            []DiskStats       `json:"disk"`
+	Net             NetStats          `json:"net"`
 	Processes       []Process         `json:"processes"`
 	Services        []Service         `json:"services"`
 	DockerAvailable *bool             `json:"docker_available,omitempty"`
@@ -98,6 +98,42 @@ type Process struct {
 type Service struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+}
+
+type LatencyMonitorType string
+
+const (
+	LatencyMonitorTypeICMP LatencyMonitorType = "icmp"
+	LatencyMonitorTypeTCP  LatencyMonitorType = "tcp"
+	LatencyMonitorTypeHTTP LatencyMonitorType = "http"
+)
+
+type LatencyMonitor struct {
+	ID                 string             `json:"id"`
+	Name               string             `json:"name"`
+	Type               LatencyMonitorType `json:"type"`
+	Target             string             `json:"target"`
+	IntervalSeconds    int                `json:"interval_seconds"`
+	AutoAssignNewNodes bool               `json:"auto_assign_new_nodes"`
+	AssignedNodeCount  int                `json:"assigned_node_count,omitempty"`
+	AssignedNodeIDs    []string           `json:"assigned_node_ids,omitempty"`
+	CreatedAt          int64              `json:"created_at"`
+	UpdatedAt          int64              `json:"updated_at"`
+}
+
+type LatencyMonitorResult struct {
+	MonitorID    string   `json:"monitor_id"`
+	NodeID       string   `json:"node_id"`
+	TS           int64    `json:"ts"`
+	LatencyMs    *float64 `json:"latency_ms"`
+	LossPercent  *float64 `json:"loss_percent,omitempty"`
+	JitterMs     *float64 `json:"jitter_ms,omitempty"`
+	Success      bool     `json:"success"`
+	ErrorMessage string   `json:"error_message,omitempty"`
+}
+
+type LatencyMonitorConfigPayload struct {
+	Monitors []LatencyMonitor `json:"monitors"`
 }
 
 // DockerContainer represents a running or stopped Docker container.

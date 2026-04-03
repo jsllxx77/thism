@@ -26,8 +26,6 @@ describe("metric tabs date labels", () => {
     render(
       <MetricTabs
         range={604800}
-        onRangeChange={() => {}}
-        retentionDays={7}
         cpuData={points}
         memData={points}
         netRxData={points}

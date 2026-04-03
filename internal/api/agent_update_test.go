@@ -28,6 +28,143 @@ func waitForOnline(t *testing.T, h *hub.Hub, nodeID string) {
 	t.Fatalf("node %s did not become online in time", nodeID)
 }
 
+func readNextAgentMessageOfType[T any](t *testing.T, conn *websocket.Conn, wantType string) T {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+
+	for {
+		var msg struct {
+			Type    string `json:"type"`
+			Payload T      `json:"payload"`
+		}
+		if err := conn.ReadJSON(&msg); err != nil {
+			t.Fatalf("read %s message: %v", wantType, err)
+		}
+		if msg.Type != wantType {
+			continue
+		}
+		return msg.Payload
+	}
+}
+
+func TestAgentReceivesLatencyMonitorConfigOnConnect(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", nil)
+	server := newIPv4TestServer(router)
+	defer server.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "agent-node", Token: "agent-token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "TCP 80",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "example.com:80",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	agentURL := *baseURL
+	agentURL.Scheme = "ws"
+	agentURL.Path = "/ws/agent"
+	agentQuery := agentURL.Query()
+	agentQuery.Set("token", "agent-token-1")
+	agentURL.RawQuery = agentQuery.Encode()
+
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL.String(), http.Header{})
+	if err != nil {
+		t.Fatalf("dial agent websocket: %v", err)
+	}
+	defer agentConn.Close()
+	waitForOnline(t, h, "node-1")
+
+	payload := readNextAgentMessageOfType[models.LatencyMonitorConfigPayload](t, agentConn, "latency_monitor_config")
+	if len(payload.Monitors) != 1 || payload.Monitors[0].ID != "monitor-1" {
+		t.Fatalf("unexpected latency monitor config: %#v", payload.Monitors)
+	}
+}
+
+func TestAgentMetricsHeartbeatResyncsLatencyMonitorConfig(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", nil)
+	server := newIPv4TestServer(router)
+	defer server.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "agent-node", Token: "agent-token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	agentURL := *baseURL
+	agentURL.Scheme = "ws"
+	agentURL.Path = "/ws/agent"
+	agentQuery := agentURL.Query()
+	agentQuery.Set("token", "agent-token-1")
+	agentURL.RawQuery = agentQuery.Encode()
+
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL.String(), http.Header{})
+	if err != nil {
+		t.Fatalf("dial agent websocket: %v", err)
+	}
+	defer agentConn.Close()
+	waitForOnline(t, h, "node-1")
+
+	_ = readNextAgentMessageOfType[models.LatencyMonitorConfigPayload](t, agentConn, "latency_monitor_config")
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "TCP 80",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "example.com:80",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	metrics := models.MetricsPayload{
+		Type: "metrics",
+		TS:   time.Now().Unix(),
+		CPU:  10,
+		Mem:  models.MemStats{Used: 1, Total: 2},
+	}
+	raw, err := json.Marshal(metrics)
+	if err != nil {
+		t.Fatalf("marshal metrics payload: %v", err)
+	}
+	if err := agentConn.WriteMessage(websocket.TextMessage, raw); err != nil {
+		t.Fatalf("write metrics payload: %v", err)
+	}
+
+	payload := readNextAgentMessageOfType[models.LatencyMonitorConfigPayload](t, agentConn, "latency_monitor_config")
+	if len(payload.Monitors) != 1 || payload.Monitors[0].ID != "monitor-1" {
+		t.Fatalf("expected heartbeat resync to include monitor-1, got %#v", payload.Monitors)
+	}
+}
+
 func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -78,22 +215,12 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 		t.Fatalf("expected 200 when creating update job, got %d: %s", resp.Code, resp.Body.String())
 	}
 
-	_ = agentConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	var msg struct {
-		Type    string                     `json:"type"`
-		Payload models.AgentCommandPayload `json:"payload"`
+	payload := readNextAgentMessageOfType[models.AgentCommandPayload](t, agentConn, "agent_command")
+	if payload.Kind != models.AgentCommandKindSelfUpdate {
+		t.Fatalf("expected self_update kind, got %q", payload.Kind)
 	}
-	if err := agentConn.ReadJSON(&msg); err != nil {
-		t.Fatalf("read agent command: %v", err)
-	}
-	if msg.Type != "agent_command" {
-		t.Fatalf("expected agent_command message, got %q", msg.Type)
-	}
-	if msg.Payload.Kind != models.AgentCommandKindSelfUpdate {
-		t.Fatalf("expected self_update kind, got %q", msg.Payload.Kind)
-	}
-	if msg.Payload.TargetVersion != "1.2.3" {
-		t.Fatalf("expected target version 1.2.3, got %q", msg.Payload.TargetVersion)
+	if payload.TargetVersion != "1.2.3" {
+		t.Fatalf("expected target version 1.2.3, got %q", payload.TargetVersion)
 	}
 
 	var body struct {

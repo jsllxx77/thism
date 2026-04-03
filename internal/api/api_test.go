@@ -1308,6 +1308,230 @@ func TestRegisterNode(t *testing.T) {
 	}
 }
 
+func TestLatencyMonitorCRUD(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	for _, node := range []*models.Node{
+		{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()},
+		{ID: "node-2", Name: "beta", Token: "token-2", CreatedAt: time.Now().Unix()},
+	} {
+		if err := s.UpsertNode(node); err != nil {
+			t.Fatalf("UpsertNode %s: %v", node.ID, err)
+		}
+	}
+
+	createBody := bytes.NewBufferString(`{"name":"Guangdong Telecom IPv4","type":"tcp","target":"gd-ct-v4.ip.zstaticcdn.com:80","interval_seconds":60,"auto_assign_new_nodes":true,"node_ids":["node-1","node-2"]}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/settings/latency-monitors", createBody)
+	createReq.Header.Set("Authorization", "Bearer admin-token")
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for create, got %d: %s", createResp.Code, createResp.Body.String())
+	}
+
+	var created models.LatencyMonitor
+	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created monitor: %v", err)
+	}
+	if created.ID == "" || created.AssignedNodeCount != 2 {
+		t.Fatalf("unexpected created monitor: %#v", created)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/settings/latency-monitors", nil)
+	listReq.Header.Set("Authorization", "Bearer admin-token")
+	listResp := httptest.NewRecorder()
+	router.ServeHTTP(listResp, listReq)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for list, got %d: %s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed struct {
+		Monitors []models.LatencyMonitor `json:"monitors"`
+	}
+	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode listed monitors: %v", err)
+	}
+	if len(listed.Monitors) != 1 || listed.Monitors[0].Target != "gd-ct-v4.ip.zstaticcdn.com:80" {
+		t.Fatalf("unexpected listed monitors: %#v", listed.Monitors)
+	}
+
+	updateBody := bytes.NewBufferString(`{"name":"Guangdong Telecom IPv4","type":"tcp","target":"gd-ct-v4.ip.zstaticcdn.com:443","interval_seconds":90,"auto_assign_new_nodes":true,"node_ids":["node-1"]}`)
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/settings/latency-monitors/"+created.ID, updateBody)
+	updateReq.Header.Set("Authorization", "Bearer admin-token")
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp := httptest.NewRecorder()
+	router.ServeHTTP(updateResp, updateReq)
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for update, got %d: %s", updateResp.Code, updateResp.Body.String())
+	}
+
+	var updated models.LatencyMonitor
+	if err := json.Unmarshal(updateResp.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated monitor: %v", err)
+	}
+	if updated.Target != "gd-ct-v4.ip.zstaticcdn.com:443" || updated.IntervalSeconds != 90 || updated.AssignedNodeCount != 1 {
+		t.Fatalf("unexpected updated monitor: %#v", updated)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/settings/latency-monitors/"+created.ID, nil)
+	deleteReq.Header.Set("Authorization", "Bearer admin-token")
+	deleteResp := httptest.NewRecorder()
+	router.ServeHTTP(deleteResp, deleteReq)
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for delete, got %d: %s", deleteResp.Code, deleteResp.Body.String())
+	}
+
+	listResp = httptest.NewRecorder()
+	router.ServeHTTP(listResp, listReq)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for list after delete, got %d: %s", listResp.Code, listResp.Body.String())
+	}
+	if err := json.Unmarshal(listResp.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode listed monitors after delete: %v", err)
+	}
+	if len(listed.Monitors) != 0 {
+		t.Fatalf("expected empty monitor list after delete, got %#v", listed.Monitors)
+	}
+}
+
+func TestLatencyMonitorNodeHistory(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Healthcheck",
+		Type:               models.LatencyMonitorTypeHTTP,
+		Target:             "https://example.com/healthz",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	latency := 18.25
+	loss := 20.0
+	jitter := 3.5
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID:   "monitor-1",
+		NodeID:      "node-1",
+		TS:          1700000100,
+		LatencyMs:   &latency,
+		LossPercent: &loss,
+		JitterMs:    &jitter,
+		Success:     true,
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult success: %v", err)
+	}
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID:    "monitor-1",
+		NodeID:       "node-1",
+		TS:           1700000160,
+		Success:      false,
+		ErrorMessage: "dial timeout",
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult failure: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1700000000&to=1700000200", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Monitors []models.LatencyMonitor       `json:"monitors"`
+		Results  []models.LatencyMonitorResult `json:"results"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode latency history response: %v", err)
+	}
+	if len(body.Monitors) != 1 || body.Monitors[0].ID != "monitor-1" {
+		t.Fatalf("unexpected monitors payload: %#v", body.Monitors)
+	}
+	if len(body.Results) != 2 {
+		t.Fatalf("expected 2 results, got %#v", body.Results)
+	}
+	if body.Results[0].LatencyMs == nil || *body.Results[0].LatencyMs != latency {
+		t.Fatalf("unexpected first result: %#v", body.Results[0])
+	}
+	if body.Results[0].LossPercent == nil || *body.Results[0].LossPercent != loss {
+		t.Fatalf("unexpected first result loss summary: %#v", body.Results[0])
+	}
+	if body.Results[0].JitterMs == nil || *body.Results[0].JitterMs != jitter {
+		t.Fatalf("unexpected first result jitter summary: %#v", body.Results[0])
+	}
+	if body.Results[1].LatencyMs != nil || body.Results[1].Success || body.Results[1].ErrorMessage != "dial timeout" {
+		t.Fatalf("unexpected second result: %#v", body.Results[1])
+	}
+}
+
+func TestRegisterNodeAutoAssignsLatencyMonitors(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Default monitor",
+		Type:               models.LatencyMonitorTypeICMP,
+		Target:             "1.1.1.1",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	body := strings.NewReader(`{"name":"web-2"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/register", body)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+	nodeID := payload["id"]
+	if nodeID == "" {
+		t.Fatal("expected registered node id")
+	}
+
+	monitors, err := s.ListLatencyMonitorsByNodeID(nodeID)
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(monitors) != 1 || monitors[0].ID != "monitor-1" {
+		t.Fatalf("expected new node to inherit monitor-1, got %#v", monitors)
+	}
+}
+
 func TestNodeManagementActions(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

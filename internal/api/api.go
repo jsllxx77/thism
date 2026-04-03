@@ -428,12 +428,28 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 			handleUpdateDashboardSettings(w, req, s)
 		})
 
+		r.Get("/api/settings/latency-monitors", func(w http.ResponseWriter, req *http.Request) {
+			handleListLatencyMonitors(w, req, s)
+		})
+
+		r.Post("/api/settings/latency-monitors", func(w http.ResponseWriter, req *http.Request) {
+			handleCreateLatencyMonitor(w, req, s, h)
+		})
+
+		r.Put("/api/settings/latency-monitors/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateLatencyMonitor(w, req, s, h)
+		})
+
+		r.Delete("/api/settings/latency-monitors/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleDeleteLatencyMonitor(w, req, s, h)
+		})
+
 		r.Post("/api/settings/notifications/test", func(w http.ResponseWriter, req *http.Request) {
 			handleSendTestNotification(w, req, s)
 		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
-			handleRegisterNode(w, req, s)
+			handleRegisterNode(w, req, s, h)
 		})
 
 		r.Patch("/api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
@@ -450,6 +466,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 
 		r.Get("/api/nodes/{id}/metrics", func(w http.ResponseWriter, req *http.Request) {
 			handleGetMetrics(w, req, s)
+		})
+
+		r.Get("/api/nodes/{id}/latency-results", func(w http.ResponseWriter, req *http.Request) {
+			handleGetLatencyResults(w, req, s)
 		})
 
 		r.Get("/api/nodes/{id}/processes", func(w http.ResponseWriter, req *http.Request) {
@@ -1618,6 +1638,144 @@ func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *sto
 	})
 }
 
+func handleListLatencyMonitors(w http.ResponseWriter, _ *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if monitors == nil {
+		monitors = []*models.LatencyMonitor{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"monitors": monitors})
+}
+
+type latencyMonitorRequest struct {
+	Name               string                    `json:"name"`
+	Type               models.LatencyMonitorType `json:"type"`
+	Target             string                    `json:"target"`
+	IntervalSeconds    int                       `json:"interval_seconds"`
+	AutoAssignNewNodes *bool                     `json:"auto_assign_new_nodes"`
+	NodeIDs            []string                  `json:"node_ids"`
+}
+
+func decodeLatencyMonitorRequest(r *http.Request) (latencyMonitorRequest, error) {
+	var req latencyMonitorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return latencyMonitorRequest{}, err
+	}
+	return req, nil
+}
+
+func handleCreateLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	req, err := decodeLatencyMonitorRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+
+	id, err := generateHex()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+
+	autoAssign := true
+	if req.AutoAssignNewNodes != nil {
+		autoAssign = *req.AutoAssignNewNodes
+	}
+	monitor := &models.LatencyMonitor{
+		ID:                 id,
+		Name:               req.Name,
+		Type:               req.Type,
+		Target:             req.Target,
+		IntervalSeconds:    req.IntervalSeconds,
+		AutoAssignNewNodes: autoAssign,
+		CreatedAt:          time.Now().Unix(),
+		UpdatedAt:          time.Now().Unix(),
+	}
+	if err := s.CreateLatencyMonitor(monitor, req.NodeIDs); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	stored, err := s.GetLatencyMonitorByID(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	syncLatencyMonitorsForOnlineNodes(s, h)
+	writeJSON(w, http.StatusOK, stored)
+}
+
+func handleUpdateLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	monitorID := chi.URLParam(r, "id")
+	existing, err := s.GetLatencyMonitorByID(monitorID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "latency monitor not found"})
+		return
+	}
+	req, err := decodeLatencyMonitorRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return
+	}
+	autoAssign := existing.AutoAssignNewNodes
+	if req.AutoAssignNewNodes != nil {
+		autoAssign = *req.AutoAssignNewNodes
+	}
+	monitor := &models.LatencyMonitor{
+		ID:                 existing.ID,
+		Name:               req.Name,
+		Type:               req.Type,
+		Target:             req.Target,
+		IntervalSeconds:    req.IntervalSeconds,
+		AutoAssignNewNodes: autoAssign,
+		CreatedAt:          existing.CreatedAt,
+		UpdatedAt:          time.Now().Unix(),
+	}
+	if err := s.UpdateLatencyMonitor(monitor, req.NodeIDs); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	stored, err := s.GetLatencyMonitorByID(existing.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	syncLatencyMonitorsForOnlineNodes(s, h)
+	writeJSON(w, http.StatusOK, stored)
+}
+
+func handleDeleteLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	monitorID := chi.URLParam(r, "id")
+	if err := s.DeleteLatencyMonitor(monitorID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	syncLatencyMonitorsForOnlineNodes(s, h)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func handleLogout(w http.ResponseWriter, r *http.Request, auth *authManager) {
 	auth.ClearAdminSession(w, r)
 	clearGuestSessionCookie(w, r)
@@ -1681,7 +1839,7 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": result})
 }
 
-func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
+func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -1711,6 +1869,11 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := s.AssignAutoLatencyMonitorsToNode(node.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	syncLatencyMonitorsForOnlineNodes(s, h)
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "token": token})
 }
@@ -2083,6 +2246,44 @@ func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	})
 }
 
+func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+
+	to := time.Now().Unix()
+	from := to - 3600
+	if v := r.URL.Query().Get("from"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			from = parsed
+		}
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			to = parsed
+		}
+	}
+
+	monitors, err := s.ListLatencyMonitorsByNodeID(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	results, err := s.QueryLatencyResultsByNodeID(nodeID, from, to)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if monitors == nil {
+		monitors = []*models.LatencyMonitor{}
+	}
+	if results == nil {
+		results = []*models.LatencyMonitorResult{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monitors": monitors,
+		"results":  results,
+	})
+}
+
 func handleGetProcesses(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	nodeID := chi.URLParam(r, "id")
 	data, err := s.GetProcesses(nodeID)
@@ -2352,6 +2553,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		return
 	}
 
+	writeLatencyMonitorConfigToConn(conn, s, node.ID)
 	h.Register(node.ID, conn)
 	alertDispatcher.EnqueueHeartbeat(node, true, time.Now().Unix())
 	defer func() {
@@ -2382,6 +2584,26 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			continue
 		}
 
+		if envelope.Type == "latency_result" {
+			resultPayload, err := decodeWSPayload[models.LatencyMonitorResult](envelope.Payload)
+			if err != nil {
+				continue
+			}
+			resultPayload.NodeID = node.ID
+			if err := s.InsertLatencyResult(&resultPayload); err != nil {
+				log.Printf("agent latency: persist result for node %s failed: %v", node.ID, err)
+				continue
+			}
+			h.Broadcast(models.WSMessage{
+				Type: "latency_result",
+				Payload: map[string]any{
+					"node_id": node.ID,
+					"data":    resultPayload,
+				},
+			})
+			continue
+		}
+
 		var payload models.MetricsPayload
 		if err := json.Unmarshal(msg, &payload); err != nil {
 			continue
@@ -2402,6 +2624,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		}
 
 		alertDispatcher.EnqueueMetrics(node, &payload)
+		syncLatencyMonitorsForNode(s, h, node.ID)
 
 		// Broadcast metrics to dashboard subscribers, wrapped with node_id.
 		h.Broadcast(models.WSMessage{
@@ -2412,6 +2635,68 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 				"data":      payload,
 			},
 		})
+	}
+}
+
+func cloneLatencyMonitors(monitors []*models.LatencyMonitor) []models.LatencyMonitor {
+	cloned := make([]models.LatencyMonitor, 0, len(monitors))
+	for _, monitor := range monitors {
+		if monitor == nil {
+			continue
+		}
+		current := *monitor
+		if len(monitor.AssignedNodeIDs) > 0 {
+			current.AssignedNodeIDs = append([]string(nil), monitor.AssignedNodeIDs...)
+		}
+		cloned = append(cloned, current)
+	}
+	return cloned
+}
+
+func syncLatencyMonitorsForNode(s *store.Store, h *hub.Hub, nodeID string) {
+	if s == nil || h == nil || strings.TrimSpace(nodeID) == "" || !h.IsOnline(nodeID) {
+		return
+	}
+	monitors, err := s.ListLatencyMonitorsByNodeID(nodeID)
+	if err != nil {
+		log.Printf("latency monitors: list for node %s failed: %v", nodeID, err)
+		return
+	}
+	if err := h.SendToAgent(nodeID, models.WSMessage{
+		Type: "latency_monitor_config",
+		Payload: models.LatencyMonitorConfigPayload{
+			Monitors: cloneLatencyMonitors(monitors),
+		},
+	}); err != nil {
+		log.Printf("latency monitors: sync to node %s failed: %v", nodeID, err)
+	}
+}
+
+func syncLatencyMonitorsForOnlineNodes(s *store.Store, h *hub.Hub) {
+	if s == nil || h == nil {
+		return
+	}
+	for _, nodeID := range h.OnlineNodeIDs() {
+		syncLatencyMonitorsForNode(s, h, nodeID)
+	}
+}
+
+func writeLatencyMonitorConfigToConn(conn *websocket.Conn, s *store.Store, nodeID string) {
+	if conn == nil || s == nil || strings.TrimSpace(nodeID) == "" {
+		return
+	}
+	monitors, err := s.ListLatencyMonitorsByNodeID(nodeID)
+	if err != nil {
+		log.Printf("latency monitors: initial list for node %s failed: %v", nodeID, err)
+		return
+	}
+	if err := conn.WriteJSON(models.WSMessage{
+		Type: "latency_monitor_config",
+		Payload: models.LatencyMonitorConfigPayload{
+			Monitors: cloneLatencyMonitors(monitors),
+		},
+	}); err != nil {
+		log.Printf("latency monitors: initial write to node %s failed: %v", nodeID, err)
 	}
 }
 

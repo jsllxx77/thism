@@ -66,6 +66,46 @@ export type MetricsRow = {
   uptime_seconds?: number
 }
 
+export type LatencyMonitorType = "icmp" | "tcp" | "http"
+
+export type LatencyMonitor = {
+  id: string
+  name: string
+  type: LatencyMonitorType
+  target: string
+  interval_seconds: number
+  auto_assign_new_nodes: boolean
+  assigned_node_count: number
+  assigned_node_ids: string[]
+  created_at: number
+  updated_at: number
+}
+
+export type LatencyMonitorResult = {
+  monitor_id: string
+  node_id: string
+  ts: number
+  latency_ms: number | null
+  loss_percent?: number | null
+  jitter_ms?: number | null
+  success: boolean
+  error_message?: string
+}
+
+export type LatencyMonitorHistory = {
+  monitors: LatencyMonitor[]
+  results: LatencyMonitorResult[]
+}
+
+export type LatencyMonitorUpsertPayload = {
+  name: string
+  type: LatencyMonitorType
+  target: string
+  interval_seconds: number
+  auto_assign_new_nodes: boolean
+  node_ids: string[]
+}
+
 export type Process = {
   pid: number
   name: string
@@ -242,6 +282,13 @@ export const api = {
     const qs = params.toString()
     return req<{ metrics: MetricsRow[] }>(`/api/nodes/${id}/metrics${qs ? `?${qs}` : ""}`)
   },
+  latencyResults: (id: string, from?: number, to?: number) => {
+    const params = new URLSearchParams()
+    if (from != null) params.set("from", String(from))
+    if (to != null) params.set("to", String(to))
+    const qs = params.toString()
+    return req<LatencyMonitorHistory>(`/api/nodes/${id}/latency-results${qs ? `?${qs}` : ""}`)
+  },
   processes: (id: string) => req<Process[]>(`/api/nodes/${id}/processes`),
   services: (id: string) => req<{ services: ServiceCheck[] }>(`/api/nodes/${id}/services`),
   docker: (id: string) => req<DockerSnapshot>(`/api/nodes/${id}/docker`),
@@ -278,6 +325,21 @@ export const api = {
     req<MetricsRetentionSettings>("/api/settings/metrics-retention", {
       method: "PUT",
       body: JSON.stringify({ retention_days: retentionDays }),
+    }),
+  latencyMonitors: () => req<{ monitors: LatencyMonitor[] }>("/api/settings/latency-monitors"),
+  createLatencyMonitor: (payload: LatencyMonitorUpsertPayload) =>
+    req<LatencyMonitor>("/api/settings/latency-monitors", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateLatencyMonitor: (id: string, payload: LatencyMonitorUpsertPayload) =>
+    req<LatencyMonitor>(`/api/settings/latency-monitors/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteLatencyMonitor: (id: string) =>
+    req<{ ok: boolean }>(`/api/settings/latency-monitors/${id}`, {
+      method: "DELETE",
     }),
   dashboardSettings: () => req<DashboardSettings>("/api/settings/dashboard"),
   updateDashboardSettings: (settings: DashboardSettings) =>

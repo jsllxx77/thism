@@ -194,6 +194,40 @@ CREATE TABLE IF NOT EXISTS service_checks (
     UNIQUE(node_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS monitor_items (
+    id                    TEXT PRIMARY KEY,
+    name                  TEXT NOT NULL,
+    type                  TEXT NOT NULL,
+    target                TEXT NOT NULL,
+    interval_seconds      INTEGER NOT NULL,
+    auto_assign_new_nodes INTEGER NOT NULL DEFAULT 1,
+    created_at            INTEGER NOT NULL DEFAULT 0,
+    updated_at            INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS monitor_item_nodes (
+    monitor_id TEXT NOT NULL,
+    node_id    TEXT NOT NULL,
+    PRIMARY KEY (monitor_id, node_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_monitor_item_nodes_node_id ON monitor_item_nodes(node_id);
+
+CREATE TABLE IF NOT EXISTS monitor_results (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitor_id    TEXT NOT NULL,
+    node_id       TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    latency_ms    REAL,
+    loss_percent  REAL,
+    jitter_ms     REAL,
+    success       INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_monitor_results_node_ts ON monitor_results(node_id, ts);
+CREATE INDEX IF NOT EXISTS idx_monitor_results_monitor_node_ts ON monitor_results(monitor_id, node_id, ts);
+
 CREATE TABLE IF NOT EXISTS admin_auth (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     username   TEXT NOT NULL,
@@ -273,6 +307,12 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 		return err
 	}
 	if err := s.ensureColumn("metrics", "uptime_seconds", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("monitor_results", "loss_percent", "REAL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("monitor_results", "jitter_ms", "REAL"); err != nil {
 		return err
 	}
 	return s.ensureColumn("update_jobs", "updated_at", "INTEGER NOT NULL DEFAULT 0")
@@ -360,6 +400,354 @@ func defaultDashboardSettings() models.DashboardSettings {
 	return models.DashboardSettings{
 		ShowDashboardCardIP: true,
 	}
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func normalizeLatencyMonitorNodeIDs(nodeIDs []string) []string {
+	clean := make([]string, 0, len(nodeIDs))
+	seen := make(map[string]struct{}, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		normalized := strings.TrimSpace(nodeID)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		clean = append(clean, normalized)
+	}
+	return clean
+}
+
+func normalizeLatencyMonitor(monitor *models.LatencyMonitor) (*models.LatencyMonitor, error) {
+	if monitor == nil {
+		return nil, fmt.Errorf("latency monitor is nil")
+	}
+	normalized := *monitor
+	normalized.ID = strings.TrimSpace(normalized.ID)
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Target = strings.TrimSpace(normalized.Target)
+	if normalized.ID == "" {
+		return nil, fmt.Errorf("latency monitor id is required")
+	}
+	if normalized.Name == "" {
+		return nil, fmt.Errorf("latency monitor name is required")
+	}
+	if normalized.Target == "" {
+		return nil, fmt.Errorf("latency monitor target is required")
+	}
+	if normalized.IntervalSeconds <= 0 {
+		return nil, fmt.Errorf("latency monitor interval_seconds must be greater than 0")
+	}
+	switch normalized.Type {
+	case models.LatencyMonitorTypeICMP, models.LatencyMonitorTypeTCP, models.LatencyMonitorTypeHTTP:
+	default:
+		return nil, fmt.Errorf("invalid latency monitor type")
+	}
+	now := time.Now().Unix()
+	if normalized.CreatedAt <= 0 {
+		normalized.CreatedAt = now
+	}
+	if normalized.UpdatedAt <= 0 {
+		normalized.UpdatedAt = now
+	}
+	normalized.AssignedNodeIDs = normalizeLatencyMonitorNodeIDs(normalized.AssignedNodeIDs)
+	return &normalized, nil
+}
+
+func replaceLatencyMonitorNodes(tx *sql.Tx, monitorID string, nodeIDs []string) error {
+	if _, err := tx.Exec(`DELETE FROM monitor_item_nodes WHERE monitor_id = ?`, monitorID); err != nil {
+		return err
+	}
+	for _, nodeID := range normalizeLatencyMonitorNodeIDs(nodeIDs) {
+		if _, err := tx.Exec(`INSERT INTO monitor_item_nodes (monitor_id, node_id) VALUES (?, ?)`, monitorID, nodeID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func listLatencyMonitorNodeIDsWith(db queryRower, monitorID string) ([]string, error) {
+	rows, err := db.Query(`
+SELECT node_id
+FROM monitor_item_nodes
+WHERE monitor_id = ?
+ORDER BY node_id
+`, monitorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodeIDs []string
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			return nil, err
+		}
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	return nodeIDs, rows.Err()
+}
+
+type queryRower interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func (s *Store) populateLatencyMonitorAssignments(monitors []*models.LatencyMonitor) error {
+	for _, monitor := range monitors {
+		nodeIDs, err := listLatencyMonitorNodeIDsWith(s.db, monitor.ID)
+		if err != nil {
+			return err
+		}
+		monitor.AssignedNodeIDs = nodeIDs
+		if monitor.AssignedNodeCount == 0 {
+			monitor.AssignedNodeCount = len(nodeIDs)
+		}
+	}
+	return nil
+}
+
+func (s *Store) CreateLatencyMonitor(monitor *models.LatencyMonitor, nodeIDs []string) error {
+	normalized, err := normalizeLatencyMonitor(monitor)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+INSERT INTO monitor_items (id, name, type, target, interval_seconds, auto_assign_new_nodes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, normalized.ID, normalized.Name, normalized.Type, normalized.Target, normalized.IntervalSeconds, boolToInt(normalized.AutoAssignNewNodes), normalized.CreatedAt, normalized.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if err := replaceLatencyMonitorNodes(tx, normalized.ID, nodeIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UpdateLatencyMonitor(monitor *models.LatencyMonitor, nodeIDs []string) error {
+	normalized, err := normalizeLatencyMonitor(monitor)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+UPDATE monitor_items
+SET name = ?, type = ?, target = ?, interval_seconds = ?, auto_assign_new_nodes = ?, updated_at = ?
+WHERE id = ?
+`, normalized.Name, normalized.Type, normalized.Target, normalized.IntervalSeconds, boolToInt(normalized.AutoAssignNewNodes), normalized.UpdatedAt, normalized.ID)
+	if err != nil {
+		return err
+	}
+	if err := replaceLatencyMonitorNodes(tx, normalized.ID, nodeIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetLatencyMonitorByID(monitorID string) (*models.LatencyMonitor, error) {
+	row := s.db.QueryRow(`
+SELECT id, name, type, target, interval_seconds, auto_assign_new_nodes, created_at, updated_at
+FROM monitor_items
+WHERE id = ?
+`, monitorID)
+
+	var monitor models.LatencyMonitor
+	var autoAssign int
+	if err := row.Scan(&monitor.ID, &monitor.Name, &monitor.Type, &monitor.Target, &monitor.IntervalSeconds, &autoAssign, &monitor.CreatedAt, &monitor.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	monitor.AutoAssignNewNodes = autoAssign == 1
+	nodeIDs, err := listLatencyMonitorNodeIDsWith(s.db, monitor.ID)
+	if err != nil {
+		return nil, err
+	}
+	monitor.AssignedNodeIDs = nodeIDs
+	monitor.AssignedNodeCount = len(nodeIDs)
+	return &monitor, nil
+}
+
+func (s *Store) ListLatencyMonitors() ([]*models.LatencyMonitor, error) {
+	rows, err := s.db.Query(`
+SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.auto_assign_new_nodes, m.created_at, m.updated_at, COUNT(n.node_id) AS assigned_node_count
+FROM monitor_items m
+LEFT JOIN monitor_item_nodes n ON n.monitor_id = m.id
+GROUP BY m.id, m.name, m.type, m.target, m.interval_seconds, m.auto_assign_new_nodes, m.created_at, m.updated_at
+ORDER BY m.name, m.id
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var monitors []*models.LatencyMonitor
+	for rows.Next() {
+		var monitor models.LatencyMonitor
+		var autoAssign int
+		if err := rows.Scan(&monitor.ID, &monitor.Name, &monitor.Type, &monitor.Target, &monitor.IntervalSeconds, &autoAssign, &monitor.CreatedAt, &monitor.UpdatedAt, &monitor.AssignedNodeCount); err != nil {
+			return nil, err
+		}
+		monitor.AutoAssignNewNodes = autoAssign == 1
+		monitors = append(monitors, &monitor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := s.populateLatencyMonitorAssignments(monitors); err != nil {
+		return nil, err
+	}
+	return monitors, nil
+}
+
+func (s *Store) ListLatencyMonitorsByNodeID(nodeID string) ([]*models.LatencyMonitor, error) {
+	rows, err := s.db.Query(`
+SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.auto_assign_new_nodes, m.created_at, m.updated_at
+FROM monitor_items m
+JOIN monitor_item_nodes n ON n.monitor_id = m.id
+WHERE n.node_id = ?
+ORDER BY m.name, m.id
+`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var monitors []*models.LatencyMonitor
+	for rows.Next() {
+		var monitor models.LatencyMonitor
+		var autoAssign int
+		if err := rows.Scan(&monitor.ID, &monitor.Name, &monitor.Type, &monitor.Target, &monitor.IntervalSeconds, &autoAssign, &monitor.CreatedAt, &monitor.UpdatedAt); err != nil {
+			return nil, err
+		}
+		monitor.AutoAssignNewNodes = autoAssign == 1
+		monitors = append(monitors, &monitor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := s.populateLatencyMonitorAssignments(monitors); err != nil {
+		return nil, err
+	}
+	return monitors, nil
+}
+
+func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
+	if strings.TrimSpace(nodeID) == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id)
+SELECT id, ?
+FROM monitor_items
+WHERE auto_assign_new_nodes = 1
+`, nodeID)
+	return err
+}
+
+func (s *Store) DeleteLatencyMonitor(monitorID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, stmt := range []string{
+		`DELETE FROM monitor_results WHERE monitor_id = ?`,
+		`DELETE FROM monitor_item_nodes WHERE monitor_id = ?`,
+		`DELETE FROM monitor_items WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(stmt, monitorID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) InsertLatencyResult(result *models.LatencyMonitorResult) error {
+	if result == nil {
+		return fmt.Errorf("latency monitor result is nil")
+	}
+	if strings.TrimSpace(result.MonitorID) == "" {
+		return fmt.Errorf("latency monitor result monitor_id is required")
+	}
+	if strings.TrimSpace(result.NodeID) == "" {
+		return fmt.Errorf("latency monitor result node_id is required")
+	}
+	_, err := s.db.Exec(`
+INSERT INTO monitor_results (monitor_id, node_id, ts, latency_ms, loss_percent, jitter_ms, success, error_message)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`, result.MonitorID, result.NodeID, result.TS, result.LatencyMs, result.LossPercent, result.JitterMs, boolToInt(result.Success), result.ErrorMessage)
+	return err
+}
+
+func (s *Store) QueryLatencyResultsByNodeID(nodeID string, from, to int64) ([]*models.LatencyMonitorResult, error) {
+	rows, err := s.db.Query(`
+SELECT monitor_id, node_id, ts, latency_ms, loss_percent, jitter_ms, success, error_message
+FROM monitor_results
+WHERE node_id = ? AND ts BETWEEN ? AND ?
+ORDER BY ts, monitor_id
+`, nodeID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*models.LatencyMonitorResult
+	for rows.Next() {
+		var result models.LatencyMonitorResult
+		var latency sql.NullFloat64
+		var loss sql.NullFloat64
+		var jitter sql.NullFloat64
+		var success int
+		if err := rows.Scan(&result.MonitorID, &result.NodeID, &result.TS, &latency, &loss, &jitter, &success, &result.ErrorMessage); err != nil {
+			return nil, err
+		}
+		if latency.Valid {
+			value := latency.Float64
+			result.LatencyMs = &value
+		}
+		if loss.Valid {
+			value := loss.Float64
+			result.LossPercent = &value
+		}
+		if jitter.Valid {
+			value := jitter.Float64
+			result.JitterMs = &value
+		}
+		result.Success = success == 1
+		results = append(results, &result)
+	}
+	return results, rows.Err()
 }
 
 func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
@@ -1191,6 +1579,8 @@ func (s *Store) DeleteNode(nodeID string) error {
 	stmts := []string{
 		`DELETE FROM metrics WHERE node_id = ?`,
 		`DELETE FROM metrics_1m WHERE node_id = ?`,
+		`DELETE FROM monitor_results WHERE node_id = ?`,
+		`DELETE FROM monitor_item_nodes WHERE node_id = ?`,
 		`DELETE FROM processes WHERE node_id = ?`,
 		`DELETE FROM docker_containers WHERE node_id = ?`,
 		`DELETE FROM service_checks WHERE node_id = ?`,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NodeDetail } from "./NodeDetail"
 
 const nodesMock = vi.fn()
@@ -8,6 +9,7 @@ const processesMock = vi.fn()
 const servicesMock = vi.fn()
 const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
+const latencyResultsMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -17,6 +19,7 @@ vi.mock("../lib/api", () => ({
     services: (...args: unknown[]) => servicesMock(...args),
     docker: (...args: unknown[]) => dockerMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
+    latencyResults: (...args: unknown[]) => latencyResultsMock(...args),
   },
 }))
 
@@ -45,6 +48,7 @@ describe("node detail page states", () => {
     servicesMock.mockReset()
     dockerMock.mockReset()
     metricsRetentionMock.mockReset()
+    latencyResultsMock.mockReset()
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -60,6 +64,7 @@ describe("node detail page states", () => {
       }),
     })
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
   })
 
   it("shows a loading state while node detail data is pending", async () => {
@@ -78,6 +83,7 @@ describe("node detail page states", () => {
 
     nodesMock.mockReturnValue(nodesRequest.promise)
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
@@ -108,6 +114,7 @@ describe("node detail page states", () => {
   it("shows an error state when node detail data fails", async () => {
     nodesMock.mockRejectedValue(new Error("timeout"))
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
@@ -133,6 +140,7 @@ describe("node detail page states", () => {
       ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({
@@ -163,6 +171,7 @@ describe("node detail page states", () => {
       ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([{ pid: 10, name: "sshd", cpu: 0.1, mem: 1024 }])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
@@ -192,6 +201,7 @@ describe("node detail page states", () => {
       ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
@@ -200,6 +210,7 @@ describe("node detail page states", () => {
     await waitFor(() => {
       expect(nodesMock).toHaveBeenCalledTimes(1)
       expect(metricsMock).toHaveBeenCalledTimes(1)
+      expect(latencyResultsMock).toHaveBeenCalledTimes(1)
       expect(processesMock).toHaveBeenCalledTimes(1)
       expect(servicesMock).toHaveBeenCalledTimes(1)
       expect(dockerMock).toHaveBeenCalledTimes(1)
@@ -209,10 +220,70 @@ describe("node detail page states", () => {
     await waitFor(() => {
       expect(nodesMock).toHaveBeenCalledTimes(2)
       expect(metricsMock).toHaveBeenCalledTimes(2)
+      expect(latencyResultsMock).toHaveBeenCalledTimes(2)
       expect(processesMock).toHaveBeenCalledTimes(2)
       expect(servicesMock).toHaveBeenCalledTimes(2)
       expect(dockerMock).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it("uses a shared range control for metrics and latency history", async () => {
+    const user = userEvent.setup()
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1700003600 * 1000)
+
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "node-1",
+          name: "alpha",
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          created_at: 0,
+          last_seen: 0,
+          online: true,
+        },
+      ],
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({
+      monitors: [
+        {
+          id: "monitor-1",
+          name: "Guangdong Telecom IPv4",
+          type: "tcp",
+          target: "gd-ct-v4.ip.zstaticcdn.com:80",
+          interval_seconds: 60,
+          auto_assign_new_nodes: true,
+          assigned_node_count: 1,
+          assigned_node_ids: ["node-1"],
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
+      results: [
+        { monitor_id: "monitor-1", node_id: "node-1", ts: 1700003000, latency_ms: 23.5, loss_percent: 20, jitter_ms: 4.2, success: true },
+      ],
+    })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    expect(await screen.findByRole("button", { name: "1h" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Guangdong Telecom IPv4/i })).toHaveTextContent("Loss: 20%")
+    expect(metricsMock).toHaveBeenCalledWith("node-1", 1700000000, 1700003600)
+    expect(latencyResultsMock).toHaveBeenCalledWith("node-1", 1700000000, 1700003600)
+
+    await user.click(screen.getByRole("button", { name: "6h" }))
+
+    await waitFor(() => {
+      expect(metricsMock).toHaveBeenLastCalledWith("node-1", 1699982000, 1700003600)
+      expect(latencyResultsMock).toHaveBeenLastCalledWith("node-1", 1699982000, 1700003600)
+    })
+
+    dateNowSpy.mockRestore()
   })
 
   it("renders hardware passport when node metadata includes hardware", async () => {
@@ -240,6 +311,7 @@ describe("node detail page states", () => {
       ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })

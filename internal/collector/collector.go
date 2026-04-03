@@ -93,6 +93,11 @@ type Collector struct {
 	updateMu              sync.Mutex
 	updateInProgress      bool
 	autoUpdateInterval    time.Duration
+	latencyMu             sync.Mutex
+	latencyMonitors       map[string]*latencyMonitorState
+	icmpLatencyProbe      latencyProbeFunc
+	tcpLatencyProbe       latencyProbeFunc
+	httpLatencyProbe      latencyProbeFunc
 }
 
 // New creates a new Collector with the default report interval.
@@ -118,6 +123,10 @@ func NewWithInterval(serverURL, token, name, nodeIP string, reportInterval time.
 		heavySnapshotInterval: DefaultHeavySnapshotInterval,
 		now:                   nowFunc,
 		autoUpdateInterval:    DefaultAutoUpdateInterval,
+		latencyMonitors:       make(map[string]*latencyMonitorState),
+		icmpLatencyProbe:      defaultICMPLatencyProbe,
+		tcpLatencyProbe:       defaultTCPLatencyProbe,
+		httpLatencyProbe:      defaultHTTPLatencyProbe,
 	}
 	c.selfUpdateFunc = c.runSelfUpdate
 	c.SetAgentVersion(c.agentVersion)
@@ -636,6 +645,8 @@ func (c *Collector) connect() error {
 
 	ticker := time.NewTicker(c.reportInterval)
 	defer ticker.Stop()
+	latencyTicker := time.NewTicker(time.Second)
+	defer latencyTicker.Stop()
 	autoUpdateTicker := time.NewTicker(c.autoUpdateInterval)
 	defer autoUpdateTicker.Stop()
 	autoUpdateNow := make(chan struct{}, 1)
@@ -662,6 +673,8 @@ func (c *Collector) connect() error {
 			if err := c.checkForAutoUpdate(); err != nil {
 				log.Printf("collector: auto update check failed: %v", err)
 			}
+		case <-latencyTicker.C:
+			c.runDueLatencyMonitors(conn, &writeMu, c.currentTime())
 		case <-ticker.C:
 			metrics, err := c.Collect()
 			if err != nil {
@@ -696,6 +709,13 @@ func (c *Collector) readAgentCommands(conn websocketConn, writeMu *sync.Mutex) e
 			continue
 		}
 		if envelope.Type != "agent_command" {
+			if envelope.Type == "latency_monitor_config" {
+				var payload models.LatencyMonitorConfigPayload
+				if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+					continue
+				}
+				c.applyLatencyMonitorConfig(payload.Monitors)
+			}
 			continue
 		}
 		var payload models.AgentCommandPayload

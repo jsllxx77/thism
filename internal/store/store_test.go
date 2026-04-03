@@ -694,3 +694,230 @@ func TestStoreApplyAgentSnapshot(t *testing.T) {
 		t.Fatalf("unexpected docker snapshot: %#v", containers)
 	}
 }
+
+func TestStoreLatencyMonitorsRoundTrip(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	for _, node := range []*models.Node{
+		{ID: "node-1", Token: "token-1", Name: "alpha"},
+		{ID: "node-2", Token: "token-2", Name: "beta"},
+	} {
+		if err := s.UpsertNode(node); err != nil {
+			t.Fatalf("UpsertNode %s: %v", node.ID, err)
+		}
+	}
+
+	monitor := &models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Guangdong Telecom IPv4",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "gd-ct-v4.ip.zstaticcdn.com:80",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}
+
+	if err := s.CreateLatencyMonitor(monitor, []string{"node-1", "node-2"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		t.Fatalf("ListLatencyMonitors: %v", err)
+	}
+	if len(monitors) != 1 {
+		t.Fatalf("expected 1 monitor, got %d", len(monitors))
+	}
+	if monitors[0].Name != monitor.Name || monitors[0].AssignedNodeCount != 2 {
+		t.Fatalf("unexpected listed monitor: %#v", monitors[0])
+	}
+
+	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-2")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(nodeMonitors) != 1 || nodeMonitors[0].ID != "monitor-1" {
+		t.Fatalf("expected node-2 to see monitor-1, got %#v", nodeMonitors)
+	}
+}
+
+func TestNewNodeAutoAssignedLatencyMonitors(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
+		t.Fatalf("UpsertNode node-1: %v", err)
+	}
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Default monitor",
+		Type:               models.LatencyMonitorTypeICMP,
+		Target:             "1.1.1.1",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	if err := s.UpsertNode(&models.Node{ID: "node-2", Token: "token-2", Name: "beta"}); err != nil {
+		t.Fatalf("UpsertNode node-2: %v", err)
+	}
+	if err := s.AssignAutoLatencyMonitorsToNode("node-2"); err != nil {
+		t.Fatalf("AssignAutoLatencyMonitorsToNode: %v", err)
+	}
+
+	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-2")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(nodeMonitors) != 1 || nodeMonitors[0].ID != "monitor-1" {
+		t.Fatalf("expected node-2 to be auto-assigned, got %#v", nodeMonitors)
+	}
+}
+
+func TestLatencyResultsQueryByNode(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "TCP 80",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "example.com:80",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	latency := 23.75
+	loss := 20.0
+	jitter := 4.25
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID:    "monitor-1",
+		NodeID:       "node-1",
+		TS:           1700000100,
+		LatencyMs:    &latency,
+		LossPercent:  &loss,
+		JitterMs:     &jitter,
+		Success:      true,
+		ErrorMessage: "",
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult success: %v", err)
+	}
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID:    "monitor-1",
+		NodeID:       "node-1",
+		TS:           1700000160,
+		LatencyMs:    nil,
+		Success:      false,
+		ErrorMessage: "dial timeout",
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult failure: %v", err)
+	}
+
+	results, err := s.QueryLatencyResultsByNodeID("node-1", 1700000000, 1700000200)
+	if err != nil {
+		t.Fatalf("QueryLatencyResultsByNodeID: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].LatencyMs == nil || *results[0].LatencyMs != latency || !results[0].Success {
+		t.Fatalf("unexpected first result: %#v", results[0])
+	}
+	if results[0].LossPercent == nil || *results[0].LossPercent != loss {
+		t.Fatalf("unexpected loss percent on first result: %#v", results[0])
+	}
+	if results[0].JitterMs == nil || *results[0].JitterMs != jitter {
+		t.Fatalf("unexpected jitter on first result: %#v", results[0])
+	}
+	if results[1].LatencyMs != nil || results[1].Success || results[1].ErrorMessage != "dial timeout" {
+		t.Fatalf("unexpected second result: %#v", results[1])
+	}
+	if results[1].LossPercent != nil || results[1].JitterMs != nil {
+		t.Fatalf("expected failed result summaries to remain empty, got %#v", results[1])
+	}
+}
+
+func TestDeleteLatencyMonitorCascades(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Healthcheck",
+		Type:               models.LatencyMonitorTypeHTTP,
+		Target:             "https://example.com/healthz",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	latency := 11.5
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID: "monitor-1",
+		NodeID:    "node-1",
+		TS:        1700000100,
+		LatencyMs: &latency,
+		Success:   true,
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult: %v", err)
+	}
+
+	if err := s.DeleteLatencyMonitor("monitor-1"); err != nil {
+		t.Fatalf("DeleteLatencyMonitor: %v", err)
+	}
+
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		t.Fatalf("ListLatencyMonitors: %v", err)
+	}
+	if len(monitors) != 0 {
+		t.Fatalf("expected monitor to be deleted, got %#v", monitors)
+	}
+
+	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(nodeMonitors) != 0 {
+		t.Fatalf("expected node bindings to be deleted, got %#v", nodeMonitors)
+	}
+
+	results, err := s.QueryLatencyResultsByNodeID("node-1", 1700000000, 1700000200)
+	if err != nil {
+		t.Fatalf("QueryLatencyResultsByNodeID: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected results to be deleted, got %#v", results)
+	}
+}

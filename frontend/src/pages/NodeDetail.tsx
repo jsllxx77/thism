@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { api, type AccessMode, type Node, type MetricsRow, type Process, type ServiceCheck, type DockerSnapshot } from "../lib/api"
+import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond } from "../lib/units"
 import { appendLiveMetricPoint, buildMetricChartSeries, buildMetricRateChartSeries } from "../lib/metric-series"
@@ -7,6 +7,7 @@ import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
 import { HardwarePassport } from "../components/node-detail/HardwarePassport"
+import { LatencyMonitorChart } from "../components/node-detail/LatencyMonitorChart"
 import { MetricTabs } from "../components/node-detail/MetricTabs"
 import { ProcessTable } from "../components/node-detail/ProcessTable"
 import { ServiceStatusList } from "../components/node-detail/ServiceStatusList"
@@ -56,6 +57,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const { t } = useLanguage()
   const [node, setNode] = useState<Node | null>(null)
   const [metrics, setMetrics] = useState<MetricsRow[]>([])
+  const [latencyMonitors, setLatencyMonitors] = useState<LatencyMonitor[]>([])
+  const [latencyResults, setLatencyResults] = useState<LatencyMonitorResult[]>([])
   const [processes, setProcesses] = useState<Process[]>([])
   const [services, setServices] = useState<ServiceCheck[]>([])
   const [dockerSnapshot, setDockerSnapshot] = useState<DockerSnapshot | null>(null)
@@ -66,6 +69,13 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [detailError, setDetailError] = useState<string | null>(null)
   const maxRange = metricsRetentionDays >= 30 ? THIRTY_DAYS_SECONDS : SEVEN_DAYS_SECONDS
   const effectiveRange = Math.min(range, maxRange)
+  const ranges = [
+    { label: t("nodeDetail.range1h"), seconds: 3600 },
+    { label: t("nodeDetail.range6h"), seconds: 21600 },
+    { label: t("nodeDetail.range24h"), seconds: 86400 },
+    { label: t("nodeDetail.range7d"), seconds: 604800 },
+    ...(metricsRetentionDays >= 30 ? [{ label: t("nodeDetail.range30d"), seconds: 2592000 }] : []),
+  ]
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -129,6 +139,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
 
       if (accessMode === "guest") {
         setMetrics([])
+        setLatencyMonitors([])
+        setLatencyResults([])
         setProcesses([])
         setServices([])
         setDockerSnapshot(null)
@@ -137,14 +149,18 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
 
       const to = Math.floor(Date.now() / 1000)
       const from = to - effectiveRange
-      const [metricsResponse, processesResponse, servicesResponse, dockerResponse] = await Promise.all([
+      const latencyResultsRequest = (api as { latencyResults?: typeof api.latencyResults }).latencyResults
+      const [metricsResponse, latencyResponse, processesResponse, servicesResponse, dockerResponse] = await Promise.all([
         api.metrics(nodeId, from, to),
+        latencyResultsRequest ? latencyResultsRequest(nodeId, from, to) : Promise.resolve({ monitors: [], results: [] }),
         api.processes(nodeId),
         api.services(nodeId),
         api.docker(nodeId).catch(() => ({ docker_available: false, containers: [] })),
       ])
 
       setMetrics(metricsResponse.metrics ?? [])
+      setLatencyMonitors(latencyResponse.monitors ?? [])
+      setLatencyResults(latencyResponse.results ?? [])
       setProcesses(Array.isArray(processesResponse) ? processesResponse : [])
       setServices(servicesResponse.services ?? [])
       setDockerSnapshot(dockerResponse)
@@ -192,11 +208,26 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
           uptime_seconds: data.uptime_seconds ?? 0,
         }
         setMetrics((prev) => appendLiveMetricPoint(prev, point, effectiveRange))
+        return
+      }
+      if (msg.type === "latency_result") {
+        const { node_id, data } = msg.payload as {
+          node_id: string
+          data: LatencyMonitorResult
+        }
+        if (node_id !== nodeId) return
+        setLatencyResults((prev) => {
+          if (!latencyMonitors.some((monitor) => monitor.id === data.monitor_id)) {
+            return prev
+          }
+          const cutoff = Math.floor(Date.now() / 1000) - effectiveRange
+          return [...prev.filter((item) => item.ts >= cutoff), data]
+        })
       }
     }
     ws.on(handler)
     return () => ws.off(handler)
-  }, [accessMode, effectiveRange, nodeId])
+  }, [accessMode, effectiveRange, latencyMonitors, nodeId])
 
   const cpuData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.cpu, "average"), [effectiveRange, metrics])
   const memData = useMemo(() => buildMetricChartSeries(
@@ -270,23 +301,48 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
           <NodeHero node={node} showIP={accessMode !== "guest"} uptimeSeconds={heroUptimeSeconds} />
           <HardwarePassport hardware={node?.hardware} os={node?.os} arch={node?.arch} />
           {showMetrics && (
-            <MetricTabs
-              range={range}
-              onRangeChange={setRange}
-              retentionDays={metricsRetentionDays}
-              cpuData={cpuData}
-              memData={memData}
-              netRxData={netRxData}
-              netTxData={netTxData}
-              netRxSpeedData={netRxSpeedData}
-              netTxSpeedData={netTxSpeedData}
-              netValueFormatter={formatBytes}
-              netAxisTickFormatter={formatBytes}
-              netSpeedFormatter={formatBytesPerSecond}
-              netSpeedAxisTickFormatter={formatBytesPerSecond}
-              networkSummary={networkSummary}
-              diskData={diskData}
-            />
+            <>
+              <section className="panel-card enterprise-surface rounded-[24px] p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">{t("nodeDetail.rangeLabel")}</p>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{t("nodeDetail.rangeDescription")}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ranges.map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => setRange(item.seconds)}
+                        className={`h-10 rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                          range === item.seconds
+                            ? "border-slate-300 bg-slate-100 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:shadow-none"
+                            : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:bg-slate-900"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <MetricTabs
+                range={range}
+                cpuData={cpuData}
+                memData={memData}
+                netRxData={netRxData}
+                netTxData={netTxData}
+                netRxSpeedData={netRxSpeedData}
+                netTxSpeedData={netTxSpeedData}
+                netValueFormatter={formatBytes}
+                netAxisTickFormatter={formatBytes}
+                netSpeedFormatter={formatBytesPerSecond}
+                netSpeedAxisTickFormatter={formatBytesPerSecond}
+                networkSummary={networkSummary}
+                diskData={diskData}
+              />
+              <LatencyMonitorChart monitors={latencyMonitors} results={latencyResults} range={range} />
+            </>
           )}
           {showDetailSections && (
             <div className={`grid grid-cols-1 gap-4 ${detailSectionGridClass}`}>

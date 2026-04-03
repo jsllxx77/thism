@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEve
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { DashboardVisibilityCard } from "../components/settings/DashboardVisibilityCard"
+import { LatencyMonitorsCard } from "../components/settings/LatencyMonitorsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
@@ -201,6 +202,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
       </div>
 
       <AgentAutoUpdateCard nodes={effectiveNodes} />
+      <LatencyMonitorsCard nodes={effectiveNodes} />
       <MetricsRetentionCard />
       <DashboardVisibilityCard />
       <NotificationsCard />

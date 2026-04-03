@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Node } from "../../lib/api"
@@ -55,9 +55,8 @@ describe("node detail metrics", () => {
     expect(heroCard?.className).toContain("enterprise-hero")
   })
 
-  it("switches metric tabs and range", async () => {
+  it("switches metric tabs", async () => {
     const user = userEvent.setup()
-    const onRangeChange = vi.fn()
 
     const points = [
       { ts: 1700000000, value: 30 },
@@ -67,8 +66,6 @@ describe("node detail metrics", () => {
     const { container } = render(
       <MetricTabs
         range={3600}
-        onRangeChange={onRangeChange}
-        retentionDays={7}
         cpuData={points}
         memData={points}
         netRxData={points}
@@ -94,8 +91,5 @@ describe("node detail metrics", () => {
     expect(screen.getByRole("tab", { name: "Network Traffic" }).className).toContain("data-[state=active]:bg-slate-50/90")
     expect(screen.getByText("Inbound Traffic")).toBeInTheDocument()
     expect(screen.getByText("Inbound Speed")).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "6h" }))
-    expect(onRangeChange).toHaveBeenCalledWith(21600)
   })
 })
