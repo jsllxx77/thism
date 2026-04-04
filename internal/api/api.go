@@ -2560,7 +2560,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		alertDispatcher.EnqueueHeartbeat(node, false, time.Now().Unix())
 		alertDispatcher.Close()
 		conn.Close()
-		h.Unregister(node.ID)
+		h.Unregister(node.ID, conn)
 	}()
 
 	// Read loop: parse incoming agent messages and persist them.

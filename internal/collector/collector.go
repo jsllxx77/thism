@@ -645,6 +645,26 @@ func (c *Collector) connect() error {
 	defer autoUpdateTicker.Stop()
 	autoUpdateNow := make(chan struct{}, 1)
 	autoUpdateNow <- struct{}{}
+	autoUpdateDone := make(chan struct{}, 1)
+	autoUpdateRunning := false
+	latencyErrCh := make(chan error, 1)
+	latencyRunDone := make(chan struct{}, 1)
+	latencyRunning := false
+	startAutoUpdateCheck := func() {
+		if autoUpdateRunning {
+			return
+		}
+		autoUpdateRunning = true
+		go func() {
+			if err := c.checkForAutoUpdate(); err != nil {
+				log.Printf("collector: auto update check failed: %v", err)
+			}
+			select {
+			case autoUpdateDone <- struct{}{}:
+			default:
+			}
+		}()
+	}
 
 	var writeMu sync.Mutex
 	readErrCh := make(chan error, 1)
@@ -659,16 +679,34 @@ func (c *Collector) connect() error {
 				return err
 			}
 			return nil
+		case err := <-latencyErrCh:
+			c.noteConnectionError(mode, conn.RemoteAddr(), err)
+			return err
+		case <-autoUpdateDone:
+			autoUpdateRunning = false
+		case <-latencyRunDone:
+			latencyRunning = false
 		case <-autoUpdateNow:
-			if err := c.checkForAutoUpdate(); err != nil {
-				log.Printf("collector: auto update check failed: %v", err)
-			}
+			startAutoUpdateCheck()
 		case <-autoUpdateTicker.C:
-			if err := c.checkForAutoUpdate(); err != nil {
-				log.Printf("collector: auto update check failed: %v", err)
-			}
+			startAutoUpdateCheck()
 		case <-latencyTicker.C:
-			c.runDueLatencyMonitors(conn, &writeMu, c.currentTime())
+			if latencyRunning {
+				continue
+			}
+			latencyRunning = true
+			go func(currentTime time.Time) {
+				if err := c.runDueLatencyMonitors(conn, &writeMu, currentTime); err != nil {
+					select {
+					case latencyErrCh <- err:
+					default:
+					}
+				}
+				select {
+				case latencyRunDone <- struct{}{}:
+				default:
+				}
+			}(c.currentTime())
 		case <-ticker.C:
 			metrics, err := c.Collect()
 			if err != nil {

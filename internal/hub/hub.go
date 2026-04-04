@@ -19,6 +19,11 @@ type agentConn struct {
 	writeMu sync.Mutex
 }
 
+type unregisterRequest struct {
+	nodeID string
+	conn   agentSocket
+}
+
 // Hub manages all agent WebSocket connections and dashboard subscribers.
 type Hub struct {
 	store       *store.Store
@@ -26,7 +31,7 @@ type Hub struct {
 	subscribers []chan models.WSMessage
 	mu          sync.RWMutex
 	register    chan *agentConn
-	unregister  chan string
+	unregister  chan unregisterRequest
 	broadcast   chan models.WSMessage
 }
 
@@ -35,7 +40,7 @@ func New(s *store.Store) *Hub {
 		store:      s,
 		agents:     make(map[string]*agentConn),
 		register:   make(chan *agentConn, 16),
-		unregister: make(chan string, 16),
+		unregister: make(chan unregisterRequest, 16),
 		broadcast:  make(chan models.WSMessage, 64),
 	}
 }
@@ -56,17 +61,23 @@ func (h *Hub) Run() {
 				},
 			})
 
-		case nodeID := <-h.unregister:
+		case req := <-h.unregister:
+			shouldBroadcast := false
 			h.mu.Lock()
-			delete(h.agents, nodeID)
+			if current := h.agents[req.nodeID]; current != nil && current.conn == req.conn {
+				delete(h.agents, req.nodeID)
+				shouldBroadcast = true
+			}
 			h.mu.Unlock()
-			h.Broadcast(models.WSMessage{
-				Type: "node_status",
-				Payload: map[string]any{
-					"node_id": nodeID,
-					"online":  false,
-				},
-			})
+			if shouldBroadcast {
+				h.Broadcast(models.WSMessage{
+					Type: "node_status",
+					Payload: map[string]any{
+						"node_id": req.nodeID,
+						"online":  false,
+					},
+				})
+			}
 
 		case msg := <-h.broadcast:
 			h.mu.RLock()
@@ -89,9 +100,9 @@ func (h *Hub) Register(nodeID string, conn agentSocket) {
 	h.register <- &agentConn{nodeID: nodeID, conn: conn}
 }
 
-// Unregister removes an agent connection from the hub.
-func (h *Hub) Unregister(nodeID string) {
-	h.unregister <- nodeID
+// Unregister removes an agent connection from the hub only if it is still current.
+func (h *Hub) Unregister(nodeID string, conn agentSocket) {
+	h.unregister <- unregisterRequest{nodeID: nodeID, conn: conn}
 }
 
 // SendToAgent writes a typed JSON message to a specific online agent.

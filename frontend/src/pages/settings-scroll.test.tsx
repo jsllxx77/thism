@@ -29,12 +29,7 @@ vi.mock("../lib/api", () => ({
   },
 }))
 
-function renderSettings(path = "/settings?section=security") {
-  window.history.replaceState({}, "", path)
-  return render(<Settings />)
-}
-
-describe("settings change password", () => {
+describe("settings section scrolling", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
@@ -46,8 +41,16 @@ describe("settings change password", () => {
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
-    agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
+
     nodesMock.mockResolvedValue({ nodes: [] })
+    agentReleaseMock.mockImplementation((_os: string, arch: string) =>
+      Promise.resolve({
+        target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd",
+        download_url: `https://example.com/${arch}`,
+        sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64",
+        check_interval_seconds: 1800,
+      }),
+    )
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
@@ -91,50 +94,22 @@ describe("settings change password", () => {
       node_offline_grace_minutes: 2,
     })
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
+    window.history.replaceState({}, "", "/settings?section=nodes")
   })
 
-  it("validates password confirmation before submitting", async () => {
+  it("scrolls to the top when the user switches sections", async () => {
     const user = userEvent.setup()
-    renderSettings()
+    const scrollToMock = vi.fn()
+    window.scrollTo = scrollToMock
 
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass")
-    await user.type(screen.getByLabelText(/confirm new password/i), "different-pass")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+    render(<Settings />)
 
-    expect(screen.getByRole("alert")).toHaveTextContent("New password and confirmation do not match.")
-    expect(changePasswordMock).not.toHaveBeenCalled()
-  })
-
-  it("submits change password request and shows success state", async () => {
-    const user = userEvent.setup()
-    changePasswordMock.mockResolvedValue({ ok: true })
-    renderSettings()
-
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+    await user.click(await screen.findByRole("tab", { name: "Agent" }))
 
     await waitFor(() => {
-      expect(changePasswordMock).toHaveBeenCalledWith("old-pass", "new-pass-123")
+      expect(window.location.search).toBe("?section=agent")
     })
-    expect(await screen.findByText("Password updated successfully.")).toBeInTheDocument()
 
-    expect(screen.getByLabelText(/current password/i).className).toContain("rounded-xl")
-    expect(screen.getByRole("button", { name: /update password/i }).className).toContain("rounded-xl")
-  })
-
-  it("shows backend error when password change fails", async () => {
-    const user = userEvent.setup()
-    changePasswordMock.mockRejectedValue(new Error("invalid current password"))
-    renderSettings()
-
-    await user.type(screen.getByLabelText(/current password/i), "bad-old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("invalid current password")
+    expect(scrollToMock).toHaveBeenCalled()
   })
 })

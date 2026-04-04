@@ -21,6 +21,11 @@ vi.mock("../../lib/api", () => ({
   },
 }))
 
+function renderSettings(path = "/settings?section=agent") {
+  window.history.replaceState({}, "", path)
+  return render(<Settings />)
+}
+
 describe("agent auto update status card", () => {
   beforeEach(() => {
     nodesMock.mockReset()
@@ -53,7 +58,7 @@ describe("agent auto update status card", () => {
       ],
     })
 
-    render(<Settings />)
+    renderSettings()
 
     expect(await screen.findByText("Automatic Updates")).toBeInTheDocument()
     expect(screen.getByText("On")).toBeInTheDocument()
@@ -77,7 +82,7 @@ describe("agent auto update status card", () => {
       ],
     })
 
-    render(<Settings />)
+    renderSettings()
 
     await screen.findByRole("button", { name: "Update now" })
     await user.click(screen.getByRole("button", { name: "Update now" }))
@@ -100,7 +105,7 @@ describe("agent auto update status card", () => {
       ],
     })
 
-    render(<Settings />)
+    renderSettings()
 
     const button = await screen.findByRole("button", { name: "Update now" })
     expect(button).toBeDisabled()

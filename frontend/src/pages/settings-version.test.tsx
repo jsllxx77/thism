@@ -20,6 +20,11 @@ vi.mock("../lib/api", () => ({
   },
 }))
 
+function renderSettings(path = "/settings?section=security") {
+  window.history.replaceState({}, "", path)
+  return render(<Settings />)
+}
+
 describe("settings version metadata", () => {
   beforeEach(() => {
     nodesMock.mockReset()
@@ -37,7 +42,7 @@ describe("settings version metadata", () => {
   })
 
   it("renders server version metadata in the security section", async () => {
-    render(<Settings />)
+    renderSettings()
 
     expect(await screen.findByText("Server version")).toBeInTheDocument()
     expect(screen.getByText("abc1234")).toBeInTheDocument()

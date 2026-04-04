@@ -13,6 +13,7 @@ const updateDashboardSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
+const dispatcherRuntimeStatsMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -26,15 +27,16 @@ vi.mock("../lib/api", () => ({
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
+    dispatcherRuntimeStats: (...args: unknown[]) => dispatcherRuntimeStatsMock(...args),
   },
 }))
 
-function renderSettings(path = "/settings?section=security") {
+function renderSettings(path = "/settings") {
   window.history.replaceState({}, "", path)
   return render(<Settings />)
 }
 
-describe("settings change password", () => {
+describe("settings section tabs", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     changePasswordMock.mockReset()
@@ -46,8 +48,30 @@ describe("settings change password", () => {
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
-    agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
-    nodesMock.mockResolvedValue({ nodes: [] })
+    dispatcherRuntimeStatsMock.mockReset()
+
+    nodesMock.mockResolvedValue({
+      nodes: [
+        {
+          id: "node-1",
+          name: "alpha",
+          ip: "1.1.1.1",
+          os: "linux",
+          arch: "amd64",
+          created_at: 0,
+          last_seen: 0,
+          online: true,
+        },
+      ],
+    })
+    agentReleaseMock.mockImplementation((_os: string, arch: string) =>
+      Promise.resolve({
+        target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd",
+        download_url: `https://example.com/${arch}`,
+        sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64",
+        check_interval_seconds: 1800,
+      }),
+    )
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
@@ -91,50 +115,71 @@ describe("settings change password", () => {
       node_offline_grace_minutes: 2,
     })
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
+    dispatcherRuntimeStatsMock.mockResolvedValue({
+      active_dispatchers: 1,
+      total_capacity: 256,
+      queue_depth: 0,
+      high_watermark: 0,
+      enqueued: 0,
+      processed: 0,
+      dropped: 0,
+    })
+    window.scrollTo = vi.fn()
   })
 
-  it("validates password confirmation before submitting", async () => {
-    const user = userEvent.setup()
-    renderSettings()
-
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass")
-    await user.type(screen.getByLabelText(/confirm new password/i), "different-pass")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
-
-    expect(screen.getByRole("alert")).toHaveTextContent("New password and confirmation do not match.")
-    expect(changePasswordMock).not.toHaveBeenCalled()
-  })
-
-  it("submits change password request and shows success state", async () => {
-    const user = userEvent.setup()
-    changePasswordMock.mockResolvedValue({ ok: true })
-    renderSettings()
-
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+  it("normalizes missing section to nodes", async () => {
+    renderSettings("/settings")
 
     await waitFor(() => {
-      expect(changePasswordMock).toHaveBeenCalledWith("old-pass", "new-pass-123")
+      expect(window.location.search).toBe("?section=nodes")
     })
-    expect(await screen.findByText("Password updated successfully.")).toBeInTheDocument()
 
-    expect(screen.getByLabelText(/current password/i).className).toContain("rounded-xl")
-    expect(screen.getByRole("button", { name: /update password/i }).className).toContain("rounded-xl")
+    expect(await screen.findByRole("button", { name: /add node/i })).toBeInTheDocument()
   })
 
-  it("shows backend error when password change fails", async () => {
+  it("normalizes invalid section to nodes", async () => {
+    renderSettings("/settings?section=unknown")
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=nodes")
+    })
+
+    expect(await screen.findByRole("button", { name: /add node/i })).toBeInTheDocument()
+  })
+
+  it("switches sections and updates the query string", async () => {
     const user = userEvent.setup()
-    changePasswordMock.mockRejectedValue(new Error("invalid current password"))
-    renderSettings()
+    renderSettings("/settings?section=nodes")
 
-    await user.type(screen.getByLabelText(/current password/i), "bad-old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass-123")
-    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass-123")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+    await screen.findByRole("button", { name: /add node/i })
+    await user.click(screen.getByRole("tab", { name: "Agent" }))
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("invalid current password")
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=agent")
+    })
+
+    expect(await screen.findByRole("heading", { name: "Automatic Updates", level: 3 })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Latency Monitors", level: 3 })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add node/i })).not.toBeInTheDocument()
+  })
+
+  it("preserves unsaved notification form input across section switches", async () => {
+    const user = userEvent.setup()
+    renderSettings("/settings?section=alerts")
+
+    const botTokenInput = await screen.findByLabelText("Telegram bot token")
+    await user.type(botTokenInput, "123456:ABC")
+
+    await user.click(screen.getByRole("tab", { name: "Nodes" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=nodes")
+    })
+
+    await user.click(screen.getByRole("tab", { name: "Alerts" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=alerts")
+    })
+
+    expect(await screen.findByLabelText("Telegram bot token")).toHaveValue("123456:ABC")
   })
 })

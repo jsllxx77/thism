@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ComponentProps } from "react"
 import { Settings } from "./Settings"
 
 const nodesMock = vi.fn()
@@ -28,6 +29,11 @@ vi.mock("../lib/api", () => ({
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
   },
 }))
+
+function renderSettings(path = "/settings?section=nodes", props?: ComponentProps<typeof Settings>) {
+  window.history.replaceState({}, "", path)
+  return render(<Settings {...props} />)
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -102,7 +108,7 @@ describe("settings page states", () => {
     const request = deferred<{ nodes: [] }>()
     nodesMock.mockReturnValue(request.promise)
 
-    render(<Settings />)
+    renderSettings("/settings?section=nodes")
     expect(screen.getByText("Loading nodes...")).toBeInTheDocument()
 
     request.resolve({ nodes: [] })
@@ -127,20 +133,25 @@ describe("settings page states", () => {
       ],
     })
 
-    const { container } = render(<Settings />)
+    const user = userEvent.setup()
+    const { container } = renderSettings("/settings?section=nodes")
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Nodes", level: 4 })).toBeInTheDocument()
     })
 
     const nodeRegistry = screen.getByRole("heading", { name: "Nodes", level: 4 }).closest("section") as HTMLElement | null
-    const securityCard = screen.getByRole("heading", { name: "Password", level: 4 }).closest("section") as HTMLElement | null
 
     expect(nodeRegistry?.className).toContain("enterprise-surface")
-    expect(securityCard?.className).toContain("enterprise-surface")
 
     const addNodeButton = screen.getByRole("button", { name: /add node/i })
     expect(addNodeButton.className).toContain("rounded-xl")
+
+    window.scrollTo = vi.fn()
+    await user.click(screen.getByRole("tab", { name: "Security" }))
+
+    const securityCard = await screen.findByRole("heading", { name: "Password", level: 4 })
+    expect(securityCard.closest("section")?.className).toContain("enterprise-surface")
 
     expect(container.textContent).toContain("Settings")
   })
@@ -148,14 +159,14 @@ describe("settings page states", () => {
   it("shows an error state when settings data fails to load", async () => {
     nodesMock.mockRejectedValue(new Error("timeout"))
 
-    render(<Settings />)
+    renderSettings("/settings?section=nodes")
     expect(await screen.findByText("We couldn't load settings data. Please try again.")).toBeInTheDocument()
   })
 
   it("refetches settings data when refreshNonce changes", async () => {
     nodesMock.mockResolvedValue({ nodes: [] })
 
-    const { rerender } = render(<Settings refreshNonce={0} />)
+    const { rerender } = renderSettings("/settings?section=nodes", { refreshNonce: 0 })
     let initialCalls = 0
     await waitFor(() => {
       initialCalls = nodesMock.mock.calls.length
@@ -187,7 +198,7 @@ describe("settings page states", () => {
       ],
     })
 
-    render(<Settings />)
+    renderSettings("/settings?section=nodes")
 
     await act(async () => {
       await Promise.resolve()
@@ -208,7 +219,7 @@ describe("settings page states", () => {
     const user = userEvent.setup()
     nodesMock.mockResolvedValue({ nodes: [] })
 
-    render(<Settings />)
+    renderSettings("/settings?section=monitoring")
 
     const checkbox = await screen.findByRole("checkbox", { name: "Show IP addresses on dashboard node cards" })
     expect(checkbox).toBeChecked()

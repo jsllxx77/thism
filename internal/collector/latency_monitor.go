@@ -67,7 +67,7 @@ func (c *Collector) latencyMonitorSnapshot() []models.LatencyMonitor {
 	return monitors
 }
 
-func (c *Collector) runDueLatencyMonitors(conn websocketConn, writeMu *sync.Mutex, currentTime time.Time) {
+func (c *Collector) runDueLatencyMonitors(conn websocketConn, writeMu *sync.Mutex, currentTime time.Time) error {
 	c.latencyMu.Lock()
 	due := make([]models.LatencyMonitor, 0, len(c.latencyMonitors))
 	for _, state := range c.latencyMonitors {
@@ -88,11 +88,15 @@ func (c *Collector) runDueLatencyMonitors(conn websocketConn, writeMu *sync.Mute
 	})
 
 	for _, monitor := range due {
-		c.executeLatencyMonitor(monitor, conn, writeMu, currentTime)
+		if err := c.executeLatencyMonitor(monitor, conn, writeMu, currentTime); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
-func (c *Collector) executeLatencyMonitor(monitor models.LatencyMonitor, conn websocketConn, writeMu *sync.Mutex, currentTime time.Time) {
+func (c *Collector) executeLatencyMonitor(monitor models.LatencyMonitor, conn websocketConn, writeMu *sync.Mutex, currentTime time.Time) error {
 	result := models.LatencyMonitorResult{
 		MonitorID: monitor.ID,
 		TS:        currentTime.Unix(),
@@ -111,7 +115,10 @@ func (c *Collector) executeLatencyMonitor(monitor models.LatencyMonitor, conn we
 
 	if err := c.sendLatencyResult(conn, writeMu, result); err != nil {
 		log.Printf("collector: send latency result for monitor %s failed: %v", monitor.ID, err)
+		return err
 	}
+
+	return nil
 }
 
 func (c *Collector) probeLatencyMonitor(monitor models.LatencyMonitor) (float64, error) {

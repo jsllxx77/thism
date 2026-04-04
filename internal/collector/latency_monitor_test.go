@@ -17,10 +17,14 @@ type latencyTestConn struct {
 	readErr    error
 	readIndex  int
 	writes     [][]byte
+	writeErr   error
 	remoteAddr net.Addr
 }
 
 func (c *latencyTestConn) WriteMessage(_ int, data []byte) error {
+	if c.writeErr != nil {
+		return c.writeErr
+	}
 	copied := make([]byte, len(data))
 	copy(copied, data)
 	c.writes = append(c.writes, copied)
@@ -228,5 +232,25 @@ func TestCollectorLatencyProbeAggregationSkipsJitterWithSingleSuccess(t *testing
 	}
 	if results[0].JitterMs != nil {
 		t.Fatalf("expected jitter to remain empty with a single success, got %#v", results[0])
+	}
+}
+
+func TestCollectorLatencyMonitorWriteErrorIsReturned(t *testing.T) {
+	collector := NewWithInterval("ws://localhost:12026", "token", "node", "", DefaultReportInterval)
+	collector.applyLatencyMonitorConfig([]models.LatencyMonitor{
+		{ID: "tcp-1", Name: "TCP", Type: models.LatencyMonitorTypeTCP, Target: "example.com:80", IntervalSeconds: 60},
+	})
+
+	collector.tcpLatencyProbe = func(_ string) (float64, error) {
+		return 12.5, nil
+	}
+
+	wantErr := errors.New("broken pipe")
+	conn := &latencyTestConn{writeErr: wantErr}
+	var writeMu sync.Mutex
+
+	err := collector.runDueLatencyMonitors(conn, &writeMu, time.Unix(100, 0))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected write error %v, got %v", wantErr, err)
 	}
 }
