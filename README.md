@@ -10,6 +10,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Lightweight Linux agents for monitored nodes
 - SQLite storage with no external database requirement
 - Server-hosted agent install script and release manifest
+- Built-in ICMP, TCP, and HTTP latency monitoring from selected nodes
 - Prebuilt GHCR image plus Docker Compose deployment path
 
 ## Quick Start
@@ -65,6 +66,24 @@ Use the web console for the normal enrollment flow:
 The generated command installs `thism-agent` into `/usr/local/bin`, writes a `systemd` unit, and starts the service. The installer supports `linux/amd64` and `linux/arm64`.
 
 If the node already exists and you need the command again, open `Settings` -> `Node Management` and click `Get Script` on that node row.
+
+## Latency Monitoring
+
+ThisM can run active latency checks from your agents and plot the results on the node detail page.
+
+Current monitor types:
+
+- `ICMP`
+- `TCP`
+- `HTTP`
+
+To configure a monitor:
+
+1. Open `Settings`.
+2. Switch to the `Agent` section.
+3. Open `Latency Monitors`.
+4. Create a monitor, choose the target, interval, and nodes that should run it.
+5. Open a node detail page to view the latency chart for the monitors assigned to that node.
 
 ## More Documentation
 
