@@ -1,5 +1,4 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const nodesMock = vi.fn()
@@ -9,7 +8,7 @@ const servicesMock = vi.fn()
 const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = null
-let latestCPUData: Array<{ ts: number; value: number }> = []
+let latestDiskValue: number | null | undefined
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -34,20 +33,9 @@ vi.mock("../lib/ws", () => ({
 }))
 
 vi.mock("../components/node-detail/MetricTabs", () => ({
-  MetricTabs: (props: {
-    range: number
-    cpuData: Array<{ ts: number; value: number }>
-  }) => {
-    latestCPUData = props.cpuData
-    const span = props.cpuData.length > 1 ? props.cpuData[props.cpuData.length - 1].ts - props.cpuData[0].ts : 0
-
-    return (
-      <div>
-        <div data-testid="metric-range">{props.range}</div>
-        <div data-testid="cpu-points">{props.cpuData.length}</div>
-        <div data-testid="cpu-span">{span}</div>
-      </div>
-    )
+  MetricTabs: (props: { diskData: Array<{ ts: number; value: number | null }> }) => {
+    latestDiskValue = props.diskData[props.diskData.length - 1]?.value
+    return <div data-testid="latest-disk">{latestDiskValue == null ? "null" : String(latestDiskValue)}</div>
   },
 }))
 
@@ -69,25 +57,7 @@ function mockMatchMedia() {
   })
 }
 
-function buildMetrics(from: number, to: number) {
-  const rows = []
-  for (let ts = from + 5; ts <= to; ts += 5) {
-    rows.push({
-      ts,
-      cpu: ts % 100,
-      mem_used: 512,
-      mem_total: 1024,
-      disk_used: 2048,
-      disk_total: 4096,
-      net_rx: ts * 10,
-      net_tx: ts * 20,
-      uptime_seconds: 1000 + ts,
-    })
-  }
-  return rows
-}
-
-describe("node detail chart density", () => {
+describe("node detail live disk usage", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     metricsMock.mockReset()
@@ -96,7 +66,7 @@ describe("node detail chart density", () => {
     dockerMock.mockReset()
     metricsRetentionMock.mockReset()
     wsHandler = null
-    latestCPUData = []
+    latestDiskValue = undefined
     mockMatchMedia()
 
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
@@ -114,40 +84,32 @@ describe("node detail chart density", () => {
         },
       ],
     })
-    metricsMock.mockImplementation((_nodeId: string, from?: number, to?: number) =>
-      Promise.resolve({ metrics: buildMetrics(from ?? 0, to ?? 0) })
-    )
+    metricsMock.mockResolvedValue({
+      metrics: [
+        {
+          ts: 100,
+          cpu: 10,
+          mem_used: 100,
+          mem_total: 200,
+          disk_used: 300,
+          disk_total: 600,
+          net_rx: 1000,
+          net_tx: 2000,
+        },
+      ],
+    })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })
     dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
   })
 
-  it("keeps the selected 6h window after live updates while reducing chart density", async () => {
-    const user = userEvent.setup()
-
+  it("keeps disk usage from raw live disk partitions instead of dropping to zero", async () => {
     render(<NodeDetail nodeId="node-1" />)
 
     await waitFor(() => {
       expect(screen.getByText("alpha")).toBeInTheDocument()
     })
-
-    await waitFor(() => {
-      expect(Number(screen.getByTestId("cpu-points").textContent)).toBeLessThanOrEqual(120)
-    })
-    expect(Number(screen.getByTestId("cpu-span").textContent)).toBeGreaterThan(3000)
-
-    await user.click(screen.getByRole("button", { name: "6h" }))
-
-    await waitFor(() => {
-      expect(screen.getByTestId("metric-range")).toHaveTextContent("21600")
-    })
-    await waitFor(() => {
-      expect(Number(screen.getByTestId("cpu-points").textContent)).toBeLessThanOrEqual(180)
-    })
-    expect(Number(screen.getByTestId("cpu-span").textContent)).toBeGreaterThan(18000)
-
-    const latestPoint = latestCPUData[latestCPUData.length - 1]
-    expect(latestPoint).toBeDefined()
+    expect(screen.getByTestId("latest-disk")).toHaveTextContent("50")
 
     act(() => {
       wsHandler?.({
@@ -155,21 +117,21 @@ describe("node detail chart density", () => {
         payload: {
           node_id: "node-1",
           data: {
-            ts: latestPoint.ts + 5,
-            cpu: 42,
-            mem: { used: 768, total: 1024 },
-            disk_used: 2048,
-            disk_total: 4096,
-            net: { rx_bytes: (latestPoint.ts + 5) * 10, tx_bytes: (latestPoint.ts + 5) * 20 },
-            uptime_seconds: 1000 + latestPoint.ts + 5,
+            ts: 110,
+            cpu: 12,
+            mem: { used: 110, total: 200 },
+            disk: [
+              { mount: "/", used: 320, total: 640 },
+              { mount: "/data", used: 40, total: 80 },
+            ],
+            net: { rx_bytes: 1200, tx_bytes: 2200 },
           },
         },
       })
     })
 
     await waitFor(() => {
-      expect(Number(screen.getByTestId("cpu-points").textContent)).toBeLessThanOrEqual(180)
+      expect(screen.getByTestId("latest-disk")).toHaveTextContent("50")
     })
-    expect(Number(screen.getByTestId("cpu-span").textContent)).toBeGreaterThan(18000)
   })
 })

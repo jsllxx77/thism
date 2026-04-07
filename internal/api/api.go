@@ -2632,7 +2632,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			Payload: map[string]any{
 				"node_id":   node.ID,
 				"last_seen": lastSeen,
-				"data":      payload,
+				"data":      dashboardMetricsDataFromPayload(&payload),
 			},
 		})
 	}
@@ -2920,23 +2920,65 @@ func dashboardInitialMessages(s *store.Store, h *hub.Hub) ([]models.WSMessage, e
 			Payload: map[string]any{
 				"node_id":   node.ID,
 				"last_seen": node.LastSeen,
-				"data": map[string]any{
-					"ts":  snapshot.TS,
-					"cpu": snapshot.CPU,
-					"mem": map[string]any{
-						"used":  snapshot.MemUsed,
-						"total": snapshot.MemTotal,
-					},
-					"net": map[string]any{
-						"rx_bytes": snapshot.NetRx,
-						"tx_bytes": snapshot.NetTx,
-					},
-					"disk_used":  snapshot.DiskUsed,
-					"disk_total": snapshot.DiskTotal,
-				},
+				"data":      dashboardMetricsDataFromSnapshot(snapshot),
 			},
 		})
 	}
 
 	return messages, nil
+}
+
+func dashboardMetricsDataFromSnapshot(snapshot *models.NodeMetricsSnapshot) map[string]any {
+	if snapshot == nil {
+		return map[string]any{}
+	}
+
+	return map[string]any{
+		"ts":  snapshot.TS,
+		"cpu": snapshot.CPU,
+		"mem": map[string]any{
+			"used":  snapshot.MemUsed,
+			"total": snapshot.MemTotal,
+		},
+		"net": map[string]any{
+			"rx_bytes": snapshot.NetRx,
+			"tx_bytes": snapshot.NetTx,
+		},
+		"disk_used":      snapshot.DiskUsed,
+		"disk_total":     snapshot.DiskTotal,
+		"uptime_seconds": snapshot.UptimeSeconds,
+	}
+}
+
+func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+
+	diskUsed, diskTotal := aggregatePayloadDiskTotals(payload.Disk)
+	data := map[string]any{
+		"ts":             payload.TS,
+		"cpu":            payload.CPU,
+		"mem":            payload.Mem,
+		"net":            payload.Net,
+		"disk_used":      diskUsed,
+		"disk_total":     diskTotal,
+		"uptime_seconds": payload.UptimeSeconds,
+	}
+
+	if len(payload.Disk) > 0 {
+		data["disk"] = payload.Disk
+	}
+
+	return data
+}
+
+func aggregatePayloadDiskTotals(disks []models.DiskStats) (uint64, uint64) {
+	var used uint64
+	var total uint64
+	for _, disk := range disks {
+		used += disk.Used
+		total += disk.Total
+	}
+	return used, total
 }

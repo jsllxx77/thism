@@ -21,6 +21,18 @@ type Props = {
   accessMode?: AccessMode
 }
 
+type LiveDiskStats = {
+  used?: number
+  total?: number
+}
+
+type LiveMetricsMessage = Partial<MetricsRow> & {
+  cpu: number
+  mem?: { used?: number; total?: number }
+  net?: { rx_bytes?: number; tx_bytes?: number }
+  disk?: LiveDiskStats[]
+}
+
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 768px)"
 const DEFAULT_METRICS_RETENTION_DAYS = 7
 const SEVEN_DAYS_SECONDS = 604800
@@ -51,6 +63,54 @@ function formatOptionalBytes(value: number | undefined): string {
 
 function formatOptionalBytesPerSecond(value: number | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? formatBytesPerSecond(value) : "—"
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function aggregateLiveDiskTotals(disks?: ReadonlyArray<LiveDiskStats>): { diskUsed?: number; diskTotal?: number } {
+  if (!Array.isArray(disks) || disks.length === 0) {
+    return {}
+  }
+
+  let diskUsed = 0
+  let diskTotal = 0
+  let hasValue = false
+
+  for (const disk of disks) {
+    if (isFiniteNumber(disk?.used)) {
+      diskUsed += disk.used
+      hasValue = true
+    }
+    if (isFiniteNumber(disk?.total)) {
+      diskTotal += disk.total
+      hasValue = true
+    }
+  }
+
+  if (!hasValue) {
+    return {}
+  }
+
+  return { diskUsed, diskTotal }
+}
+
+function resolveLiveDiskTotals(data: LiveMetricsMessage, previous?: MetricsRow): { diskUsed: number; diskTotal: number } {
+  if (isFiniteNumber(data.disk_used) && isFiniteNumber(data.disk_total)) {
+    return { diskUsed: data.disk_used, diskTotal: data.disk_total }
+  }
+
+  const aggregated = aggregateLiveDiskTotals(data.disk)
+  if (isFiniteNumber(aggregated.diskUsed) && isFiniteNumber(aggregated.diskTotal) && aggregated.diskTotal > 0) {
+    return { diskUsed: aggregated.diskUsed, diskTotal: aggregated.diskTotal }
+  }
+
+  if (previous) {
+    return { diskUsed: previous.disk_used, diskTotal: previous.disk_total }
+  }
+
+  return { diskUsed: 0, diskTotal: 0 }
 }
 
 export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: Props) {
@@ -190,24 +250,25 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
       if (msg.type === "metrics") {
         const { node_id, data } = msg.payload as {
           node_id: string
-          data: MetricsRow & {
-            mem: { used: number; total: number }
-            net: { rx_bytes: number; tx_bytes: number }
-          }
+          data: LiveMetricsMessage
         }
         if (node_id !== nodeId) return
-        const point: MetricsRow = {
-          ts: data.ts ?? Math.floor(Date.now() / 1000),
-          cpu: data.cpu,
-          mem_used: data.mem?.used ?? 0,
-          mem_total: data.mem?.total ?? 0,
-          disk_used: data.disk_used ?? 0,
-          disk_total: data.disk_total ?? 0,
-          net_rx: data.net?.rx_bytes ?? 0,
-          net_tx: data.net?.tx_bytes ?? 0,
-          uptime_seconds: data.uptime_seconds ?? 0,
-        }
-        setMetrics((prev) => appendLiveMetricPoint(prev, point, effectiveRange))
+        setMetrics((prev) => {
+          const previousPoint = prev[prev.length - 1]
+          const { diskUsed, diskTotal } = resolveLiveDiskTotals(data, previousPoint)
+          const point: MetricsRow = {
+            ts: data.ts ?? Math.floor(Date.now() / 1000),
+            cpu: data.cpu,
+            mem_used: data.mem?.used ?? 0,
+            mem_total: data.mem?.total ?? 0,
+            disk_used: diskUsed,
+            disk_total: diskTotal,
+            net_rx: data.net?.rx_bytes ?? 0,
+            net_tx: data.net?.tx_bytes ?? 0,
+            uptime_seconds: data.uptime_seconds ?? 0,
+          }
+          return appendLiveMetricPoint(prev, point, effectiveRange)
+        })
         return
       }
       if (msg.type === "latency_result") {

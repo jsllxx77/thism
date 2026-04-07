@@ -154,6 +154,104 @@ func TestAgentMetricsBroadcastIncludesLastSeen(t *testing.T) {
 	}
 }
 
+func TestAgentMetricsBroadcastIncludesAggregatedDiskTotals(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server := newIPv4TestServer(router)
+	defer server.Close()
+
+	if err := s.UpsertNode(&models.Node{
+		ID:        "node-1",
+		Name:      "agent-node",
+		Token:     "agent-token-1",
+		CreatedAt: time.Now().Unix(),
+	}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+
+	dashboardURL := *baseURL
+	dashboardURL.Scheme = "ws"
+	dashboardURL.Path = "/ws/dashboard"
+	dashboardHeader := http.Header{}
+	dashboardHeader.Set("Authorization", "Bearer admin-token")
+
+	dashboardConn, _, err := websocket.DefaultDialer.Dial(dashboardURL.String(), dashboardHeader)
+	if err != nil {
+		t.Fatalf("dial dashboard websocket: %v", err)
+	}
+	defer dashboardConn.Close()
+
+	agentURL := *baseURL
+	agentURL.Scheme = "ws"
+	agentURL.Path = "/ws/agent"
+	agentQuery := agentURL.Query()
+	agentQuery.Set("token", "agent-token-1")
+	agentURL.RawQuery = agentQuery.Encode()
+
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL.String(), http.Header{})
+	if err != nil {
+		t.Fatalf("dial agent websocket: %v", err)
+	}
+	defer agentConn.Close()
+
+	payload := models.MetricsPayload{
+		Type: "metrics",
+		TS:   time.Now().Unix(),
+		CPU:  12.5,
+		Mem:  models.MemStats{Used: 1024, Total: 2048},
+		Disk: []models.DiskStats{
+			{Mount: "/", Used: 300, Total: 500},
+			{Mount: "/data", Used: 50, Total: 100},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := agentConn.WriteMessage(websocket.TextMessage, raw); err != nil {
+		t.Fatalf("write agent metrics: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	_ = dashboardConn.SetReadDeadline(deadline)
+
+	for {
+		var msg struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
+		}
+		if err := dashboardConn.ReadJSON(&msg); err != nil {
+			t.Fatalf("read dashboard message: %v", err)
+		}
+		if msg.Type != "metrics" {
+			continue
+		}
+
+		data, ok := msg.Payload["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data payload, got %#v", msg.Payload["data"])
+		}
+		if data["disk_used"] != float64(350) {
+			t.Fatalf("expected disk_used 350, got %#v", data["disk_used"])
+		}
+		if data["disk_total"] != float64(600) {
+			t.Fatalf("expected disk_total 600, got %#v", data["disk_total"])
+		}
+		break
+	}
+}
+
 func TestAgentMetricsDoesNotBroadcastWhenPersistenceFails(t *testing.T) {
 	s, _ := store.New(":memory:")
 	h := hub.New(s)
