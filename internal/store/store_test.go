@@ -3,6 +3,7 @@ package store_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -387,6 +388,8 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 		Channel:                 string(models.NotificationChannelTelegram),
 		TelegramBotToken:        "secret-token",
 		TelegramTargets:         []models.TelegramTarget{{Name: "Ops", ChatID: "-100123", TopicID: 42}},
+		TimeZoneMode:            models.NotificationTimeZoneModeCustom,
+		TimeZone:                "Asia/Shanghai",
 		CPUWarningPercent:       80,
 		CPUCriticalPercent:      90,
 		MemWarningPercent:       81,
@@ -407,6 +410,9 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	if stored.TelegramBotToken != "secret-token" || len(stored.TelegramTargets) != 1 || stored.TelegramTargets[0].TopicID != 42 {
 		t.Fatalf("unexpected stored notification settings: %#v", stored)
 	}
+	if stored.TimeZoneMode != models.NotificationTimeZoneModeCustom || stored.TimeZone != "Asia/Shanghai" {
+		t.Fatalf("expected timezone settings to round-trip, got %#v", stored)
+	}
 	if stored.DispatcherQueueCapacity != 512 || !stored.NotifyDispatcherDrops {
 		t.Fatalf("expected dispatcher settings to round-trip, got %#v", stored)
 	}
@@ -416,6 +422,15 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	}
 	if !view.TelegramBotTokenSet || view.TelegramBotToken != "" {
 		t.Fatalf("expected masked token in notification settings view, got %#v", view)
+	}
+	if view.TimeZoneMode != models.NotificationTimeZoneModeCustom || view.TimeZone != "Asia/Shanghai" {
+		t.Fatalf("expected timezone settings in view, got %#v", view)
+	}
+	if strings.TrimSpace(view.SystemTimeZone) == "" {
+		t.Fatalf("expected system timezone in view, got %#v", view)
+	}
+	if !strings.Contains(view.EffectiveTimeZone, "Asia/Shanghai") {
+		t.Fatalf("expected effective timezone to include custom timezone, got %#v", view)
 	}
 	if view.DispatcherQueueCapacity != 512 || !view.NotifyDispatcherDrops {
 		t.Fatalf("expected dispatcher settings in masked view, got %#v", view)
@@ -487,6 +502,12 @@ func TestStoreNotificationSettingsDefaultDispatcherValues(t *testing.T) {
 	}
 	if settings.NotifyDispatcherDrops {
 		t.Fatalf("expected dispatcher drop alerts disabled by default, got %#v", settings)
+	}
+	if settings.TimeZoneMode != models.NotificationTimeZoneModeSystem {
+		t.Fatalf("expected default timezone mode %q, got %#v", models.NotificationTimeZoneModeSystem, settings)
+	}
+	if settings.TimeZone != "" {
+		t.Fatalf("expected default custom timezone to be empty, got %#v", settings)
 	}
 }
 

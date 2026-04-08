@@ -13,6 +13,10 @@ const defaultState: NotificationSettings = {
   telegram_bot_token_set: false,
   telegram_bot_token: "",
   telegram_targets: [defaultTarget()],
+  time_zone_mode: "system",
+  time_zone: "",
+  system_time_zone: "",
+  effective_time_zone: "",
   enabled_node_ids: [],
   node_scope_mode: "all",
   node_scope_node_ids: [],
@@ -202,6 +206,8 @@ export function NotificationsCard() {
         disk_warning_percent: Number(settings.disk_warning_percent),
         disk_critical_percent: Number(settings.disk_critical_percent),
         cooldown_minutes: Number(settings.cooldown_minutes),
+        time_zone_mode: settings.time_zone_mode ?? "system",
+        time_zone: settings.time_zone_mode === "custom" ? settings.time_zone?.trim() ?? "" : "",
         notify_node_offline: settings.notify_node_offline,
         notify_node_online: settings.notify_node_online,
         node_offline_grace_minutes: Number(settings.node_offline_grace_minutes),
@@ -304,6 +310,51 @@ export function NotificationsCard() {
                 </label>
               </div>
             ))}
+          </div>
+
+          <div className="enterprise-inner-surface space-y-3 rounded-2xl border border-slate-200 px-4 py-4 dark:border-white/10">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.notificationTimezoneTitle")}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationTimezoneHint")}</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold tracking-[0.12em] text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                {settings.effective_time_zone || settings.system_time_zone || t("common.unavailable")}
+              </span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {([
+                ["system", t("settingsPage.notificationTimezoneSystem")],
+                ["custom", t("settingsPage.notificationTimezoneCustom")],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSettings((current: NotificationSettings) => ({ ...current, time_zone_mode: mode }))}
+                  className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${settings.time_zone_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t("settingsPage.notificationSystemTimezone", { value: settings.system_time_zone || t("common.unavailable") })}
+            </p>
+            {settings.time_zone_mode === "custom" ? (
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                {t("settingsPage.notificationCustomTimezone")}
+                <Input
+                  aria-label={t("settingsPage.notificationCustomTimezone")}
+                  value={settings.time_zone ?? ""}
+                  onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, time_zone: event.target.value }))}
+                  placeholder={t("settingsPage.notificationCustomTimezonePlaceholder")}
+                  className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+                />
+              </label>
+            ) : null}
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t("settingsPage.notificationEffectiveTimezone", { value: settings.effective_time_zone || settings.system_time_zone || t("common.unavailable") })}
+            </p>
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">

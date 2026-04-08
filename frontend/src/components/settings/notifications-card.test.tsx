@@ -31,6 +31,10 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      time_zone_mode: "system",
+      time_zone: "",
+      system_time_zone: "Local (UTC+08:00)",
+      effective_time_zone: "Local (UTC+08:00)",
       enabled_node_ids: ["node-1"],
       node_scope_mode: "include",
       node_scope_node_ids: ["node-1"],
@@ -52,6 +56,10 @@ describe("notifications card", () => {
       channel: "telegram",
       telegram_bot_token_set: true,
       telegram_targets: [{ name: "Ops", chat_id: "-100123", topic_id: 99 }],
+      time_zone_mode: "custom",
+      time_zone: "Asia/Shanghai",
+      system_time_zone: "Local (UTC+08:00)",
+      effective_time_zone: "Asia/Shanghai (UTC+08:00)",
       enabled_node_ids: ["node-1", "node-2"],
       node_scope_mode: "include",
       node_scope_node_ids: ["node-1", "node-2"],
@@ -123,6 +131,23 @@ describe("notifications card", () => {
       notify_dispatcher_drops: false,
     })
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
+  })
+
+  it("saves a custom notification timezone", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("Server timezone: Local (UTC+08:00)")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Custom timezone" }))
+    await user.clear(screen.getByLabelText("Custom timezone (IANA)"))
+    await user.type(screen.getByLabelText("Custom timezone (IANA)"), "Asia/Shanghai")
+    await user.click(screen.getByRole("button", { name: "Save notifications" }))
+
+    await waitFor(() => expect(updateNotificationSettingsMock).toHaveBeenCalled())
+    expect(updateNotificationSettingsMock.mock.calls[0][0]).toMatchObject({
+      time_zone_mode: "custom",
+      time_zone: "Asia/Shanghai",
+    })
   })
 
   it("sends a test notification to the first telegram target", async () => {

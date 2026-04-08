@@ -219,6 +219,10 @@ export type NotificationSettings = {
   telegram_bot_token?: string
   telegram_bot_token_set: boolean
   telegram_targets: TelegramTarget[]
+  time_zone_mode?: "system" | "custom"
+  time_zone?: string
+  system_time_zone?: string
+  effective_time_zone?: string
   enabled_node_ids: string[]
   node_scope_mode?: "all" | "include" | "exclude"
   node_scope_node_ids?: string[]

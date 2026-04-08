@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/notify"
 	"github.com/thism-dev/thism/internal/security"
 	_ "modernc.org/sqlite"
 )
@@ -391,6 +392,8 @@ func defaultNotificationSettings() models.NotificationSettings {
 		CooldownMinutes:                     30,
 		RecoverySuccessiveSamples:           3,
 		RecoveryNotificationCooldownMinutes: 30,
+		TimeZoneMode:                        models.NotificationTimeZoneModeSystem,
+		TimeZone:                            "",
 		DispatcherQueueCapacity:             models.DefaultDispatcherQueueCapacity,
 		NotifyDispatcherDrops:               false,
 	}
@@ -821,6 +824,11 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 	if settings.RecoveryNotificationCooldownMinutes <= 0 {
 		settings.RecoveryNotificationCooldownMinutes = defaults.RecoveryNotificationCooldownMinutes
 	}
+	settings.TimeZoneMode = normalizeNotificationTimeZoneMode(settings.TimeZoneMode)
+	settings.TimeZone = strings.TrimSpace(settings.TimeZone)
+	if settings.TimeZoneMode != models.NotificationTimeZoneModeCustom {
+		settings.TimeZone = ""
+	}
 	if settings.DispatcherQueueCapacity <= 0 {
 		settings.DispatcherQueueCapacity = defaults.DispatcherQueueCapacity
 	}
@@ -873,6 +881,15 @@ func normalizeNotificationSettings(settings models.NotificationSettings) models.
 	return settings
 }
 
+func normalizeNotificationTimeZoneMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case models.NotificationTimeZoneModeCustom:
+		return models.NotificationTimeZoneModeCustom
+	default:
+		return models.NotificationTimeZoneModeSystem
+	}
+}
+
 func (s *Store) GetNotificationSettings() (models.NotificationSettings, error) {
 	var raw string
 	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, notificationSettingsKey).Scan(&raw)
@@ -910,6 +927,8 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 	if err != nil {
 		return models.NotificationSettingsView{}, err
 	}
+	systemLocation := time.Now().Location()
+	currentTime := time.Now()
 	view := models.NotificationSettingsView{
 		Enabled:                             settings.Enabled,
 		Channel:                             settings.Channel,
@@ -929,6 +948,10 @@ func (s *Store) NotificationSettingsView(includeSecret bool) (models.Notificatio
 		RecoveryNotificationCooldownMinutes: settings.RecoveryNotificationCooldownMinutes,
 		NotifyNodeOffline:                   settings.NotifyNodeOffline,
 		NotifyNodeOnline:                    settings.NotifyNodeOnline,
+		TimeZoneMode:                        settings.TimeZoneMode,
+		TimeZone:                            settings.TimeZone,
+		SystemTimeZone:                      notify.LocationLabel(systemLocation, currentTime),
+		EffectiveTimeZone:                   notify.LocationLabel(notify.ResolveLocation(settings, systemLocation), currentTime),
 		NodeOfflineGraceMinutes:             settings.NodeOfflineGraceMinutes,
 		DispatcherQueueCapacity:             settings.DispatcherQueueCapacity,
 		NotifyDispatcherDrops:               settings.NotifyDispatcherDrops,

@@ -1507,6 +1507,10 @@ func handleUpdateNotificationSettings(w http.ResponseWriter, r *http.Request, s 
 	if strings.TrimSpace(reqBody.TelegramBotToken) == "" {
 		reqBody.TelegramBotToken = current.TelegramBotToken
 	}
+	if err := notify.ValidateTimezoneSettings(reqBody); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := s.UpsertNotificationSettings(reqBody); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

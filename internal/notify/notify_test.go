@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thism-dev/thism/internal/models"
 )
@@ -40,5 +41,37 @@ func TestFormatTelegramMessageForNodeStatus(t *testing.T) {
 	message = formatTelegramMessage(models.AlertEvent{NodeName: "alpha", Metric: models.ResourceMetricNodeStatus, Severity: models.AlertSeverityInfo, Value: 1, ObservedAt: 1710000000})
 	if !strings.Contains(message, "Node online") {
 		t.Fatalf("expected online node status message, got %s", message)
+	}
+}
+
+func TestResolveNotificationLocationPrefersCustomTimezone(t *testing.T) {
+	systemLocation := time.FixedZone("SYSTEM", 9*60*60)
+	settings := models.NotificationSettings{
+		TimeZoneMode: models.NotificationTimeZoneModeCustom,
+		TimeZone:     "America/New_York",
+	}
+
+	location := resolveNotificationLocation(settings, systemLocation)
+	if got := location.String(); got != "America/New_York" {
+		t.Fatalf("expected custom timezone, got %s", got)
+	}
+}
+
+func TestFormatTelegramMessageInLocationUsesProvidedTimezone(t *testing.T) {
+	location := time.FixedZone("SYSTEM", 9*60*60)
+	observedAt := time.Date(2026, time.January, 2, 15, 4, 5, 0, time.UTC).Unix()
+
+	message := formatTelegramMessageInLocation(models.AlertEvent{
+		NodeName:   "alpha",
+		Metric:     models.ResourceMetricCPU,
+		Severity:   models.AlertSeverityCritical,
+		Value:      95,
+		Threshold:  90,
+		ObservedAt: observedAt,
+	}, location)
+
+	expectedTimestamp := escapeTelegramMarkdown(time.Unix(observedAt, 0).In(location).Format(time.RFC3339))
+	if !strings.Contains(message, expectedTimestamp) {
+		t.Fatalf("expected timestamp %s in message, got %s", expectedTimestamp, message)
 	}
 }

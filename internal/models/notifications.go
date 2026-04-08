@@ -12,6 +12,11 @@ const (
 	NotificationChannelTelegram NotificationChannel = "telegram"
 )
 
+const (
+	NotificationTimeZoneModeSystem = "system"
+	NotificationTimeZoneModeCustom = "custom"
+)
+
 const DefaultDispatcherQueueCapacity = 256
 
 const (
@@ -62,6 +67,8 @@ type NotificationSettings struct {
 	RecoveryNotificationCooldownMinutes int              `json:"recovery_notification_cooldown_minutes"`
 	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
 	NotifyNodeOnline                    bool             `json:"notify_node_online"`
+	TimeZoneMode                        string           `json:"time_zone_mode,omitempty"`
+	TimeZone                            string           `json:"time_zone,omitempty"`
 	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
 	DispatcherQueueCapacity             int              `json:"dispatcher_queue_capacity"`
 	NotifyDispatcherDrops               bool             `json:"notify_dispatcher_drops"`
@@ -87,6 +94,10 @@ type NotificationSettingsView struct {
 	RecoveryNotificationCooldownMinutes int              `json:"recovery_notification_cooldown_minutes"`
 	NotifyNodeOffline                   bool             `json:"notify_node_offline"`
 	NotifyNodeOnline                    bool             `json:"notify_node_online"`
+	TimeZoneMode                        string           `json:"time_zone_mode,omitempty"`
+	TimeZone                            string           `json:"time_zone,omitempty"`
+	SystemTimeZone                      string           `json:"system_time_zone,omitempty"`
+	EffectiveTimeZone                   string           `json:"effective_time_zone,omitempty"`
 	NodeOfflineGraceMinutes             int              `json:"node_offline_grace_minutes"`
 	DispatcherQueueCapacity             int              `json:"dispatcher_queue_capacity"`
 	NotifyDispatcherDrops               bool             `json:"notify_dispatcher_drops"`

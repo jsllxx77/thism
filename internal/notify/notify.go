@@ -31,7 +31,7 @@ func (s *TelegramSender) Send(settings models.NotificationSettings, event models
 		return fmt.Errorf("at least one telegram target is required")
 	}
 
-	message := formatTelegramMessage(event)
+	message := formatTelegramMessageInLocation(event, resolveNotificationLocation(settings, time.Now().Location()))
 	for _, rawTarget := range settings.TelegramTargets {
 		target := rawTarget.Normalized()
 		if target.ChatID == "" {
@@ -45,6 +45,11 @@ func (s *TelegramSender) Send(settings models.NotificationSettings, event models
 }
 
 func formatTelegramMessage(event models.AlertEvent) string {
+	return formatTelegramMessageInLocation(event, time.UTC)
+}
+
+func formatTelegramMessageInLocation(event models.AlertEvent, location *time.Location) string {
+	location = normalizeSystemLocation(location)
 	metricLabel := map[models.ResourceMetric]string{
 		models.ResourceMetricCPU:             "CPU",
 		models.ResourceMetricMemory:          "Memory",
@@ -64,7 +69,7 @@ func formatTelegramMessage(event models.AlertEvent) string {
 	if severityLabel == "" {
 		severityLabel = string(event.Severity)
 	}
-	timestamp := escapeTelegramMarkdown(time.Unix(event.ObservedAt, 0).UTC().Format(time.RFC3339))
+	timestamp := escapeTelegramMarkdown(time.Unix(event.ObservedAt, 0).In(location).Format(time.RFC3339))
 	if event.Metric == models.ResourceMetricNodeStatus {
 		status := "offline"
 		emoji := "🔴"

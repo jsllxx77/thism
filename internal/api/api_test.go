@@ -2008,7 +2008,7 @@ func TestNotificationSettingsRoundTripEndpoints(t *testing.T) {
 	go h.Run()
 	router := api.NewRouter(s, h, "test-admin-token", nil)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/notifications", bytes.NewBufferString(`{"enabled":true,"channel":"telegram","telegram_bot_token":"123:abc","telegram_targets":[{"name":"Ops","chat_id":"-100123","topic_id":99}],"cpu_warning_percent":80,"cpu_critical_percent":90,"mem_warning_percent":81,"mem_critical_percent":91,"disk_warning_percent":82,"disk_critical_percent":92,"cooldown_minutes":15}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/notifications", bytes.NewBufferString(`{"enabled":true,"channel":"telegram","telegram_bot_token":"123:abc","telegram_targets":[{"name":"Ops","chat_id":"-100123","topic_id":99}],"time_zone_mode":"custom","time_zone":"Asia/Shanghai","cpu_warning_percent":80,"cpu_critical_percent":90,"mem_warning_percent":81,"mem_critical_percent":91,"disk_warning_percent":82,"disk_critical_percent":92,"cooldown_minutes":15}`))
 	putReq.Header.Set("Authorization", "Bearer test-admin-token")
 	putReq.Header.Set("Content-Type", "application/json")
 	putResp := httptest.NewRecorder()
@@ -2033,6 +2033,36 @@ func TestNotificationSettingsRoundTripEndpoints(t *testing.T) {
 	}
 	if view["telegram_bot_token_set"] != true {
 		t.Fatalf("expected token flag true, got %#v", view["telegram_bot_token_set"])
+	}
+	if view["time_zone_mode"] != "custom" {
+		t.Fatalf("expected timezone mode custom, got %#v", view["time_zone_mode"])
+	}
+	if view["time_zone"] != "Asia/Shanghai" {
+		t.Fatalf("expected timezone Asia/Shanghai, got %#v", view["time_zone"])
+	}
+	if strings.TrimSpace(view["system_time_zone"].(string)) == "" {
+		t.Fatalf("expected system timezone in response, got %#v", view["system_time_zone"])
+	}
+	if !strings.Contains(view["effective_time_zone"].(string), "Asia/Shanghai") {
+		t.Fatalf("expected effective timezone to include custom timezone, got %#v", view["effective_time_zone"])
+	}
+}
+
+func TestNotificationSettingsRejectInvalidCustomTimezone(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/notifications", bytes.NewBufferString(`{"enabled":true,"channel":"telegram","time_zone_mode":"custom","time_zone":"Mars/Olympus Mons"}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", putResp.Code, putResp.Body.String())
 	}
 }
 

@@ -78,6 +78,7 @@ describe("metrics retention settings", () => {
 
     render(<Settings />)
 
+    await user.click(await screen.findByRole("tab", { name: "Monitoring" }))
     expect(await screen.findByRole("heading", { name: "Metrics Retention", level: 3 })).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "30 days" })).toBeChecked()
 
