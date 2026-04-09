@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { buildLatencyMonitorSeries, LatencyMonitorChart } from "./LatencyMonitorChart"
+import { LatencyMonitorChart } from "./LatencyMonitorChart"
+import { buildLatencyMonitorSeries } from "./latency-monitor-series"
 
 describe("latency monitor chart", () => {
   it("shows an empty state when the node has no assigned latency monitors", () => {

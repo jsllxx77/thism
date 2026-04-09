@@ -132,7 +132,7 @@ export function NotificationsCard() {
         topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
       }))
 
-  const selectedNodeIDs = settings.node_scope_node_ids ?? []
+  const selectedNodeIDs = useMemo(() => settings.node_scope_node_ids ?? [], [settings.node_scope_node_ids])
 
   const filteredNodes = useMemo(() => {
     const keyword = nodeSearch.trim().toLowerCase()

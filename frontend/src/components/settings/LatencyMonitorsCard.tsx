@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Pencil, Plus, Trash2 } from "lucide-react"
 import { api, type LatencyMonitor, type LatencyMonitorType, type Node } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
@@ -44,7 +44,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
   const [success, setSuccess] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(() => defaultForm(nodes))
 
-  const loadMonitors = async () => {
+  const loadMonitors = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -60,11 +60,11 @@ export function LatencyMonitorsCard({ nodes }: Props) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [t])
 
   useEffect(() => {
     void loadMonitors()
-  }, [])
+  }, [loadMonitors])
 
   const resetForm = (nextForm?: FormState) => {
     setForm(nextForm ?? defaultForm(nodes))

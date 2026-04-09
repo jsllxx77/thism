@@ -2,7 +2,7 @@
 	build build-server build-agent build-agent-all build-frontend test clean \
 	dev-ui dev-server dev-rebuild dev-restart
 
-GO ?= /usr/local/go/bin/go
+GO ?= go
 GOCACHE_DIR ?= /tmp/go-build
 PORT ?= 12026
 TOKEN ?= thism2026
