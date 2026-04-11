@@ -253,6 +253,10 @@ export function Settings({ refreshNonce = 0 }: Props) {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" })
   }, [activeSection])
 
+  const getTabsContentProps = useCallback((section: SettingsSection) => (
+    mountedSections[section] ? { forceMount: true as const } : {}
+  ), [mountedSections])
+
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.03}>
       <section className="panel-card enterprise-hero rounded-[28px] px-5 py-5 sm:px-6">
@@ -288,7 +292,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
           ))}
         </TabsList>
 
-        <TabsContent value="nodes" forceMount={mountedSections.nodes} hidden={activeSection !== "nodes"} className="space-y-6">
+        <TabsContent value="nodes" {...getTabsContentProps("nodes")} hidden={activeSection !== "nodes"} className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Node Management")}</h3>
@@ -329,21 +333,21 @@ export function Settings({ refreshNonce = 0 }: Props) {
           </div>
         </TabsContent>
 
-        <TabsContent value="agent" forceMount={mountedSections.agent} hidden={activeSection !== "agent"} className="space-y-6">
+        <TabsContent value="agent" {...getTabsContentProps("agent")} hidden={activeSection !== "agent"} className="space-y-6">
           <AgentAutoUpdateCard nodes={effectiveNodes} />
           <LatencyMonitorsCard nodes={effectiveNodes} />
         </TabsContent>
 
-        <TabsContent value="monitoring" forceMount={mountedSections.monitoring} hidden={activeSection !== "monitoring"} className="space-y-6">
+        <TabsContent value="monitoring" {...getTabsContentProps("monitoring")} hidden={activeSection !== "monitoring"} className="space-y-6">
           <MetricsRetentionCard />
           <DashboardVisibilityCard />
         </TabsContent>
 
-        <TabsContent value="alerts" forceMount={mountedSections.alerts} hidden={activeSection !== "alerts"} className="space-y-6">
+        <TabsContent value="alerts" {...getTabsContentProps("alerts")} hidden={activeSection !== "alerts"} className="space-y-6">
           <NotificationsCard active={activeSection === "alerts"} />
         </TabsContent>
 
-        <TabsContent value="security" forceMount={mountedSections.security} hidden={activeSection !== "security"} className="space-y-6">
+        <TabsContent value="security" {...getTabsContentProps("security")} hidden={activeSection !== "security"} className="space-y-6">
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>
             <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
