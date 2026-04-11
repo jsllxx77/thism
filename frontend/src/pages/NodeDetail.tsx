@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond } from "../lib/units"
-import { appendLiveMetricPoint, buildMetricChartSeries, buildMetricRateChartSeries } from "../lib/metric-series"
+import { appendLiveMetricPoint, buildNodeDetailMetricSeries } from "../lib/metric-series"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
@@ -290,17 +290,10 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     return () => ws.off(handler)
   }, [accessMode, effectiveRange, latencyMonitors, nodeId])
 
-  const cpuData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.cpu, "average"), [effectiveRange, metrics])
-  const memData = useMemo(() => buildMetricChartSeries(
-    metrics,
-    effectiveRange,
-    (row) => (row.mem_total > 0 ? (row.mem_used / row.mem_total) * 100 : 0),
-    "average",
-  ), [effectiveRange, metrics])
-  const netRxData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.net_rx, "last"), [effectiveRange, metrics])
-  const netTxData = useMemo(() => buildMetricChartSeries(metrics, effectiveRange, (row) => row.net_tx, "last"), [effectiveRange, metrics])
-  const netRxSpeedData = useMemo(() => buildMetricRateChartSeries(metrics, effectiveRange, (row) => row.net_rx), [effectiveRange, metrics])
-  const netTxSpeedData = useMemo(() => buildMetricRateChartSeries(metrics, effectiveRange, (row) => row.net_tx), [effectiveRange, metrics])
+  const { cpuData, memData, netRxData, netTxData, netRxSpeedData, netTxSpeedData, diskData } = useMemo(
+    () => buildNodeDetailMetricSeries(metrics, effectiveRange),
+    [effectiveRange, metrics],
+  )
   const latestMetricPoint = metrics[metrics.length - 1]
   const heroUptimeSeconds =
     typeof latestMetricPoint?.uptime_seconds === "number" && latestMetricPoint.uptime_seconds > 0
@@ -318,12 +311,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
       outboundSpeed={latestOutboundSpeed}
     />
   )
-  const diskData = useMemo(() => buildMetricChartSeries(
-    metrics,
-    effectiveRange,
-    (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0),
-    "average",
-  ), [effectiveRange, metrics])
   const hasProcessSection = processes.length > 0
   const hasServiceSection = services.length > 0
   const hasDockerSection = dockerSnapshot?.docker_available === true

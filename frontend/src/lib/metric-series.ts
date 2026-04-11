@@ -4,6 +4,16 @@ import { deriveRateSeries, type SeriesPoint } from "./units"
 type DownsampleStrategy = "average" | "last"
 export type ChartPoint = { ts: number; value: number | null }
 
+export type NodeDetailMetricSeries = {
+  cpuData: ChartPoint[]
+  memData: ChartPoint[]
+  netRxData: ChartPoint[]
+  netTxData: ChartPoint[]
+  netRxSpeedData: ChartPoint[]
+  netTxSpeedData: ChartPoint[]
+  diskData: ChartPoint[]
+}
+
 type MetricsValueSelector = (row: MetricsRow) => number
 
 const MIN_GAP_BREAK_SECONDS = 30
@@ -77,6 +87,58 @@ export function buildMetricRateChartSeries(
     deriveRateSeries(segment.map((row) => ({ ts: row.ts, value: selectValue(row) }))),
   )
   return mergeSegmentedSeries(segments, getChartPointBudget(rangeSeconds), "average")
+}
+
+export function buildNodeDetailMetricSeries(
+  metrics: ReadonlyArray<MetricsRow>,
+  rangeSeconds: number,
+): NodeDetailMetricSeries {
+  const targetPoints = getChartPointBudget(rangeSeconds)
+  const segments = splitMetricSegments(metrics).map((segment) => {
+    const cpu: SeriesPoint[] = []
+    const memory: SeriesPoint[] = []
+    const netRx: SeriesPoint[] = []
+    const netTx: SeriesPoint[] = []
+    const netRxSpeed: SeriesPoint[] = []
+    const netTxSpeed: SeriesPoint[] = []
+    const disk: SeriesPoint[] = []
+    let previous: MetricsRow | null = null
+
+    segment.forEach((row) => {
+      cpu.push({ ts: row.ts, value: row.cpu })
+      memory.push({ ts: row.ts, value: row.mem_total > 0 ? (row.mem_used / row.mem_total) * 100 : 0 })
+      netRx.push({ ts: row.ts, value: row.net_rx })
+      netTx.push({ ts: row.ts, value: row.net_tx })
+      disk.push({ ts: row.ts, value: row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0 })
+
+      if (previous) {
+        const deltaTs = row.ts - previous.ts
+        const rxDelta = row.net_rx - previous.net_rx
+        const txDelta = row.net_tx - previous.net_tx
+
+        if (deltaTs > 0 && rxDelta >= 0) {
+          netRxSpeed.push({ ts: row.ts, value: rxDelta / deltaTs })
+        }
+        if (deltaTs > 0 && txDelta >= 0) {
+          netTxSpeed.push({ ts: row.ts, value: txDelta / deltaTs })
+        }
+      }
+
+      previous = row
+    })
+
+    return { cpu, memory, netRx, netTx, netRxSpeed, netTxSpeed, disk }
+  })
+
+  return {
+    cpuData: mergeSegmentedSeries(segments.map((segment) => segment.cpu), targetPoints, "average"),
+    memData: mergeSegmentedSeries(segments.map((segment) => segment.memory), targetPoints, "average"),
+    netRxData: mergeSegmentedSeries(segments.map((segment) => segment.netRx), targetPoints, "last"),
+    netTxData: mergeSegmentedSeries(segments.map((segment) => segment.netTx), targetPoints, "last"),
+    netRxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netRxSpeed), targetPoints, "average"),
+    netTxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netTxSpeed), targetPoints, "average"),
+    diskData: mergeSegmentedSeries(segments.map((segment) => segment.disk), targetPoints, "average"),
+  }
 }
 
 function splitMetricSegments(metrics: ReadonlyArray<MetricsRow>): MetricsRow[][] {

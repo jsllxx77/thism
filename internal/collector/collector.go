@@ -35,6 +35,7 @@ import (
 const DefaultReportInterval = 5 * time.Second
 const DefaultAutoUpdateInterval = 30 * time.Minute
 const DefaultHeavySnapshotInterval = time.Minute
+const networkTopologyCacheTTL = 30 * time.Second
 
 const (
 	ipv4DefaultRoutePath = "/proc/net/route"
@@ -60,6 +61,7 @@ type websocketDialFunc func(mode dialMode, targetURL string, headers http.Header
 var (
 	cpuInfoFunc                 = cpu.Info
 	cpuPercentFunc              = cpu.Percent
+	cpuTimesFunc                = cpu.Times
 	cpuCountsFunc               = cpu.Counts
 	virtualMemoryFunc           = mem.VirtualMemory
 	hostInfoFunc                = host.Info
@@ -67,6 +69,7 @@ var (
 	diskUsageFunc               = disk.Usage
 	ioCountersFunc              = psnet.IOCounters
 	netInterfacesFunc           = net.Interfaces
+	interfaceAddrsFunc          = net.InterfaceAddrs
 	readFileFunc                = os.ReadFile
 	nowFunc                     = time.Now
 	collectProcessSamplesFunc   = collectProcessSamples
@@ -93,6 +96,15 @@ type Collector struct {
 	updateMu              sync.Mutex
 	updateInProgress      bool
 	autoUpdateInterval    time.Duration
+	cpuSampleMu           sync.Mutex
+	cpuSampleReady        bool
+	lastCPUTotal          float64
+	lastCPUIdle           float64
+	networkCacheMu        sync.Mutex
+	cachedLocalIP         string
+	cachedLocalIPAt       time.Time
+	cachedInterfaces      map[string]struct{}
+	cachedInterfacesAt    time.Time
 	latencyMu             sync.Mutex
 	latencyMonitors       map[string]*latencyMonitorState
 	icmpLatencyProbe      latencyProbeFunc
@@ -130,12 +142,83 @@ func NewWithInterval(serverURL, token, name, nodeIP string, reportInterval time.
 	}
 	c.selfUpdateFunc = c.runSelfUpdate
 	c.SetAgentVersion(c.agentVersion)
+	c.primeCPUSample()
 	return c
 }
 
 // ReportInterval returns the effective metrics push interval.
 func (c *Collector) ReportInterval() time.Duration {
 	return c.reportInterval
+}
+
+func (c *Collector) primeCPUSample() {
+	sample, ok := readCPUSample()
+	if !ok {
+		return
+	}
+
+	c.cpuSampleMu.Lock()
+	c.lastCPUTotal = sample.total
+	c.lastCPUIdle = sample.idle
+	c.cpuSampleReady = true
+	c.cpuSampleMu.Unlock()
+}
+
+type cpuSample struct {
+	total float64
+	idle  float64
+}
+
+func readCPUSample() (cpuSample, bool) {
+	times, err := cpuTimesFunc(false)
+	if err != nil || len(times) == 0 {
+		return cpuSample{}, false
+	}
+	return cpuSampleFromTimes(times[0]), true
+}
+
+func cpuSampleFromTimes(times cpu.TimesStat) cpuSample {
+	idle := times.Idle + times.Iowait
+	total := times.User + times.System + times.Idle + times.Nice + times.Iowait + times.Irq + times.Softirq + times.Steal + times.Guest + times.GuestNice
+	return cpuSample{total: total, idle: idle}
+}
+
+func clampCPUPercent(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func (c *Collector) sampleCPUPercent() (float64, bool) {
+	sample, ok := readCPUSample()
+	if !ok {
+		return 0, false
+	}
+
+	c.cpuSampleMu.Lock()
+	defer c.cpuSampleMu.Unlock()
+
+	if !c.cpuSampleReady {
+		c.lastCPUTotal = sample.total
+		c.lastCPUIdle = sample.idle
+		c.cpuSampleReady = true
+		return 0, false
+	}
+
+	deltaTotal := sample.total - c.lastCPUTotal
+	deltaIdle := sample.idle - c.lastCPUIdle
+	c.lastCPUTotal = sample.total
+	c.lastCPUIdle = sample.idle
+	if deltaTotal <= 0 || deltaIdle < 0 {
+		return 0, false
+	}
+
+	usage := ((deltaTotal - deltaIdle) / deltaTotal) * 100
+	return clampCPUPercent(usage), true
 }
 
 func (c *Collector) SetAgentVersion(version string) {
@@ -369,8 +452,18 @@ func supplementalLinuxInterfaceNames() map[string]struct{} {
 	return names
 }
 
-func collectNetworkStats() models.NetStats {
-	selectedInterfaces := nonLoopbackInterfaceNames()
+func cloneInterfaceNames(names map[string]struct{}) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	clone := make(map[string]struct{}, len(names))
+	for name := range names {
+		clone[name] = struct{}{}
+	}
+	return clone
+}
+
+func collectNetworkStatsForInterfaces(selectedInterfaces map[string]struct{}) models.NetStats {
 	if len(selectedInterfaces) == 0 {
 		return models.NetStats{}
 	}
@@ -397,12 +490,63 @@ func collectNetworkStats() models.NetStats {
 	return models.NetStats{RxBytes: rxBytes, TxBytes: txBytes}
 }
 
+func collectNetworkStats() models.NetStats {
+	return collectNetworkStatsForInterfaces(nonLoopbackInterfaceNames())
+}
+
+func (c *Collector) cachedNonLoopbackInterfaceNames(currentTime time.Time) map[string]struct{} {
+	c.networkCacheMu.Lock()
+	if !c.cachedInterfacesAt.IsZero() && currentTime.Sub(c.cachedInterfacesAt) < networkTopologyCacheTTL && len(c.cachedInterfaces) > 0 {
+		cached := cloneInterfaceNames(c.cachedInterfaces)
+		c.networkCacheMu.Unlock()
+		return cached
+	}
+	c.networkCacheMu.Unlock()
+
+	selectedInterfaces := nonLoopbackInterfaceNames()
+	if len(selectedInterfaces) == 0 {
+		return nil
+	}
+
+	cloned := cloneInterfaceNames(selectedInterfaces)
+	c.networkCacheMu.Lock()
+	c.cachedInterfaces = cloned
+	c.cachedInterfacesAt = currentTime
+	c.networkCacheMu.Unlock()
+	return cloneInterfaceNames(cloned)
+}
+
+func (c *Collector) cachedDetectedLocalIP(currentTime time.Time) string {
+	c.networkCacheMu.Lock()
+	if !c.cachedLocalIPAt.IsZero() && currentTime.Sub(c.cachedLocalIPAt) < networkTopologyCacheTTL && c.cachedLocalIP != "" {
+		cached := c.cachedLocalIP
+		c.networkCacheMu.Unlock()
+		return cached
+	}
+	c.networkCacheMu.Unlock()
+
+	ip := detectLocalIP()
+	if ip == "" {
+		return ""
+	}
+
+	c.networkCacheMu.Lock()
+	c.cachedLocalIP = ip
+	c.cachedLocalIPAt = currentTime
+	c.networkCacheMu.Unlock()
+	return ip
+}
+
+func (c *Collector) collectNetworkStats(currentTime time.Time) models.NetStats {
+	return collectNetworkStatsForInterfaces(c.cachedNonLoopbackInterfaceNames(currentTime))
+}
+
 // Collect gathers a single snapshot of system metrics.
 func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	currentTime := c.currentTime()
 	ip := c.nodeIP
 	if net.ParseIP(ip) == nil {
-		ip = detectLocalIP()
+		ip = c.cachedDetectedLocalIP(currentTime)
 	}
 
 	payload := &models.MetricsPayload{
@@ -418,10 +562,9 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 		payload.UptimeSeconds = hostInfo.Uptime
 	}
 
-	// CPU — blocks for 1 second for an accurate reading.
-	cpuPercents, err := cpuPercentFunc(time.Second, false)
-	if err == nil && len(cpuPercents) > 0 {
-		payload.CPU = cpuPercents[0]
+	// CPU — compute usage from non-blocking cumulative CPU time deltas.
+	if cpuPercent, ok := c.sampleCPUPercent(); ok {
+		payload.CPU = cpuPercent
 	}
 
 	// Memory.
@@ -449,8 +592,8 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 		}
 	}
 
-	// Network — aggregate across default egress interfaces plus tunnel links.
-	payload.Net = collectNetworkStats()
+	// Network — aggregate across active non-loopback interfaces with cached topology selection.
+	payload.Net = c.collectNetworkStats(currentTime)
 
 	if c.shouldCollectHeavySnapshot(currentTime) {
 		if !c.heavySnapshotSent {
@@ -1048,7 +1191,7 @@ func selectTopProcesses(processes []models.Process, limit int) []models.Process 
 }
 
 func detectLocalIP() string {
-	addrs, err := net.InterfaceAddrs()
+	addrs, err := interfaceAddrsFunc()
 	if err != nil {
 		return ""
 	}

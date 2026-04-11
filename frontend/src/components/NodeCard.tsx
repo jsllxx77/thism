@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
@@ -15,6 +15,7 @@ type Props = {
   netTxSpeed?: number
   showIP?: boolean
   onClick?: () => void
+  onSelectNode?: (id: string) => void
 }
 
 function isDarkModeEnabled(): boolean {
@@ -39,22 +40,12 @@ function MetricBar({ value, hasValue = true }: { value: number; hasValue?: boole
   )
 }
 
-export function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed, showIP = true, onClick }: Props) {
+function RelativeLastSeenLabel({ lastSeen }: { lastSeen: number }) {
   const { t, formatRelativeLastSeen } = useLanguage()
-  const hasCpu = typeof cpu === "number"
-  const hasMemory = typeof memUsed === "number" && typeof memTotal === "number" && memTotal > 0
-  const memPct = hasMemory ? (memUsed / memTotal) * 100 : null
-  const showNetSpeed = node.online
-  const hasNetRxSpeed = showNetSpeed && typeof netRxSpeed === "number" && Number.isFinite(netRxSpeed) && netRxSpeed >= 0
-  const hasNetTxSpeed = showNetSpeed && typeof netTxSpeed === "number" && Number.isFinite(netTxSpeed) && netTxSpeed >= 0
-  const netRxLabel = hasNetRxSpeed ? formatBytesPerSecond(netRxSpeed) : "—"
-  const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
-  const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
 
   useEffect(() => {
-    if (node.last_seen <= 0) {
+    if (lastSeen <= 0) {
       return undefined
     }
 
@@ -65,14 +56,33 @@ export function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed,
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [node.last_seen])
+  }, [lastSeen])
 
-  const formattedLastSeen = formatRelativeLastSeen(node.last_seen, nowMs)
+  return (
+    <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+      {t("dashboard.nodeCard.lastSeen", { value: formatRelativeLastSeen(lastSeen, nowMs) })}
+    </p>
+  )
+}
+
+export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed, showIP = true, onClick, onSelectNode }: Props) {
+  const { t } = useLanguage()
+  const hasCpu = typeof cpu === "number"
+  const hasMemory = typeof memUsed === "number" && typeof memTotal === "number" && memTotal > 0
+  const memPct = hasMemory ? (memUsed / memTotal) * 100 : null
+  const showNetSpeed = node.online
+  const hasNetRxSpeed = showNetSpeed && typeof netRxSpeed === "number" && Number.isFinite(netRxSpeed) && netRxSpeed >= 0
+  const hasNetTxSpeed = showNetSpeed && typeof netTxSpeed === "number" && Number.isFinite(netTxSpeed) && netTxSpeed >= 0
+  const netRxLabel = hasNetRxSpeed ? formatBytesPerSecond(netRxSpeed) : "—"
+  const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
+  const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
+  const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
+  const handleClick = onClick ?? (onSelectNode ? () => onSelectNode(node.id) : undefined)
 
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={handleClick}
       aria-label={node.name}
       className={`w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-transform hover:-translate-y-0.5 ${
         !node.online ? "opacity-80" : ""
@@ -130,9 +140,9 @@ export function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed,
             </div>
           </div>
 
-          <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.lastSeen", { value: formattedLastSeen })}</p>
+          <RelativeLastSeenLabel lastSeen={node.last_seen} />
         </CardContent>
       </Card>
     </button>
   )
-}
+})

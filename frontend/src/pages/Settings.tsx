@@ -24,6 +24,7 @@ const AddNodeModal = lazy(async () => ({ default: (await import("../components/A
 const settingsSections = ["nodes", "agent", "monitoring", "alerts", "security"] as const
 
 type SettingsSection = (typeof settingsSections)[number]
+type MountedSections = Record<SettingsSection, boolean>
 
 function isSettingsSection(value: string | null): value is SettingsSection {
   return value !== null && settingsSections.includes(value as SettingsSection)
@@ -40,6 +41,35 @@ function resolveSettingsSection(search: string): { section: SettingsSection; nor
   return { section, normalizedSearch: `?${params.toString()}` }
 }
 
+function resolveInitialSettingsSection(): SettingsSection {
+  if (typeof window === "undefined") {
+    return "nodes"
+  }
+
+  return resolveSettingsSection(window.location.search).section
+}
+
+function createMountedSections(initialSection: SettingsSection): MountedSections {
+  return {
+    nodes: initialSection === "nodes",
+    agent: initialSection === "agent",
+    monitoring: initialSection === "monitoring",
+    alerts: initialSection === "alerts",
+    security: initialSection === "security",
+  }
+}
+
+function mountSection(sections: MountedSections, section: SettingsSection): MountedSections {
+  if (sections[section]) {
+    return sections
+  }
+
+  return {
+    ...sections,
+    [section]: true,
+  }
+}
+
 function replaceSettingsSearch(search: string) {
   if (typeof window === "undefined") return
   window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}${window.location.hash}`)
@@ -52,6 +82,7 @@ function pushSettingsSearch(search: string) {
 
 export function Settings({ refreshNonce = 0 }: Props) {
   const { t, translateApiError } = useLanguage()
+  const initialSection = resolveInitialSettingsSection()
   const [nodes, setNodes] = useState<Node[]>([])
   const [showModal, setShowModal] = useState(false)
   const [loadingNodes, setLoadingNodes] = useState(true)
@@ -66,10 +97,8 @@ export function Settings({ refreshNonce = 0 }: Props) {
   const [versionMeta, setVersionMeta] = useState<VersionMeta | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
-    if (typeof window === "undefined") return "nodes"
-    return resolveSettingsSection(window.location.search).section
-  })
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection)
+  const [mountedSections, setMountedSections] = useState<MountedSections>(() => createMountedSections(initialSection))
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -80,6 +109,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
         replaceSettingsSearch(normalizedSearch)
       }
       setActiveSection(section)
+      setMountedSections((current) => mountSection(current, section))
     }
 
     syncSectionFromLocation()
@@ -153,13 +183,16 @@ export function Settings({ refreshNonce = 0 }: Props) {
   }, [t])
 
   useEffect(() => {
+    if (!mountedSections.security) {
+      return
+    }
     void fetchVersionMeta()
-  }, [fetchVersionMeta])
+  }, [fetchVersionMeta, mountedSections.security])
 
   useEffect(() => {
-    if (refreshNonce === 0) return
+    if (refreshNonce === 0 || !mountedSections.security) return
     void fetchVersionMeta()
-  }, [fetchVersionMeta, refreshNonce])
+  }, [fetchVersionMeta, mountedSections.security, refreshNonce])
 
   const handleChangePassword = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -215,6 +248,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
     const { normalizedSearch } = resolveSettingsSection(`?section=${nextValue}`)
     pushSettingsSearch(normalizedSearch)
+    setMountedSections((current) => mountSection(current, nextValue))
     setActiveSection(nextValue)
     window.scrollTo({ top: 0, left: 0, behavior: "auto" })
   }, [activeSection])
@@ -254,7 +288,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
           ))}
         </TabsList>
 
-        <TabsContent value="nodes" forceMount hidden={activeSection !== "nodes"} className="space-y-6">
+        <TabsContent value="nodes" forceMount={mountedSections.nodes} hidden={activeSection !== "nodes"} className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Node Management")}</h3>
@@ -295,21 +329,21 @@ export function Settings({ refreshNonce = 0 }: Props) {
           </div>
         </TabsContent>
 
-        <TabsContent value="agent" forceMount hidden={activeSection !== "agent"} className="space-y-6">
+        <TabsContent value="agent" forceMount={mountedSections.agent} hidden={activeSection !== "agent"} className="space-y-6">
           <AgentAutoUpdateCard nodes={effectiveNodes} />
           <LatencyMonitorsCard nodes={effectiveNodes} />
         </TabsContent>
 
-        <TabsContent value="monitoring" forceMount hidden={activeSection !== "monitoring"} className="space-y-6">
+        <TabsContent value="monitoring" forceMount={mountedSections.monitoring} hidden={activeSection !== "monitoring"} className="space-y-6">
           <MetricsRetentionCard />
           <DashboardVisibilityCard />
         </TabsContent>
 
-        <TabsContent value="alerts" forceMount hidden={activeSection !== "alerts"} className="space-y-6">
-          <NotificationsCard />
+        <TabsContent value="alerts" forceMount={mountedSections.alerts} hidden={activeSection !== "alerts"} className="space-y-6">
+          <NotificationsCard active={activeSection === "alerts"} />
         </TabsContent>
 
-        <TabsContent value="security" forceMount hidden={activeSection !== "security"} className="space-y-6">
+        <TabsContent value="security" forceMount={mountedSections.security} hidden={activeSection !== "security"} className="space-y-6">
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>
             <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">

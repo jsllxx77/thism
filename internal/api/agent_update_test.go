@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -98,7 +99,7 @@ func TestAgentReceivesLatencyMonitorConfigOnConnect(t *testing.T) {
 	}
 }
 
-func TestAgentMetricsHeartbeatResyncsLatencyMonitorConfig(t *testing.T) {
+func TestAgentMetricsHeartbeatDoesNotResyncLatencyMonitorConfigWithoutConfigChange(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
 	h := hub.New(s)
@@ -110,6 +111,18 @@ func TestAgentMetricsHeartbeatResyncsLatencyMonitorConfig(t *testing.T) {
 
 	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "agent-node", Token: "agent-token-1", CreatedAt: time.Now().Unix()}); err != nil {
 		t.Fatalf("seed node: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "TCP 80",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "example.com:80",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
 	}
 
 	baseURL, err := url.Parse(server.URL)
@@ -132,19 +145,6 @@ func TestAgentMetricsHeartbeatResyncsLatencyMonitorConfig(t *testing.T) {
 
 	_ = readNextAgentMessageOfType[models.LatencyMonitorConfigPayload](t, agentConn, "latency_monitor_config")
 
-	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
-		ID:                 "monitor-1",
-		Name:               "TCP 80",
-		Type:               models.LatencyMonitorTypeTCP,
-		Target:             "example.com:80",
-		IntervalSeconds:    60,
-		AutoAssignNewNodes: true,
-		CreatedAt:          1700000000,
-		UpdatedAt:          1700000000,
-	}, []string{"node-1"}); err != nil {
-		t.Fatalf("CreateLatencyMonitor: %v", err)
-	}
-
 	metrics := models.MetricsPayload{
 		Type: "metrics",
 		TS:   time.Now().Unix(),
@@ -159,9 +159,15 @@ func TestAgentMetricsHeartbeatResyncsLatencyMonitorConfig(t *testing.T) {
 		t.Fatalf("write metrics payload: %v", err)
 	}
 
-	payload := readNextAgentMessageOfType[models.LatencyMonitorConfigPayload](t, agentConn, "latency_monitor_config")
-	if len(payload.Monitors) != 1 || payload.Monitors[0].ID != "monitor-1" {
-		t.Fatalf("expected heartbeat resync to include monitor-1, got %#v", payload.Monitors)
+	_ = agentConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	var msg map[string]any
+	err = agentConn.ReadJSON(&msg)
+	if err == nil {
+		t.Fatalf("expected no latency monitor resync after metrics heartbeat, got %#v", msg)
+	}
+	netErr, ok := err.(net.Error)
+	if !ok || !netErr.Timeout() {
+		t.Fatalf("expected read timeout when no resync is sent, got %v", err)
 	}
 }
 

@@ -6,6 +6,16 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard card rendering churn by removing the page-wide 1s refresh loop, memoizing node cards, and isolating live last-seen updates to the label itself
+- Agent websocket overhead by stopping redundant latency monitor config resync on every metrics heartbeat
+- Latest-metrics lookups for node listings by switching from per-node queries to a batched store query
+- Settings tab startup cost by lazily mounting section panels, deferring tab-specific API requests until first open, and pausing alert dispatcher polling when the Alerts tab is hidden
+- Node detail metric recomputation by deriving all CPU, memory, network, and disk chart series from a shared segmented pass instead of rebuilding each series separately
+- Agent metrics collection latency by replacing the blocking 1-second CPU percentage probe with a non-blocking cumulative CPU time sampler
+- Agent network topology refresh cost by caching detected local IP and selected non-loopback interfaces for a short TTL instead of re-enumerating them on every metrics report
+
 ## [0.4.0] - 2026-04-11
 
 ### Added

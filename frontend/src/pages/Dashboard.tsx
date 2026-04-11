@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
 import { Activity } from "lucide-react"
 import { api, type AccessMode, type Node } from "../lib/api"
-import { withEffectiveNodeStatus } from "../lib/node-status"
+import { ONLINE_GRACE_PERIOD_SECONDS, isNodeEffectivelyOnline } from "../lib/node-status"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeCard } from "../components/NodeCard"
@@ -51,7 +51,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   const [nodes, setNodes] = useState<Node[]>([])
   const [live, setLive] = useState<LiveMetrics>({})
   const [showDashboardCardIP, setShowDashboardCardIP] = useState(false)
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [statusRefreshNonce, setStatusRefreshNonce] = useState(0)
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
   const [searchFilter, setSearchFilter] = useState("")
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards")
@@ -94,14 +94,40 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   }, [t])
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNowMs(Date.now())
-    }, 1000)
+    const nowMs = Date.now()
+    let nextRefreshAtMs: number | null = null
+
+    for (const node of nodes) {
+      if (node.online || node.last_seen <= 0) {
+        continue
+      }
+
+      const effectiveOnline = isNodeEffectivelyOnline(node, nowMs)
+      if (!effectiveOnline) {
+        continue
+      }
+
+      const candidate = (node.last_seen + ONLINE_GRACE_PERIOD_SECONDS + 1) * 1000
+      if (candidate <= nowMs) {
+        continue
+      }
+      if (nextRefreshAtMs == null || candidate < nextRefreshAtMs) {
+        nextRefreshAtMs = candidate
+      }
+    }
+
+    if (nextRefreshAtMs == null) {
+      return undefined
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStatusRefreshNonce((current) => current + 1)
+    }, Math.max(0, nextRefreshAtMs - nowMs))
 
     return () => {
-      window.clearInterval(intervalId)
+      window.clearTimeout(timeoutId)
     }
-  }, [])
+  }, [nodes, statusRefreshNonce])
 
   useEffect(() => {
     let cancelled = false
@@ -179,10 +205,13 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
     return () => ws.off(handler)
   }, [loadNodes])
 
-  const effectiveNodes = useMemo(
-    () => nodes.map((node) => withEffectiveNodeStatus(node, nowMs)),
-    [nodes, nowMs],
-  )
+  const effectiveNodes = useMemo(() => {
+    const nowMs = Date.now()
+    return nodes.map((node) => {
+      const effectiveOnline = isNodeEffectivelyOnline(node, nowMs)
+      return effectiveOnline === node.online ? node : { ...node, online: effectiveOnline }
+    })
+  }, [nodes, statusRefreshNonce])
 
   const onlineCount = effectiveNodes.filter((n) => n.online).length
   const offlineCount = effectiveNodes.length - onlineCount
@@ -308,7 +337,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
                   netRxSpeed={live[node.id]?.netRxSpeed}
                   netTxSpeed={live[node.id]?.netTxSpeed}
                   showIP={accessMode !== "guest" && showDashboardCardIP}
-                  onClick={() => onSelectNode(node.id)}
+                  onSelectNode={onSelectNode}
                 />
               ))}
             </div>

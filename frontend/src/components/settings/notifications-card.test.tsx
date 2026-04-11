@@ -206,6 +206,28 @@ describe("notifications card", () => {
     expect(screen.getByText("Drops detected")).toBeInTheDocument()
   })
 
+  it("stops polling dispatcher health when the card becomes inactive", async () => {
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval")
+
+    try {
+      const { rerender } = render(<NotificationsCard active />)
+
+      await waitFor(() => {
+        expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
+      })
+      const clearCallsBeforeDeactivate = clearIntervalSpy.mock.calls.length
+
+      rerender(<NotificationsCard active={false} />)
+
+      await waitFor(() => {
+        expect(clearIntervalSpy.mock.calls.length).toBeGreaterThan(clearCallsBeforeDeactivate)
+      })
+      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
+    } finally {
+      clearIntervalSpy.mockRestore()
+    }
+  })
+
   it("renders offline grace input in a separate block from the toggle buttons", async () => {
     render(<NotificationsCard />)
 

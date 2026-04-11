@@ -147,6 +147,58 @@ describe("settings section tabs", () => {
     expect(await screen.findByRole("button", { name: /add node/i })).toBeInTheDocument()
   })
 
+  it("defers section-specific data requests until the tab is visited", async () => {
+    const user = userEvent.setup()
+    renderSettings("/settings?section=nodes")
+
+    await screen.findByRole("button", { name: /add node/i })
+
+    expect(agentReleaseMock).not.toHaveBeenCalled()
+    expect(metricsRetentionMock).not.toHaveBeenCalled()
+    expect(dashboardSettingsMock).not.toHaveBeenCalled()
+    expect(notificationSettingsMock).not.toHaveBeenCalled()
+    expect(dispatcherRuntimeStatsMock).not.toHaveBeenCalled()
+    expect(versionMetaMock).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("tab", { name: "Agent" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=agent")
+    })
+    expect(await screen.findByRole("heading", { name: "Automatic Updates", level: 3 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(agentReleaseMock).toHaveBeenCalledTimes(2)
+    })
+
+    await user.click(screen.getByRole("tab", { name: "Monitoring" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=monitoring")
+    })
+    expect(await screen.findByRole("heading", { name: "Metrics Retention", level: 3 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(metricsRetentionMock).toHaveBeenCalledTimes(1)
+      expect(dashboardSettingsMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("tab", { name: "Alerts" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=alerts")
+    })
+    expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(notificationSettingsMock).toHaveBeenCalledTimes(1)
+      expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole("tab", { name: "Security" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=security")
+    })
+    expect(await screen.findByRole("heading", { name: "Version", level: 3 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(versionMetaMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("switches sections and updates the query string", async () => {
     const user = userEvent.setup()
     renderSettings("/settings?section=nodes")

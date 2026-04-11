@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { Settings } from "./Settings"
 
+function renderAlertsSettings() {
+  window.history.replaceState({}, "", "/settings?section=alerts")
+  return render(<Settings />)
+}
+
 const nodesMock = vi.fn()
 const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
@@ -101,7 +106,7 @@ describe("settings dispatcher health", () => {
       dropped: 1,
     })
 
-    render(<Settings />)
+    renderAlertsSettings()
 
     expect(await screen.findByText("Alert delivery status")).toBeInTheDocument()
     expect(screen.getByText("Drops detected")).toBeInTheDocument()
@@ -112,7 +117,7 @@ describe("settings dispatcher health", () => {
   it("does not render dispatcher health when diagnostics fail to load", async () => {
     dispatcherRuntimeStatsMock.mockRejectedValue(new Error("boom"))
 
-    render(<Settings />)
+    renderAlertsSettings()
 
     await waitFor(() => {
       expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)
@@ -132,7 +137,7 @@ describe("settings dispatcher health", () => {
       dropped: 0,
     })
 
-    render(<Settings refreshNonce={0} />)
+    renderAlertsSettings()
 
     await waitFor(() => {
       expect(dispatcherRuntimeStatsMock).toHaveBeenCalledTimes(1)

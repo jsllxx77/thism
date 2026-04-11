@@ -1574,6 +1574,24 @@ ORDER BY ts DESC, id DESC
 LIMIT 1`
 }
 
+func latestMetricsBatchLookupQuery(nodeCount int) string {
+	if nodeCount <= 0 {
+		return ""
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", nodeCount), ",")
+	return `
+SELECT n.id, m.ts, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.net_rx, m.net_tx, m.uptime_seconds
+FROM nodes n
+JOIN metrics m ON m.id = (
+	SELECT id
+	FROM metrics
+	WHERE node_id = n.id
+	ORDER BY ts DESC, id DESC
+	LIMIT 1
+)
+WHERE n.id IN (` + placeholders + `)`
+}
+
 // UpsertNode inserts or updates a node record.
 func (s *Store) UpsertNode(node *models.Node) error {
 	hardwareJSON, err := encodeHardware(node.Hardware)
@@ -1909,6 +1927,7 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
 // LatestMetricsByNodeIDs returns the most recent metrics sample for each node ID.
 func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.NodeMetricsSnapshot, error) {
 	result := make(map[string]*models.NodeMetricsSnapshot, len(nodeIDs))
+	cleanNodeIDs := make([]string, 0, len(nodeIDs))
 	seen := make(map[string]struct{}, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
 		nodeID = strings.TrimSpace(nodeID)
@@ -1919,14 +1938,27 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 			continue
 		}
 		seen[nodeID] = struct{}{}
+		cleanNodeIDs = append(cleanNodeIDs, nodeID)
 	}
-	if len(seen) == 0 {
+	if len(cleanNodeIDs) == 0 {
 		return result, nil
 	}
 
-	for nodeID := range seen {
+	args := make([]any, 0, len(cleanNodeIDs))
+	for _, nodeID := range cleanNodeIDs {
+		args = append(args, nodeID)
+	}
+	rows, err := s.db.Query(latestMetricsBatchLookupQuery(len(cleanNodeIDs)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var nodeID string
 		var snapshot models.NodeMetricsSnapshot
-		err := s.db.QueryRow(latestMetricsLookupQuery(), nodeID).Scan(
+		if err := rows.Scan(
+			&nodeID,
 			&snapshot.TS,
 			&snapshot.CPU,
 			&snapshot.MemUsed,
@@ -1936,14 +1968,13 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 			&snapshot.NetRx,
 			&snapshot.NetTx,
 			&snapshot.UptimeSeconds,
-		)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
+		); err != nil {
 			return nil, err
 		}
 		result[nodeID] = &snapshot
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return result, nil

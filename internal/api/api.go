@@ -2671,7 +2671,6 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		}
 
 		alertDispatcher.EnqueueMetrics(node, &payload)
-		syncLatencyMonitorsForNode(s, h, node.ID)
 
 		// Broadcast metrics to dashboard subscribers, wrapped with node_id.
 		h.Broadcast(models.WSMessage{

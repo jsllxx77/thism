@@ -34,7 +34,11 @@ const defaultState: NotificationSettings = {
   notify_dispatcher_drops: false,
 }
 
-export function NotificationsCard() {
+type Props = {
+  active?: boolean
+}
+
+export function NotificationsCard({ active = true }: Props) {
   const { t } = useLanguage()
   const dispatcherHealthRequest = (api as { dispatcherRuntimeStats?: () => Promise<DispatcherRuntimeStats> }).dispatcherRuntimeStats
   const dispatcherHealthSupported = typeof dispatcherHealthRequest === "function"
@@ -85,7 +89,7 @@ export function NotificationsCard() {
   }, [t])
 
   useEffect(() => {
-    if (!dispatcherHealthSupported) {
+    if (!active || !dispatcherHealthSupported) {
       return
     }
 
@@ -112,7 +116,7 @@ export function NotificationsCard() {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [dispatcherHealthRequest, dispatcherHealthSupported])
+  }, [active, dispatcherHealthRequest, dispatcherHealthSupported])
 
   const updateTarget = (index: number, patch: Partial<TelegramTarget>) => {
     setSettings((current: NotificationSettings) => ({
