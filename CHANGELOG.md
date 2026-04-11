@@ -6,6 +6,20 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-11
+
+### Added
+
+- Persistent `latency_1m` rollups for node-detail latency history, with automatic backfill on large-range requests
+
+### Fixed
+
+- Long-range latency chart rendering by switching 7d+ requests to 1-minute rollups, preserving lightweight front-end downsampling, and suppressing dense chart dots
+- Frontend linting and agent release build reliability in CI
+- GitHub Actions runtime compatibility for the release pipeline
+
+## [0.3.0] - 2026-04-08
+
 ### Added
 
 - Telegram notification delivery, test sends, notification node scoping, dispatcher diagnostics, and configurable dispatcher queue settings
