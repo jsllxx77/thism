@@ -229,6 +229,22 @@ CREATE TABLE IF NOT EXISTS monitor_results (
 CREATE INDEX IF NOT EXISTS idx_monitor_results_node_ts ON monitor_results(node_id, ts);
 CREATE INDEX IF NOT EXISTS idx_monitor_results_monitor_node_ts ON monitor_results(monitor_id, node_id, ts);
 
+CREATE TABLE IF NOT EXISTS latency_1m (
+    node_id          TEXT NOT NULL,
+    monitor_id       TEXT NOT NULL,
+    ts               INTEGER NOT NULL,
+    samples          INTEGER NOT NULL DEFAULT 0,
+    success_samples  INTEGER NOT NULL DEFAULT 0,
+    latency_ms_avg   REAL,
+    loss_percent_avg REAL,
+    jitter_ms_avg    REAL,
+    error_message    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (node_id, monitor_id, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_latency_1m_node_ts ON latency_1m(node_id, ts);
+CREATE INDEX IF NOT EXISTS idx_latency_1m_monitor_node_ts ON latency_1m(monitor_id, node_id, ts);
+
 CREATE TABLE IF NOT EXISTS admin_auth (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     username   TEXT NOT NULL,
@@ -686,6 +702,7 @@ func (s *Store) DeleteLatencyMonitor(monitorID string) error {
 
 	for _, stmt := range []string{
 		`DELETE FROM monitor_results WHERE monitor_id = ?`,
+		`DELETE FROM latency_1m WHERE monitor_id = ?`,
 		`DELETE FROM monitor_item_nodes WHERE monitor_id = ?`,
 		`DELETE FROM monitor_items WHERE id = ?`,
 	} {
@@ -751,6 +768,121 @@ ORDER BY ts, monitor_id
 		results = append(results, &result)
 	}
 	return results, rows.Err()
+}
+
+func (s *Store) QueryLatencyResultsByNodeID1m(nodeID string, from, to int64) ([]*models.LatencyMonitorResult, error) {
+	from = (from / 60) * 60
+	to = (to / 60) * 60
+	rows, err := s.db.Query(`
+SELECT monitor_id, node_id, ts, latency_ms_avg, loss_percent_avg, jitter_ms_avg, success_samples, error_message
+FROM latency_1m
+WHERE node_id = ? AND ts BETWEEN ? AND ?
+ORDER BY ts, monitor_id
+`, nodeID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*models.LatencyMonitorResult
+	for rows.Next() {
+		var result models.LatencyMonitorResult
+		var latency sql.NullFloat64
+		var loss sql.NullFloat64
+		var jitter sql.NullFloat64
+		var successSamples int
+		if err := rows.Scan(&result.MonitorID, &result.NodeID, &result.TS, &latency, &loss, &jitter, &successSamples, &result.ErrorMessage); err != nil {
+			return nil, err
+		}
+		if latency.Valid {
+			value := latency.Float64
+			result.LatencyMs = &value
+		}
+		if loss.Valid {
+			value := loss.Float64
+			result.LossPercent = &value
+		}
+		if jitter.Valid {
+			value := jitter.Float64
+			result.JitterMs = &value
+		}
+		result.Success = successSamples > 0
+		results = append(results, &result)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) RollupLatencyResults1m(from, to int64) error {
+	from = (from / 60) * 60
+	if to < from {
+		return nil
+	}
+	_, err := s.db.Exec(`
+INSERT INTO latency_1m (
+  node_id, monitor_id, ts, samples, success_samples,
+  latency_ms_avg, loss_percent_avg, jitter_ms_avg, error_message
+)
+SELECT
+  node_id,
+  monitor_id,
+  (ts / 60) * 60 AS minute_ts,
+  COUNT(*) AS samples,
+  SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_samples,
+  AVG(latency_ms) AS latency_ms_avg,
+  AVG(loss_percent) AS loss_percent_avg,
+  AVG(jitter_ms) AS jitter_ms_avg,
+  CASE
+    WHEN SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) > 0 THEN ''
+    ELSE COALESCE(MAX(NULLIF(error_message, '')), '')
+  END AS error_message
+FROM monitor_results
+WHERE ts BETWEEN ? AND ?
+GROUP BY node_id, monitor_id, minute_ts
+ON CONFLICT(node_id, monitor_id, ts) DO UPDATE SET
+  samples          = excluded.samples,
+  success_samples  = excluded.success_samples,
+  latency_ms_avg   = excluded.latency_ms_avg,
+  loss_percent_avg = excluded.loss_percent_avg,
+  jitter_ms_avg    = excluded.jitter_ms_avg,
+  error_message    = excluded.error_message
+`, from, to)
+	return err
+}
+
+func (s *Store) NeedsLatencyResults1mRollup(nodeID string, from, to int64) (bool, error) {
+	var rawCount int
+	var rawMin sql.NullInt64
+	var rawMax sql.NullInt64
+	if err := s.db.QueryRow(`
+SELECT COUNT(*), MIN(ts), MAX(ts)
+FROM monitor_results
+WHERE node_id = ? AND ts BETWEEN ? AND ?
+`, nodeID, from, to).Scan(&rawCount, &rawMin, &rawMax); err != nil {
+		return false, err
+	}
+	if rawCount == 0 || !rawMin.Valid || !rawMax.Valid {
+		return false, nil
+	}
+
+	alignedFrom := (from / 60) * 60
+	alignedTo := (to / 60) * 60
+	var rollupCount int
+	var rollupMin sql.NullInt64
+	var rollupMax sql.NullInt64
+	if err := s.db.QueryRow(`
+SELECT COUNT(*), MIN(ts), MAX(ts)
+FROM latency_1m
+WHERE node_id = ? AND ts BETWEEN ? AND ?
+`, nodeID, alignedFrom, alignedTo).Scan(&rollupCount, &rollupMin, &rollupMax); err != nil {
+		return false, err
+	}
+	if rollupCount == 0 || !rollupMin.Valid || !rollupMax.Valid {
+		return true, nil
+	}
+
+	expectedMin := (rawMin.Int64 / 60) * 60
+	expectedMax := (rawMax.Int64 / 60) * 60
+	return rollupMin.Int64 > expectedMin || rollupMax.Int64 < expectedMax, nil
 }
 
 func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
@@ -1603,6 +1735,7 @@ func (s *Store) DeleteNode(nodeID string) error {
 		`DELETE FROM metrics WHERE node_id = ?`,
 		`DELETE FROM metrics_1m WHERE node_id = ?`,
 		`DELETE FROM monitor_results WHERE node_id = ?`,
+		`DELETE FROM latency_1m WHERE node_id = ?`,
 		`DELETE FROM monitor_item_nodes WHERE node_id = ?`,
 		`DELETE FROM processes WHERE node_id = ?`,
 		`DELETE FROM docker_containers WHERE node_id = ?`,
@@ -1840,7 +1973,7 @@ func (s *Store) ListNodesWithLatestMetrics() ([]*models.Node, error) {
 	return nodes, nil
 }
 
-// PruneOldMetrics deletes metrics rows older than retentionDays days.
+// PruneOldMetrics deletes historical raw and rolled-up monitoring rows older than retentionDays days.
 func (s *Store) PruneOldMetrics(retentionDays int) error {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
 	tx, err := s.db.Begin()
@@ -1853,6 +1986,12 @@ func (s *Store) PruneOldMetrics(retentionDays int) error {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM metrics_1m WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM monitor_results WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM latency_1m WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
 

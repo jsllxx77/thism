@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { LatencyMonitorChart } from "./LatencyMonitorChart"
+import type { LatencyMonitor } from "../../lib/api"
+import { LatencyMonitorChart, shouldRenderLatencyDots } from "./LatencyMonitorChart"
 import { buildLatencyMonitorSeries } from "./latency-monitor-series"
 
 describe("latency monitor chart", () => {
@@ -103,5 +104,42 @@ describe("latency monitor chart", () => {
       { monitor_id: "monitor-1", node_id: "node-1", ts: 100, latency_ms: 23.5, success: true },
       { monitor_id: "monitor-2", node_id: "node-1", ts: 107, latency_ms: 48.1, success: true },
     ])
+  })
+
+  it("downsamples dense 7d history to a chart-safe number of clusters while keeping the latest sample", () => {
+    const monitor: LatencyMonitor = {
+      id: "monitor-1",
+      name: "Guangdong Telecom IPv4",
+      type: "tcp",
+      target: "gd-ct-v4.ip.zstaticcdn.com:80",
+      interval_seconds: 60,
+      auto_assign_new_nodes: true,
+      assigned_node_count: 1,
+      assigned_node_ids: ["node-1"],
+      created_at: 1,
+      updated_at: 1,
+    }
+    const results = Array.from({ length: 600 }, (_, index) => ({
+      monitor_id: monitor.id,
+      node_id: "node-1",
+      ts: 1_700_000_000 + index * 60,
+      latency_ms: 20 + (index % 7),
+      success: true,
+    }))
+
+    const { chartData, seriesByMonitorID } = buildLatencyMonitorSeries([monitor], results, 604800)
+
+    expect(chartData.length).toBeLessThanOrEqual(280)
+    expect(seriesByMonitorID[monitor.id].length).toBeLessThanOrEqual(280)
+    expect(chartData[chartData.length - 1]).toEqual({
+      ts: results[results.length - 1].ts,
+      [monitor.id]: results[results.length - 1].latency_ms,
+    })
+  })
+
+  it("shows dots only for compact latency charts", () => {
+    expect(shouldRenderLatencyDots(3600, 60)).toBe(true)
+    expect(shouldRenderLatencyDots(86400, 180)).toBe(false)
+    expect(shouldRenderLatencyDots(604800, 280)).toBe(false)
   })
 })

@@ -168,4 +168,7 @@ func rollupMetrics(s *store.Store) {
 	if err := s.RollupMetrics1m(from, to); err != nil {
 		log.Printf("metrics rollup: failed: %v", err)
 	}
+	if err := s.RollupLatencyResults1m(from, to); err != nil {
+		log.Printf("latency rollup: failed: %v", err)
+	}
 }

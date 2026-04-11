@@ -1,4 +1,5 @@
 import type { LatencyMonitor, LatencyMonitorResult } from "../../lib/api"
+import { getChartPointBudget } from "../../lib/metric-series"
 
 export type SeriesPoint = {
   ts: number
@@ -13,7 +14,11 @@ export type ChartState = {
   resultsByTimestamp: Record<number, LatencyMonitorResult[]>
 }
 
-export function buildLatencyMonitorSeries(monitors: LatencyMonitor[], results: LatencyMonitorResult[]): ChartState {
+export function buildLatencyMonitorSeries(
+  monitors: LatencyMonitor[],
+  results: LatencyMonitorResult[],
+  rangeSeconds = 0,
+): ChartState {
   const knownMonitorIDs = new Set(monitors.map((monitor) => monitor.id))
   const rowsByTimestamp = new Map<number, Record<string, number | null | undefined>>()
   const seriesByMonitorID: Record<string, SeriesPoint[]> = {}
@@ -38,7 +43,9 @@ export function buildLatencyMonitorSeries(monitors: LatencyMonitor[], results: L
     previousCluster.results.push(result)
   }
 
-  for (const cluster of clusters) {
+  const reducedClusters = downsampleLatencyClusters(clusters, rangeSeconds)
+
+  for (const cluster of reducedClusters) {
     const row = rowsByTimestamp.get(cluster.ts) ?? { ts: cluster.ts }
     const latestByMonitorID = new Map<string, LatencyMonitorResult>()
 
@@ -92,4 +99,31 @@ function getLatencyClusterThresholdSeconds(monitors: LatencyMonitor[]): number {
 
   const minInterval = Math.min(...intervals)
   return Math.max(2, Math.min(15, Math.floor(minInterval / 4)))
+}
+
+function downsampleLatencyClusters(
+  clusters: Array<{ ts: number; results: LatencyMonitorResult[] }>,
+  rangeSeconds: number,
+): Array<{ ts: number; results: LatencyMonitorResult[] }> {
+  if (rangeSeconds <= 0) {
+    return clusters
+  }
+
+  const targetPoints = getChartPointBudget(rangeSeconds)
+  if (clusters.length <= targetPoints) {
+    return clusters
+  }
+
+  const bucketSize = Math.max(1, Math.ceil(clusters.length / targetPoints))
+  const reduced: Array<{ ts: number; results: LatencyMonitorResult[] }> = []
+
+  for (let index = 0; index < clusters.length; index += bucketSize) {
+    const bucket = clusters.slice(index, index + bucketSize)
+    const representative = bucket[bucket.length - 1]
+    if (representative) {
+      reduced.push(representative)
+    }
+  }
+
+  return reduced
 }

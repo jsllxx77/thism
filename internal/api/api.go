@@ -2266,12 +2266,52 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 		}
 	}
 
+	resolution := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("resolution")))
+	if resolution == "" {
+		resolution = "auto"
+	}
+
+	span := to - from
+	use1m := false
+	switch resolution {
+	case "1m":
+		use1m = true
+	case "raw":
+		use1m = false
+	case "auto":
+		if span > int64((6 * time.Hour).Seconds()) {
+			use1m = true
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resolution"})
+		return
+	}
+
 	monitors, err := s.ListLatencyMonitorsByNodeID(nodeID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	results, err := s.QueryLatencyResultsByNodeID(nodeID, from, to)
+
+	var results []*models.LatencyMonitorResult
+	metaResolution := "raw"
+	if use1m {
+		needsRollup, rollupErr := s.NeedsLatencyResults1mRollup(nodeID, from, to)
+		if rollupErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": rollupErr.Error()})
+			return
+		}
+		if needsRollup {
+			if err := s.RollupLatencyResults1m(from, to); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		results, err = s.QueryLatencyResultsByNodeID1m(nodeID, from, to)
+		metaResolution = "1m"
+	} else {
+		results, err = s.QueryLatencyResultsByNodeID(nodeID, from, to)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -2285,6 +2325,9 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 	writeJSON(w, http.StatusOK, map[string]any{
 		"monitors": monitors,
 		"results":  results,
+		"meta": map[string]any{
+			"resolution": metaResolution,
+		},
 	})
 }
 

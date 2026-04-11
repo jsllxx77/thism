@@ -105,6 +105,10 @@ function TooltipContent({
   )
 }
 
+export function shouldRenderLatencyDots(rangeSeconds: number, pointCount: number): boolean {
+  return rangeSeconds < 86400 && pointCount <= 120
+}
+
 export function LatencyMonitorChart({ monitors, results, range }: Props) {
   const { t, language } = useLanguage()
   const [visibleSeries, setVisibleSeries] = useState<Record<string, boolean>>({})
@@ -124,7 +128,8 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
     return map
   }, [monitors])
 
-  const chartState = useMemo(() => buildLatencyMonitorSeries(monitors, results), [monitors, results])
+  const chartState = useMemo(() => buildLatencyMonitorSeries(monitors, results, range), [monitors, range, results])
+  const showDots = shouldRenderLatencyDots(range, chartState.chartData.length)
   const latestResultByMonitorID = useMemo(() => {
     const latest = new Map<string, LatencyMonitorResult>()
     for (const result of results) {
@@ -218,7 +223,7 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
                   name={monitor.name}
                   stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                   strokeWidth={2}
-                  dot={{ r: 2, strokeWidth: 0, fill: SERIES_COLORS[index % SERIES_COLORS.length] }}
+                  dot={showDots ? { r: 2, strokeWidth: 0, fill: SERIES_COLORS[index % SERIES_COLORS.length] } : false}
                   activeDot={{ r: 4 }}
                   connectNulls
                   isAnimationActive={false}

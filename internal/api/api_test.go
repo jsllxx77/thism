@@ -1481,6 +1481,99 @@ func TestLatencyMonitorNodeHistory(t *testing.T) {
 	}
 }
 
+func TestGetLatencyResultsAutoUses1mResolutionForLargeRanges(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Healthcheck",
+		Type:               models.LatencyMonitorTypeHTTP,
+		Target:             "https://example.com/healthz",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	latencyFast := 10.0
+	latencySlow := 30.0
+	lossZero := 0.0
+	lossTwenty := 20.0
+	jitterLow := 1.0
+	jitterHigh := 3.0
+	for _, result := range []*models.LatencyMonitorResult{
+		{
+			MonitorID:   "monitor-1",
+			NodeID:      "node-1",
+			TS:          1700000100,
+			LatencyMs:   &latencyFast,
+			LossPercent: &lossZero,
+			JitterMs:    &jitterLow,
+			Success:     true,
+		},
+		{
+			MonitorID:   "monitor-1",
+			NodeID:      "node-1",
+			TS:          1700000115,
+			LatencyMs:   &latencySlow,
+			LossPercent: &lossTwenty,
+			JitterMs:    &jitterHigh,
+			Success:     true,
+		},
+		{
+			MonitorID:    "monitor-1",
+			NodeID:       "node-1",
+			TS:           1700000165,
+			Success:      false,
+			ErrorMessage: "dial timeout",
+		},
+	} {
+		if err := s.InsertLatencyResult(result); err != nil {
+			t.Fatalf("InsertLatencyResult: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1699970000&to=1700000200", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Monitors []models.LatencyMonitor       `json:"monitors"`
+		Results  []models.LatencyMonitorResult `json:"results"`
+		Meta     struct {
+			Resolution string `json:"resolution"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode latency history response: %v", err)
+	}
+	if body.Meta.Resolution != "1m" {
+		t.Fatalf("expected 1m resolution, got %#v", body.Meta)
+	}
+	if len(body.Results) != 2 {
+		t.Fatalf("expected 2 aggregated results, got %#v", body.Results)
+	}
+	if body.Results[0].TS != 1700000100 || body.Results[0].LatencyMs == nil || *body.Results[0].LatencyMs != 20 {
+		t.Fatalf("unexpected first aggregated result: %#v", body.Results[0])
+	}
+	if body.Results[1].TS != 1700000160 || body.Results[1].Success || body.Results[1].ErrorMessage != "dial timeout" {
+		t.Fatalf("unexpected second aggregated result: %#v", body.Results[1])
+	}
+}
+
 func TestRegisterNodeAutoAssignsLatencyMonitors(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
