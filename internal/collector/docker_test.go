@@ -142,11 +142,14 @@ func TestCollectDockerContainersUsesUnversionedEndpoint(t *testing.T) {
 					Header: make(http.Header),
 				}, nil
 			}
+			if req.URL.RawQuery != "" {
+				t.Fatalf("expected running-only docker query without extra parameters, got %q", req.URL.RawQuery)
+			}
 
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(
-					`[{"Id":"abc123def456789012345678","Names":["/my-app"],"Image":"nginx:latest","State":"running","Status":"Up 2 hours"}]`,
+					`[{"Id":"abc123def456789012345678","Names":["/my-app"],"Image":"nginx:latest","State":"running","Status":"Up 2 hours"},{"Id":"def456abc789012345678901","Names":["/old-job"],"Image":"busybox","State":"exited","Status":"Exited (0) 1 hour ago"}]`,
 				)),
 				Header: make(http.Header),
 			}, nil
@@ -161,7 +164,7 @@ func TestCollectDockerContainersUsesUnversionedEndpoint(t *testing.T) {
 		t.Fatal("expected docker to be available when daemon accepts the unversioned endpoint")
 	}
 	if len(containers) != 1 {
-		t.Fatalf("expected 1 container, got %d", len(containers))
+		t.Fatalf("expected 1 running container, got %d", len(containers))
 	}
 	if containers[0].Name != "my-app" {
 		t.Fatalf("expected container name my-app, got %q", containers[0].Name)

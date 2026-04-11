@@ -36,6 +36,7 @@ const DefaultReportInterval = 5 * time.Second
 const DefaultAutoUpdateInterval = 30 * time.Minute
 const DefaultHeavySnapshotInterval = time.Minute
 const networkTopologyCacheTTL = 30 * time.Second
+const processSnapshotLimit = 10
 
 const (
 	ipv4DefaultRoutePath = "/proc/net/route"
@@ -603,7 +604,7 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 		}
 		processSamples, err := collectProcessSamplesFunc()
 		if err == nil {
-			payload.Processes = selectTopProcesses(processSamples, 30)
+			payload.Processes = selectTopProcesses(processSamples, processSnapshotLimit)
 			if payload.Processes == nil {
 				payload.Processes = []models.Process{}
 			}

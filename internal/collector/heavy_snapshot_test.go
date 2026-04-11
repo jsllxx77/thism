@@ -12,6 +12,73 @@ import (
 	"github.com/thism-dev/thism/internal/models"
 )
 
+func TestCollectHeavySnapshotsOnlyKeepTop10Processes(t *testing.T) {
+	originalCPUPercentFunc := cpuPercentFunc
+	originalVirtualMemoryFunc := virtualMemoryFunc
+	originalHostInfoFunc := hostInfoFunc
+	originalDiskPartitionsFunc := diskPartitionsFunc
+	originalIOCountersFunc := ioCountersFunc
+	originalReadFileFunc := readFileFunc
+	originalCollectProcessSamplesFunc := collectProcessSamplesFunc
+	originalCollectDockerContainersFunc := collectDockerContainersFunc
+	defer func() {
+		cpuPercentFunc = originalCPUPercentFunc
+		virtualMemoryFunc = originalVirtualMemoryFunc
+		hostInfoFunc = originalHostInfoFunc
+		diskPartitionsFunc = originalDiskPartitionsFunc
+		ioCountersFunc = originalIOCountersFunc
+		readFileFunc = originalReadFileFunc
+		collectProcessSamplesFunc = originalCollectProcessSamplesFunc
+		collectDockerContainersFunc = originalCollectDockerContainersFunc
+	}()
+
+	cpuPercentFunc = func(time.Duration, bool) ([]float64, error) {
+		return []float64{25}, nil
+	}
+	virtualMemoryFunc = func() (*mem.VirtualMemoryStat, error) {
+		return &mem.VirtualMemoryStat{Used: 1024, Total: 4096}, nil
+	}
+	hostInfoFunc = func() (*host.InfoStat, error) {
+		return &host.InfoStat{Uptime: 3600}, nil
+	}
+	diskPartitionsFunc = func(bool) ([]disk.PartitionStat, error) {
+		return nil, nil
+	}
+	ioCountersFunc = func(bool) ([]psnet.IOCountersStat, error) {
+		return nil, nil
+	}
+	readFileFunc = func(string) ([]byte, error) {
+		return nil, errors.New("no route file")
+	}
+	collectProcessSamplesFunc = func() ([]models.Process, error) {
+		processes := make([]models.Process, 0, 12)
+		for index := 0; index < 12; index += 1 {
+			processes = append(processes, models.Process{
+				PID:        int32(index + 1),
+				Name:       "proc",
+				CPUPercent: float64(12 - index),
+				MemRSS:     uint64(1024 + index),
+			})
+		}
+		return processes, nil
+	}
+	collectDockerContainersFunc = func() ([]models.DockerContainer, bool, error) {
+		return nil, false, nil
+	}
+
+	collector := New("ws://localhost:9999", "token", "test", "")
+	payload, err := collector.Collect()
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(payload.Processes) != 10 {
+		t.Fatalf("expected heavy snapshot to keep top 10 processes, got %d", len(payload.Processes))
+	}
+	if payload.Processes[0].PID != 1 || payload.Processes[9].PID != 10 {
+		t.Fatalf("expected highest-ranked processes to be preserved in order, got first=%d tenth=%d", payload.Processes[0].PID, payload.Processes[9].PID)
+	}
+}
+
 func TestCollectThrottlesHeavySnapshots(t *testing.T) {
 	originalCPUPercentFunc := cpuPercentFunc
 	originalVirtualMemoryFunc := virtualMemoryFunc

@@ -54,7 +54,9 @@ func collectDockerContainers() ([]models.DockerContainer, bool, error) {
 
 	// Use the unversioned endpoint so newer daemons with higher minimum API
 	// versions do not reject the request as "client version too old".
-	url := fmt.Sprintf("http://localhost/containers/json?all=true")
+	// Default Docker behavior returns running containers only, which keeps
+	// the heavy snapshot focused on the live workload.
+	url := fmt.Sprintf("http://localhost/containers/json")
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
 		return nil, false, nil
@@ -78,6 +80,9 @@ func collectDockerContainers() ([]models.DockerContainer, bool, error) {
 
 	containers := make([]models.DockerContainer, 0, len(apiContainers))
 	for _, c := range apiContainers {
+		if !strings.EqualFold(strings.TrimSpace(c.State), "running") {
+			continue
+		}
 		name := ""
 		if len(c.Names) > 0 {
 			// Docker prefixes container names with "/".
