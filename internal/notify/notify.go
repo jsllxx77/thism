@@ -69,7 +69,7 @@ func formatTelegramMessageInLocation(event models.AlertEvent, location *time.Loc
 	if severityLabel == "" {
 		severityLabel = string(event.Severity)
 	}
-	timestamp := escapeTelegramMarkdown(time.Unix(event.ObservedAt, 0).In(location).Format(time.RFC3339))
+	timestampBlock := formatTelegramTimestampBlock(time.Unix(event.ObservedAt, 0).In(location))
 	if event.Metric == models.ResourceMetricNodeStatus {
 		status := "offline"
 		emoji := "🔴"
@@ -78,11 +78,11 @@ func formatTelegramMessageInLocation(event models.AlertEvent, location *time.Loc
 			emoji = "🟢"
 		}
 		return fmt.Sprintf(
-			"%s *Node %s*\nNode: *%s*\nTime: `%s`",
+			"%s *Node %s*\nNode: *%s*\n%s",
 			emoji,
 			escapeTelegramMarkdown(status),
 			escapeTelegramMarkdown(event.NodeName),
-			timestamp,
+			timestampBlock,
 		)
 	}
 	if event.Metric == models.ResourceMetricDispatcherQueue {
@@ -91,34 +91,53 @@ func formatTelegramMessageInLocation(event models.AlertEvent, location *time.Loc
 			details = fmt.Sprintf("Dropped jobs: %.0f\nQueue capacity: %.0f", event.Value, event.Threshold)
 		}
 		return fmt.Sprintf(
-			"🚨 *%s dispatcher alert*\nComponent: *%s*\n%s\nTime: `%s`",
+			"🚨 *%s dispatcher alert*\nComponent: *%s*\n%s\n%s",
 			escapeTelegramMarkdown(severityLabel),
 			escapeTelegramMarkdown(event.NodeName),
 			escapeTelegramMarkdown(details),
-			timestamp,
+			timestampBlock,
 		)
 	}
 	usage := escapeTelegramMarkdown(fmt.Sprintf("%.1f%%", event.Value))
 	threshold := escapeTelegramMarkdown(fmt.Sprintf("%.1f%%", event.Threshold))
 	if event.Severity == models.AlertSeverityResolved {
 		return fmt.Sprintf(
-			"✅ *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\nTime: `%s`",
+			"✅ *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\n%s",
 			escapeTelegramMarkdown(severityLabel),
 			escapeTelegramMarkdown(event.NodeName),
 			escapeTelegramMarkdown(metricLabel),
 			usage,
-			timestamp,
+			timestampBlock,
 		)
 	}
 	return fmt.Sprintf(
-		"🚨 *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\nThreshold: *%s*\nTime: `%s`",
+		"🚨 *%s resource alert*\nNode: *%s*\nMetric: *%s*\nUsage: *%s*\nThreshold: *%s*\n%s",
 		escapeTelegramMarkdown(severityLabel),
 		escapeTelegramMarkdown(event.NodeName),
 		escapeTelegramMarkdown(metricLabel),
 		usage,
 		threshold,
-		timestamp,
+		timestampBlock,
 	)
+}
+
+func formatTelegramTimestampBlock(observedAt time.Time) string {
+	dateLabel := escapeTelegramMarkdown(observedAt.Format("2006-01-02"))
+	clockLabel := escapeTelegramMarkdown(observedAt.Format("15:04:05"))
+	zoneLabel := escapeTelegramMarkdown(formatUTCOffset(observedAt))
+	return fmt.Sprintf("Time:\n• Date: *%s*\n• Clock: *%s*\n• Zone: *%s*", dateLabel, clockLabel, zoneLabel)
+}
+
+func formatUTCOffset(observedAt time.Time) string {
+	_, offsetSeconds := observedAt.Zone()
+	sign := "+"
+	if offsetSeconds < 0 {
+		sign = "-"
+		offsetSeconds = -offsetSeconds
+	}
+	hours := offsetSeconds / 3600
+	minutes := (offsetSeconds % 3600) / 60
+	return fmt.Sprintf("UTC%s%02d:%02d", sign, hours, minutes)
 }
 
 func escapeTelegramMarkdown(value string) string {

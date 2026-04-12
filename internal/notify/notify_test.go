@@ -57,7 +57,7 @@ func TestResolveNotificationLocationPrefersCustomTimezone(t *testing.T) {
 	}
 }
 
-func TestFormatTelegramMessageInLocationUsesProvidedTimezone(t *testing.T) {
+func TestFormatTelegramMessageInLocationUsesReadableTimestampBlock(t *testing.T) {
 	location := time.FixedZone("SYSTEM", 9*60*60)
 	observedAt := time.Date(2026, time.January, 2, 15, 4, 5, 0, time.UTC).Unix()
 
@@ -70,8 +70,10 @@ func TestFormatTelegramMessageInLocationUsesProvidedTimezone(t *testing.T) {
 		ObservedAt: observedAt,
 	}, location)
 
-	expectedTimestamp := escapeTelegramMarkdown(time.Unix(observedAt, 0).In(location).Format(time.RFC3339))
-	if !strings.Contains(message, expectedTimestamp) {
-		t.Fatalf("expected timestamp %s in message, got %s", expectedTimestamp, message)
+	if !strings.Contains(message, "Time:\n• Date: *2026\\-01\\-03*\n• Clock: *00:04:05*\n• Zone: *UTC\\+09:00*") {
+		t.Fatalf("expected readable timestamp block, got %s", message)
+	}
+	if strings.Contains(message, "T00:04:05") {
+		t.Fatalf("expected notification time to avoid RFC3339 compact form, got %s", message)
 	}
 }
