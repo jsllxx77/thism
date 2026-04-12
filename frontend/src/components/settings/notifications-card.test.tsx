@@ -133,20 +133,45 @@ describe("notifications card", () => {
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
   })
 
-  it("saves a custom notification timezone", async () => {
+  it("offers common notification timezone presets before manual entry", async () => {
     const user = userEvent.setup()
     render(<NotificationsCard />)
 
     expect(await screen.findByText("Server timezone: Local (UTC+08:00)")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Custom timezone" }))
-    await user.clear(screen.getByLabelText("Custom timezone (IANA)"))
-    await user.type(screen.getByLabelText("Custom timezone (IANA)"), "Asia/Shanghai")
+
+    expect(screen.getByRole("button", { name: "Asia/Shanghai" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Asia/Hong_Kong" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "UTC" })).toBeInTheDocument()
+    expect(screen.queryByLabelText("Custom timezone (IANA)")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Asia/Shanghai" }))
     await user.click(screen.getByRole("button", { name: "Save notifications" }))
 
     await waitFor(() => expect(updateNotificationSettingsMock).toHaveBeenCalled())
     expect(updateNotificationSettingsMock.mock.calls[0][0]).toMatchObject({
       time_zone_mode: "custom",
       time_zone: "Asia/Shanghai",
+    })
+  })
+
+  it("reveals manual timezone input with format guidance when needed", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("Server timezone: Local (UTC+08:00)")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Custom timezone" }))
+    await user.click(screen.getByRole("button", { name: "Enter another timezone" }))
+
+    expect(screen.getByText("Format: Area/City, e.g. Asia/Shanghai, Europe/London, America/Los_Angeles."))
+      .toBeInTheDocument()
+    await user.type(screen.getByLabelText("Custom timezone (IANA)"), "Europe/Paris")
+    await user.click(screen.getByRole("button", { name: "Save notifications" }))
+
+    await waitFor(() => expect(updateNotificationSettingsMock).toHaveBeenCalled())
+    expect(updateNotificationSettingsMock.mock.calls[0][0]).toMatchObject({
+      time_zone_mode: "custom",
+      time_zone: "Europe/Paris",
     })
   })
 

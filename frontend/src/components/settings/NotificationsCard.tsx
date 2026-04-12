@@ -6,6 +6,9 @@ import { Input } from "../ui/input"
 
 const defaultTarget = (): TelegramTarget => ({ chat_id: "", topic_id: undefined, name: "" })
 const DISPATCHER_HEALTH_REFRESH_INTERVAL_MS = 5000
+const COMMON_NOTIFICATION_TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Tokyo", "Europe/London", "America/Los_Angeles", "UTC"] as const
+
+type NotificationTimezoneEntryMode = "preset" | "manual"
 
 const defaultState: NotificationSettings = {
   enabled: false,
@@ -34,6 +37,28 @@ const defaultState: NotificationSettings = {
   notify_dispatcher_drops: false,
 }
 
+const isCommonNotificationTimezone = (timeZone?: string) =>
+  COMMON_NOTIFICATION_TIMEZONES.includes((timeZone ?? "").trim() as (typeof COMMON_NOTIFICATION_TIMEZONES)[number])
+
+const inferNotificationTimezoneEntryMode = (timeZone?: string): NotificationTimezoneEntryMode => {
+  const value = (timeZone ?? "").trim()
+  return value !== "" && !isCommonNotificationTimezone(value) ? "manual" : "preset"
+}
+
+const normalizeNotificationSettings = (response: Partial<NotificationSettings>): NotificationSettings => {
+  const scopeNodeIDs = response.node_scope_node_ids ?? response.enabled_node_ids ?? []
+  const scopeMode = response.node_scope_mode ?? (scopeNodeIDs.length > 0 ? "include" : "all")
+  return {
+    ...defaultState,
+    ...response,
+    enabled_node_ids: response.enabled_node_ids ?? [],
+    node_scope_mode: scopeMode,
+    node_scope_node_ids: scopeNodeIDs,
+    telegram_bot_token: "",
+    telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
+  }
+}
+
 type Props = {
   active?: boolean
 }
@@ -45,6 +70,7 @@ export function NotificationsCard({ active = true }: Props) {
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
   const [nodes, setNodes] = useState<Node[]>([])
   const [dispatcherStats, setDispatcherStats] = useState<DispatcherRuntimeStats | null>(null)
+  const [customTimezoneEntryMode, setCustomTimezoneEntryMode] = useState<NotificationTimezoneEntryMode>("preset")
   const [nodeSearch, setNodeSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -61,17 +87,9 @@ export function NotificationsCard({ active = true }: Props) {
         const [response, nodesResponse] = await Promise.all([api.notificationSettings(), api.nodes()])
         if (cancelled) return
         setNodes(nodesResponse.nodes)
-        const scopeNodeIDs = response.node_scope_node_ids ?? response.enabled_node_ids ?? []
-        const scopeMode = response.node_scope_mode ?? (scopeNodeIDs.length > 0 ? "include" : "all")
-        setSettings({
-          ...defaultState,
-          ...response,
-          enabled_node_ids: response.enabled_node_ids ?? [],
-          node_scope_mode: scopeMode,
-          node_scope_node_ids: scopeNodeIDs,
-          telegram_bot_token: "",
-          telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
-        })
+        const nextSettings = normalizeNotificationSettings(response)
+        setSettings(nextSettings)
+        setCustomTimezoneEntryMode(inferNotificationTimezoneEntryMode(nextSettings.time_zone))
       } catch {
         if (!cancelled) {
           setError(t("settingsPage.notificationsLoadFailed"))
@@ -189,6 +207,20 @@ export function NotificationsCard({ active = true }: Props) {
     }))
   }
 
+  const selectCommonTimezone = (timeZone: (typeof COMMON_NOTIFICATION_TIMEZONES)[number]) => {
+    setCustomTimezoneEntryMode("preset")
+    setSettings((current: NotificationSettings) => ({ ...current, time_zone_mode: "custom", time_zone: timeZone }))
+  }
+
+  const enableManualTimezoneInput = () => {
+    setCustomTimezoneEntryMode("manual")
+    setSettings((current: NotificationSettings) => ({
+      ...current,
+      time_zone_mode: "custom",
+      time_zone: isCommonNotificationTimezone(current.time_zone) ? "" : current.time_zone,
+    }))
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
@@ -219,19 +251,9 @@ export function NotificationsCard({ active = true }: Props) {
         notify_dispatcher_drops: settings.notify_dispatcher_drops,
       }
       const response = await api.updateNotificationSettings(payload)
-      setSettings((current: NotificationSettings) => {
-        const scopeNodeIDs = response.node_scope_node_ids ?? response.enabled_node_ids ?? []
-        const scopeMode = response.node_scope_mode ?? (scopeNodeIDs.length > 0 ? "include" : "all")
-        return {
-          ...current,
-          ...response,
-          enabled_node_ids: response.enabled_node_ids ?? [],
-          node_scope_mode: scopeMode,
-          node_scope_node_ids: scopeNodeIDs,
-          telegram_bot_token: "",
-          telegram_targets: response.telegram_targets?.length ? response.telegram_targets : [defaultTarget()],
-        }
-      })
+      const nextSettings = normalizeNotificationSettings(response)
+      setSettings(nextSettings)
+      setCustomTimezoneEntryMode(inferNotificationTimezoneEntryMode(nextSettings.time_zone))
       setSuccess(t("settingsPage.notificationsSaved"))
     } catch (err) {
       setError(err instanceof Error ? err.message : t("settingsPage.notificationsSaveFailed"))
@@ -334,7 +356,12 @@ export function NotificationsCard({ active = true }: Props) {
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setSettings((current: NotificationSettings) => ({ ...current, time_zone_mode: mode }))}
+                  onClick={() => {
+                    if (mode === "custom") {
+                      setCustomTimezoneEntryMode(inferNotificationTimezoneEntryMode(settings.time_zone))
+                    }
+                    setSettings((current: NotificationSettings) => ({ ...current, time_zone_mode: mode }))
+                  }}
                   className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${settings.time_zone_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
                 >
                   {label}
@@ -345,16 +372,49 @@ export function NotificationsCard({ active = true }: Props) {
               {t("settingsPage.notificationSystemTimezone", { value: settings.system_time_zone || t("common.unavailable") })}
             </p>
             {settings.time_zone_mode === "custom" ? (
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                {t("settingsPage.notificationCustomTimezone")}
-                <Input
-                  aria-label={t("settingsPage.notificationCustomTimezone")}
-                  value={settings.time_zone ?? ""}
-                  onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, time_zone: event.target.value }))}
-                  placeholder={t("settingsPage.notificationCustomTimezonePlaceholder")}
-                  className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
-                />
-              </label>
+              <div className="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.notificationCommonTimezoneLabel")}</p>
+                <div className="flex flex-wrap gap-2">
+                  {COMMON_NOTIFICATION_TIMEZONES.map((timeZone) => {
+                    const selected = customTimezoneEntryMode === "preset" && settings.time_zone === timeZone
+                    return (
+                      <button
+                        key={timeZone}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => selectCommonTimezone(timeZone)}
+                        className={`rounded-full border px-3 py-2 text-xs font-medium transition ${selected ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
+                      >
+                        {timeZone}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    aria-pressed={customTimezoneEntryMode === "manual"}
+                    onClick={enableManualTimezoneInput}
+                    className={`rounded-full border px-3 py-2 text-xs font-medium transition ${customTimezoneEntryMode === "manual" ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
+                  >
+                    {t("settingsPage.notificationTimezoneManualEntry")}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationCommonTimezoneHint")}</p>
+                {customTimezoneEntryMode === "manual" ? (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                      {t("settingsPage.notificationCustomTimezone")}
+                      <Input
+                        aria-label={t("settingsPage.notificationCustomTimezone")}
+                        value={settings.time_zone ?? ""}
+                        onChange={(event) => setSettings((current: NotificationSettings) => ({ ...current, time_zone: event.target.value }))}
+                        placeholder={t("settingsPage.notificationCustomTimezonePlaceholder")}
+                        className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationCustomTimezoneFormatHint")}</p>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {t("settingsPage.notificationEffectiveTimezone", { value: settings.effective_time_zone || settings.system_time_zone || t("common.unavailable") })}
