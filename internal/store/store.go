@@ -1924,6 +1924,34 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
 	return err
 }
 
+func (s *Store) LatestMetricsByNodeID(nodeID string) (*models.NodeMetricsSnapshot, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return nil, nil
+	}
+
+	row := s.db.QueryRow(latestMetricsLookupQuery(), nodeID)
+	var snapshot models.NodeMetricsSnapshot
+	if err := row.Scan(
+		&snapshot.TS,
+		&snapshot.CPU,
+		&snapshot.MemUsed,
+		&snapshot.MemTotal,
+		&snapshot.DiskUsed,
+		&snapshot.DiskTotal,
+		&snapshot.NetRx,
+		&snapshot.NetTx,
+		&snapshot.UptimeSeconds,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &snapshot, nil
+}
+
 // LatestMetricsByNodeIDs returns the most recent metrics sample for each node ID.
 func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.NodeMetricsSnapshot, error) {
 	result := make(map[string]*models.NodeMetricsSnapshot, len(nodeIDs))
@@ -1978,6 +2006,20 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 	}
 
 	return result, nil
+}
+
+func (s *Store) GetNodeWithLatestMetrics(nodeID string) (*models.Node, error) {
+	node, err := s.GetNodeByID(nodeID)
+	if err != nil || node == nil {
+		return node, err
+	}
+
+	latestMetrics, err := s.LatestMetricsByNodeID(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	node.LatestMetrics = latestMetrics
+	return node, nil
 }
 
 func (s *Store) ListNodesWithLatestMetrics() ([]*models.Node, error) {

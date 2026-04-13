@@ -205,13 +205,11 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
     return () => ws.off(handler)
   }, [loadNodes])
 
-  const effectiveNodes = useMemo(() => {
+  const effectiveNodes = nodes.map((node) => {
     const nowMs = Date.now()
-    return nodes.map((node) => {
-      const effectiveOnline = isNodeEffectivelyOnline(node, nowMs)
-      return effectiveOnline === node.online ? node : { ...node, online: effectiveOnline }
-    })
-  }, [nodes, statusRefreshNonce])
+    const effectiveOnline = isNodeEffectivelyOnline(node, nowMs)
+    return effectiveOnline === node.online ? node : { ...node, online: effectiveOnline }
+  })
 
   const onlineCount = effectiveNodes.filter((n) => n.online).length
   const offlineCount = effectiveNodes.length - onlineCount

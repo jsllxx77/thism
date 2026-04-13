@@ -26,6 +26,7 @@ type dispatchJob struct {
 }
 
 const DefaultDispatcherDropLogInterval = time.Minute
+const DefaultRuntimeConfigRefreshInterval = 15 * time.Second
 
 const dispatcherAlertNodeID = "dispatcher"
 const dispatcherAlertComponentName = "Alert Dispatcher"
@@ -75,6 +76,10 @@ type Dispatcher struct {
 	now              func() time.Time
 	logf             func(string, ...any)
 	dropLogInterval  time.Duration
+	runtimeConfigLoader          func() dispatcherRuntimeConfig
+	runtimeConfig                dispatcherRuntimeConfig
+	runtimeConfigLoadedAt        time.Time
+	runtimeConfigRefreshInterval time.Duration
 	wg               sync.WaitGroup
 	evaluator        *Evaluator
 }
@@ -92,11 +97,17 @@ func NewDispatcherWithCapacity(st *store.Store, sender Sender, capacity int) *Di
 		now:             time.Now,
 		logf:            log.Printf,
 		dropLogInterval: DefaultDispatcherDropLogInterval,
+		runtimeConfigRefreshInterval: DefaultRuntimeConfigRefreshInterval,
 		stats: DispatcherStats{
 			Capacity: capacity,
 		},
 	}
+	dispatcher.runtimeConfigLoader = dispatcher.loadRuntimeConfigFromStore
 	dispatcher.cond = sync.NewCond(&dispatcher.mu)
+	dispatcher.runtimeConfig = dispatcher.loadRuntimeConfigFromStore()
+	dispatcher.runtimeConfigLoadedAt = dispatcher.currentTime()
+	dispatcher.queueCapacity = dispatcher.runtimeConfig.queueCapacity
+	dispatcher.stats.Capacity = dispatcher.runtimeConfig.queueCapacity
 	recordDispatcherCreated(capacity)
 	dispatcher.wg.Add(1)
 	go dispatcher.run()
@@ -145,7 +156,7 @@ func (d *Dispatcher) EnqueueHeartbeat(node *models.Node, online bool, observedAt
 }
 
 func (d *Dispatcher) enqueue(job dispatchJob) bool {
-	config := d.loadRuntimeConfig()
+	config := d.getRuntimeConfig()
 	d.applyQueueCapacity(config.queueCapacity)
 
 	d.mu.Lock()
@@ -387,7 +398,7 @@ func (d *Dispatcher) currentQueueCapacity() int {
 	return normalizeDispatcherQueueCapacity(d.queueCapacity)
 }
 
-func (d *Dispatcher) loadRuntimeConfig() dispatcherRuntimeConfig {
+func (d *Dispatcher) loadRuntimeConfigFromStore() dispatcherRuntimeConfig {
 	fallbackCapacity := d.currentQueueCapacity()
 	config := dispatcherRuntimeConfig{
 		queueCapacity: fallbackCapacity,
@@ -408,6 +419,40 @@ func (d *Dispatcher) loadRuntimeConfig() dispatcherRuntimeConfig {
 	config.settings = settings
 	config.queueCapacity = normalizeDispatcherQueueCapacity(settings.DispatcherQueueCapacity)
 	config.notifyDispatcherDrops = settings.NotifyDispatcherDrops
+	return config
+}
+
+func (d *Dispatcher) getRuntimeConfig() dispatcherRuntimeConfig {
+	if d == nil {
+		return dispatcherRuntimeConfig{}
+	}
+
+	now := d.currentTime()
+
+	d.mu.Lock()
+	refreshInterval := d.runtimeConfigRefreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = DefaultRuntimeConfigRefreshInterval
+	}
+	cached := d.runtimeConfig
+	loadedAt := d.runtimeConfigLoadedAt
+	loader := d.runtimeConfigLoader
+	if loader == nil {
+		loader = d.loadRuntimeConfigFromStore
+	}
+	if !loadedAt.IsZero() && !loadedAt.After(now) && now.Sub(loadedAt) < refreshInterval {
+		d.mu.Unlock()
+		return cached
+	}
+	d.mu.Unlock()
+
+	config := loader()
+
+	d.mu.Lock()
+	d.runtimeConfig = config
+	d.runtimeConfigLoadedAt = now
+	d.mu.Unlock()
+
 	return config
 }
 

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NodeDetail } from "./NodeDetail"
 
-const nodesMock = vi.fn()
+const nodeMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
@@ -13,7 +13,7 @@ const latencyResultsMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
-    nodes: (...args: unknown[]) => nodesMock(...args),
+    node: (...args: unknown[]) => nodeMock(...args),
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
@@ -42,7 +42,7 @@ function deferred<T>() {
 
 describe("node detail page states", () => {
   beforeEach(() => {
-    nodesMock.mockReset()
+    nodeMock.mockReset()
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
@@ -68,8 +68,8 @@ describe("node detail page states", () => {
   })
 
   it("shows a loading state while node detail data is pending", async () => {
-    const nodesRequest = deferred<{
-      nodes: Array<{
+    const nodeRequest = deferred<{
+      node: {
         id: string
         name: string
         ip: string
@@ -78,10 +78,10 @@ describe("node detail page states", () => {
         created_at: number
         last_seen: number
         online: boolean
-      }>
+      } | null
     }>()
 
-    nodesMock.mockReturnValue(nodesRequest.promise)
+    nodeMock.mockReturnValue(nodeRequest.promise)
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
@@ -91,9 +91,8 @@ describe("node detail page states", () => {
     render(<NodeDetail nodeId="node-1" />)
     expect(screen.getByText("Loading node details...")).toBeInTheDocument()
 
-    nodesRequest.resolve({
-      nodes: [
-        {
+    nodeRequest.resolve({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -103,7 +102,6 @@ describe("node detail page states", () => {
           last_seen: 0,
           online: true,
         },
-      ],
     })
 
     await waitFor(() => {
@@ -112,7 +110,7 @@ describe("node detail page states", () => {
   })
 
   it("shows an error state when node detail data fails", async () => {
-    nodesMock.mockRejectedValue(new Error("timeout"))
+    nodeMock.mockRejectedValue(new Error("timeout"))
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
     processesMock.mockResolvedValue([])
@@ -125,9 +123,8 @@ describe("node detail page states", () => {
   })
 
   it("shows docker details when docker is available", async () => {
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -137,7 +134,6 @@ describe("node detail page states", () => {
           last_seen: 0,
           online: true,
         },
-      ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
@@ -156,19 +152,17 @@ describe("node detail page states", () => {
   })
 
   it("uses a single detail column when only one operational section is available", async () => {
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
-          id: "node-1",
-          name: "alpha",
-          ip: "1.1.1.1",
-          os: "linux",
-          arch: "amd64",
-          created_at: 0,
-          last_seen: 0,
-          online: true,
-        },
-      ],
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
@@ -186,19 +180,17 @@ describe("node detail page states", () => {
   })
 
   it("refetches node detail data when refreshNonce changes", async () => {
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
-          id: "node-1",
-          name: "alpha",
-          ip: "1.1.1.1",
-          os: "linux",
-          arch: "amd64",
-          created_at: 0,
-          last_seen: 0,
-          online: true,
-        },
-      ],
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
@@ -208,7 +200,7 @@ describe("node detail page states", () => {
 
     const { rerender } = render(<NodeDetail nodeId="node-1" refreshNonce={0} />)
     await waitFor(() => {
-      expect(nodesMock).toHaveBeenCalledTimes(1)
+      expect(nodeMock).toHaveBeenCalledTimes(1)
       expect(metricsMock).toHaveBeenCalledTimes(1)
       expect(latencyResultsMock).toHaveBeenCalledTimes(1)
       expect(processesMock).toHaveBeenCalledTimes(1)
@@ -218,7 +210,7 @@ describe("node detail page states", () => {
 
     rerender(<NodeDetail nodeId="node-1" refreshNonce={1} />)
     await waitFor(() => {
-      expect(nodesMock).toHaveBeenCalledTimes(2)
+      expect(nodeMock).toHaveBeenCalledTimes(2)
       expect(metricsMock).toHaveBeenCalledTimes(2)
       expect(latencyResultsMock).toHaveBeenCalledTimes(2)
       expect(processesMock).toHaveBeenCalledTimes(2)
@@ -231,19 +223,17 @@ describe("node detail page states", () => {
     const user = userEvent.setup()
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1700003600 * 1000)
 
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
-          id: "node-1",
-          name: "alpha",
-          ip: "1.1.1.1",
-          os: "linux",
-          arch: "amd64",
-          created_at: 0,
-          last_seen: 0,
-          online: true,
-        },
-      ],
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({
@@ -287,9 +277,8 @@ describe("node detail page states", () => {
   })
 
   it("renders hardware passport when node metadata includes hardware", async () => {
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -307,8 +296,7 @@ describe("node detail page states", () => {
             virtualization_system: "kvm",
             virtualization_role: "guest",
           },
-        },
-      ],
+      },
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
@@ -325,19 +313,17 @@ describe("node detail page states", () => {
 
   it("shows a 30d metric range when retention is set to 30 days", async () => {
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [7, 30] })
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
-          id: "node-1",
-          name: "alpha",
-          ip: "1.1.1.1",
-          os: "linux",
-          arch: "amd64",
-          created_at: 0,
-          last_seen: 0,
-          online: true,
-        },
-      ],
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([])
@@ -350,9 +336,8 @@ describe("node detail page states", () => {
   })
 
   it("limits guest users to basic node information", async () => {
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -371,7 +356,6 @@ describe("node detail page states", () => {
             virtualization_role: "guest",
           },
         },
-      ],
     })
     metricsMock.mockResolvedValue({ metrics: [] })
     processesMock.mockResolvedValue([{ pid: 10, name: "sshd", cpu: 0.1, mem: 1024 }])
@@ -388,6 +372,7 @@ describe("node detail page states", () => {
     expect(screen.getByText("Hardware")).toBeInTheDocument()
     expect(screen.queryByText("CPU Usage")).not.toBeInTheDocument()
     expect(screen.queryByText("Top Processes")).not.toBeInTheDocument()
+    expect(nodeMock).toHaveBeenCalledWith("node-1")
     expect(metricsMock).not.toHaveBeenCalled()
     expect(processesMock).not.toHaveBeenCalled()
     expect(servicesMock).not.toHaveBeenCalled()

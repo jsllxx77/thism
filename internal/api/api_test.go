@@ -143,6 +143,65 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetNodeReturnsLatestMetricsSnapshot(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	node := &models.Node{
+		ID:        "node-1",
+		Name:      "agent-node",
+		Token:     "agent-token",
+		IP:        "203.0.113.10",
+		CreatedAt: time.Now().Unix(),
+		LastSeen:  time.Now().Unix(),
+	}
+	if err := s.UpsertNode(node); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	if err := s.InsertMetrics("node-1", &models.MetricsPayload{
+		TS:            1733011200,
+		CPU:           37.5,
+		UptimeSeconds: 3723,
+		Mem:           models.MemStats{Used: 2048, Total: 4096},
+		Net:           models.NetStats{RxBytes: 1234, TxBytes: 5678},
+	}); err != nil {
+		t.Fatalf("InsertMetrics: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Node struct {
+			ID            string            `json:"id"`
+			IP            string            `json:"ip"`
+			LatestMetrics *store.MetricsRow `json:"latest_metrics"`
+		} `json:"node"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Node.ID != "node-1" {
+		t.Fatalf("expected node id node-1, got %q", body.Node.ID)
+	}
+	if body.Node.IP != "203.0.113.10" {
+		t.Fatalf("expected node ip to be included for admin, got %q", body.Node.IP)
+	}
+	if body.Node.LatestMetrics == nil || body.Node.LatestMetrics.CPU != 37.5 {
+		t.Fatalf("expected latest metrics snapshot, got %#v", body.Node.LatestMetrics)
+	}
+}
+
 func TestGetNodesIncludesHardwareSnapshot(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

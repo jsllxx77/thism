@@ -14,14 +14,27 @@ import (
 
 type commandTestConn struct {
 	remoteAddr net.Addr
+	mu         sync.Mutex
 	writes     [][]byte
 }
 
 func (c *commandTestConn) WriteMessage(_ int, data []byte) error {
 	copied := make([]byte, len(data))
 	copy(copied, data)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.writes = append(c.writes, copied)
 	return nil
+}
+
+func (c *commandTestConn) snapshotWrites() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snapshot := make([][]byte, len(c.writes))
+	for index, raw := range c.writes {
+		snapshot[index] = append([]byte(nil), raw...)
+	}
+	return snapshot
 }
 
 func (c *commandTestConn) ReadMessage() (int, []byte, error) {
@@ -77,7 +90,7 @@ func TestDispatchAgentCommandRunsSelfUpdateFlow(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		statuses := decodeStatuses(t, conn.writes)
+		statuses := decodeStatuses(t, conn.snapshotWrites())
 		if len(statuses) >= 4 {
 			if statuses[0].Status != models.UpdateJobTargetStatusAccepted {
 				t.Fatalf("expected first status accepted, got %q", statuses[0].Status)
@@ -89,7 +102,7 @@ func TestDispatchAgentCommandRunsSelfUpdateFlow(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("expected staged status messages, got %d writes", len(conn.writes))
+	t.Fatalf("expected staged status messages, got %d writes", len(conn.snapshotWrites()))
 }
 
 func TestDispatchAgentCommandRejectsConcurrentUpdates(t *testing.T) {
@@ -107,7 +120,7 @@ func TestDispatchAgentCommandRejectsConcurrentUpdates(t *testing.T) {
 	collector.dispatchAgentCommand(models.AgentCommandPayload{JobID: "job-2", Kind: models.AgentCommandKindSelfUpdate}, conn, &writeMu)
 	close(block)
 
-	statuses := decodeStatuses(t, conn.writes)
+	statuses := decodeStatuses(t, conn.snapshotWrites())
 	foundRejected := false
 	for _, status := range statuses {
 		if status.JobID == "job-2" && status.Status == models.UpdateJobTargetStatusFailed {

@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const nodesMock = vi.fn()
+const nodeMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
@@ -12,7 +12,7 @@ let latestDiskValue: number | null | undefined
 
 vi.mock("../lib/api", () => ({
   api: {
-    nodes: (...args: unknown[]) => nodesMock(...args),
+    node: (...args: unknown[]) => nodeMock(...args),
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
@@ -59,7 +59,7 @@ function mockMatchMedia() {
 
 describe("node detail live disk usage", () => {
   beforeEach(() => {
-    nodesMock.mockReset()
+    nodeMock.mockReset()
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
@@ -70,9 +70,8 @@ describe("node detail live disk usage", () => {
     mockMatchMedia()
 
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -82,7 +81,6 @@ describe("node detail live disk usage", () => {
           last_seen: 0,
           online: true,
         },
-      ],
     })
     metricsMock.mockResolvedValue({
       metrics: [

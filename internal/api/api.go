@@ -385,6 +385,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 			handleListNodes(w, req, s, h)
 		})
 
+		r.Get("/api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleGetNode(w, req, s, h)
+		})
+
 		r.Get("/api/meta/version", func(w http.ResponseWriter, req *http.Request) {
 			handleGetVersionMetadata(w, req)
 		})
@@ -1841,6 +1845,27 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": result})
+}
+
+func handleGetNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	nodeID := chi.URLParam(r, "id")
+	node, err := s.GetNodeWithLatestMetrics(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if node == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+		return
+	}
+
+	current := *node
+	current.Online = h != nil && h.IsOnline(current.ID)
+	if accessRoleFromRequest(r) == accessRoleGuest {
+		current.IP = ""
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"node": &current})
 }
 
 func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {

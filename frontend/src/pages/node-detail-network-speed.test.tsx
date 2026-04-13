@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NodeDetail } from "./NodeDetail"
 
-const nodesMock = vi.fn()
+const nodeMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
@@ -13,7 +13,7 @@ let wsHandler: ((msg: { type: string; payload?: unknown }) => void) | null = nul
 
 vi.mock("../lib/api", () => ({
   api: {
-    nodes: (...args: unknown[]) => nodesMock(...args),
+    node: (...args: unknown[]) => nodeMock(...args),
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
@@ -51,7 +51,7 @@ function mockMatchMedia() {
 
 describe("node detail network speed", () => {
   beforeEach(() => {
-    nodesMock.mockReset()
+    nodeMock.mockReset()
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
@@ -61,9 +61,8 @@ describe("node detail network speed", () => {
     mockMatchMedia()
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
 
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -73,7 +72,6 @@ describe("node detail network speed", () => {
           last_seen: 0,
           online: true,
         },
-      ],
     })
     processesMock.mockResolvedValue([])
     servicesMock.mockResolvedValue({ services: [] })

@@ -3,6 +3,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { useLanguage } from "../../i18n/language"
 import type { LatencyMonitor, LatencyMonitorResult } from "../../lib/api"
 import { buildLatencyMonitorSeries } from "./latency-monitor-series"
+import { shouldRenderLatencyDots } from "./latency-monitor-chart-utils"
 
 type Props = {
   monitors: LatencyMonitor[]
@@ -103,10 +104,6 @@ function TooltipContent({
       </div>
     </div>
   )
-}
-
-export function shouldRenderLatencyDots(rangeSeconds: number, pointCount: number): boolean {
-  return rangeSeconds < 86400 && pointCount <= 120
 }
 
 export function LatencyMonitorChart({ monitors, results, range }: Props) {

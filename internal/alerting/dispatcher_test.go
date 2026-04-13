@@ -308,6 +308,67 @@ func TestDispatcherRuntimeStatsSnapshotTracksAggregateDeltas(t *testing.T) {
 	dispatcher.Close()
 }
 
+func TestDispatcherCachesRuntimeConfigAcrossHotPathEnqueues(t *testing.T) {
+	st, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertNotificationSettings(testNotificationSettings()); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+
+	sender := &blockingSender{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		events:  make(chan models.AlertEvent, 4),
+	}
+	dispatcher := NewDispatcherWithCapacity(st, sender, 2)
+	currentTime := time.Unix(1000, 0)
+	dispatcher.now = func() time.Time { return currentTime }
+	dispatcher.runtimeConfigRefreshInterval = time.Minute
+	dispatcher.runtimeConfigLoadedAt = time.Time{}
+	loads := 0
+	dispatcher.runtimeConfigLoader = func() dispatcherRuntimeConfig {
+		loads += 1
+		return dispatcherRuntimeConfig{
+			queueCapacity: 2,
+			settings:      testNotificationSettings(),
+		}
+	}
+
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+	metrics := &models.MetricsPayload{
+		TS:   1000,
+		CPU:  95,
+		Mem:  models.MemStats{Used: 10, Total: 100},
+		Disk: []models.DiskStats{{Used: 10, Total: 100}},
+	}
+
+	if ok := dispatcher.EnqueueMetrics(node, metrics); !ok {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected worker to begin first send")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, false, 1001); !ok {
+		t.Fatal("expected second enqueue to succeed")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1002); !ok {
+		t.Fatal("expected third enqueue to succeed within cached capacity")
+	}
+
+	if loads != 1 {
+		t.Fatalf("expected runtime config loader to run once within refresh interval, got %d", loads)
+	}
+
+	close(sender.release)
+	dispatcher.Close()
+}
+
 func TestDispatcherRefreshesQueueCapacityFromNotificationSettings(t *testing.T) {
 	st, err := store.New(":memory:")
 	if err != nil {
@@ -327,6 +388,9 @@ func TestDispatcherRefreshesQueueCapacityFromNotificationSettings(t *testing.T) 
 		events:  make(chan models.AlertEvent, 4),
 	}
 	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
+	currentTime := time.Unix(1000, 0)
+	dispatcher.now = func() time.Time { return currentTime }
+	dispatcher.runtimeConfigRefreshInterval = time.Second
 
 	node := &models.Node{ID: "node-1", Name: "alpha"}
 	metrics := &models.MetricsPayload{
@@ -355,6 +419,7 @@ func TestDispatcherRefreshesQueueCapacityFromNotificationSettings(t *testing.T) 
 	if err := st.UpsertNotificationSettings(settings); err != nil {
 		t.Fatalf("UpsertNotificationSettings update: %v", err)
 	}
+	currentTime = currentTime.Add(2 * time.Second)
 	if ok := dispatcher.EnqueueHeartbeat(node, true, 1003); !ok {
 		t.Fatal("expected enqueue to succeed after runtime capacity update")
 	}

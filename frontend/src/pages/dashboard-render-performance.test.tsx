@@ -13,7 +13,7 @@ vi.mock("../lib/api", () => ({
 
 vi.mock("../lib/ws", () => ({
   getDashboardWS: () => ({
-    on: (_handler: (msg: { type: string; payload?: unknown }) => void) => {},
+    on: () => {},
     off: () => {},
   }),
 }))

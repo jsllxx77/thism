@@ -268,6 +268,7 @@ export type DispatcherRuntimeStats = {
 export const api = {
   session: () => req<SessionInfo>("/api/auth/session"),
   nodes: () => req<{ nodes: Node[] }>("/api/nodes"),
+  node: (id: string) => req<{ node: Node | null }>(`/api/nodes/${id}`),
   renameNode: (id: string, name: string) =>
     req<Node>(`/api/nodes/${id}`, {
       method: "PATCH",

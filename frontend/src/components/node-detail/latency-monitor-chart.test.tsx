@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { LatencyMonitor } from "../../lib/api"
-import { LatencyMonitorChart, shouldRenderLatencyDots } from "./LatencyMonitorChart"
+import { LatencyMonitorChart } from "./LatencyMonitorChart"
+import { shouldRenderLatencyDots } from "./latency-monitor-chart-utils"
 import { buildLatencyMonitorSeries } from "./latency-monitor-series"
 
 describe("latency monitor chart", () => {

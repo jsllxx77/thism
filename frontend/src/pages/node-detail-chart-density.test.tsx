@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const nodesMock = vi.fn()
+const nodeMock = vi.fn()
 const metricsMock = vi.fn()
 const processesMock = vi.fn()
 const servicesMock = vi.fn()
@@ -13,7 +13,7 @@ let latestCPUData: Array<{ ts: number; value: number }> = []
 
 vi.mock("../lib/api", () => ({
   api: {
-    nodes: (...args: unknown[]) => nodesMock(...args),
+    node: (...args: unknown[]) => nodeMock(...args),
     metrics: (...args: unknown[]) => metricsMock(...args),
     processes: (...args: unknown[]) => processesMock(...args),
     services: (...args: unknown[]) => servicesMock(...args),
@@ -89,7 +89,7 @@ function buildMetrics(from: number, to: number) {
 
 describe("node detail chart density", () => {
   beforeEach(() => {
-    nodesMock.mockReset()
+    nodeMock.mockReset()
     metricsMock.mockReset()
     processesMock.mockReset()
     servicesMock.mockReset()
@@ -100,9 +100,8 @@ describe("node detail chart density", () => {
     mockMatchMedia()
 
     metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    nodesMock.mockResolvedValue({
-      nodes: [
-        {
+    nodeMock.mockResolvedValue({
+      node: {
           id: "node-1",
           name: "alpha",
           ip: "1.1.1.1",
@@ -112,7 +111,6 @@ describe("node detail chart density", () => {
           last_seen: 0,
           online: true,
         },
-      ],
     })
     metricsMock.mockImplementation((_nodeId: string, from?: number, to?: number) =>
       Promise.resolve({ metrics: buildMetrics(from ?? 0, to ?? 0) })

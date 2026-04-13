@@ -193,9 +193,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     setDetailError(null)
 
     try {
-      const nodesResponse = await api.nodes()
-      const found = nodesResponse.nodes?.find((n) => n.id === nodeId) ?? null
-      setNode(found)
+      const nodeResponse = await api.node(nodeId)
+      setNode(nodeResponse.node ?? null)
 
       if (accessMode === "guest") {
         setMetrics([])
