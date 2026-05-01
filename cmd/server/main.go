@@ -13,6 +13,7 @@ import (
 
 	"github.com/thism-dev/thism/frontend"
 	"github.com/thism-dev/thism/internal/api"
+	"github.com/thism-dev/thism/internal/geo"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/store"
 )
@@ -23,6 +24,7 @@ func main() {
 	adminToken := flag.String("token", "", "Admin token for API auth")
 	adminUser := flag.String("admin-user", "", "Admin username for login page authentication")
 	adminPass := flag.String("admin-pass", "", "Admin password for login page authentication")
+	geoIPDBPath := flag.String("geoip-db", geo.DefaultDBPath, "Path to local GeoIP mmdb database")
 	flag.Parse()
 
 	if *adminToken == "" {
@@ -44,11 +46,14 @@ func main() {
 	h := hub.New(s)
 	go h.Run()
 
-	router := api.NewRouterWithAuth(s, h, api.AuthConfig{
+	countryResolver := geo.MustNewResolver(*geoIPDBPath)
+	defer countryResolver.Close()
+
+	router := api.NewRouterWithAuthAndGeo(s, h, api.AuthConfig{
 		AdminToken: *adminToken,
 		Username:   *adminUser,
 		Password:   *adminPass,
-	}, frontend.Handler())
+	}, frontend.Handler(), countryResolver)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

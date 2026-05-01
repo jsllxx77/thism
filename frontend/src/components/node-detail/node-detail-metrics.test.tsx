@@ -8,6 +8,7 @@ import { MetricTabs } from "./MetricTabs"
 const node: Node = {
   id: "node-1",
   name: "alpha",
+  country_code: "HK",
   ip: "10.0.0.7",
   os: "linux",
   arch: "amd64",
@@ -41,6 +42,7 @@ describe("node detail metrics", () => {
     const { container } = render(<NodeHero node={node} />)
 
     expect(screen.getByText("Node")).toBeInTheDocument()
+    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("Online")).toBeInTheDocument()
     expect(screen.getByText(/10.0.0.7/)).toBeInTheDocument()

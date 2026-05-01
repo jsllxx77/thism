@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Pencil, Plus, Trash2 } from "lucide-react"
 import { api, type LatencyMonitor, type LatencyMonitorType, type Node } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
+import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { Button } from "../ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog"
 import { Input } from "../ui/input"
@@ -286,6 +287,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {nodes.map((node) => {
                 const checked = form.nodeIDs.includes(node.id)
+                const flagEmoji = countryCodeToFlagEmoji(node.country_code)
                 return (
                   <label
                     key={node.id}
@@ -295,7 +297,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
                         : "border-slate-200 bg-white/80 text-slate-600 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200"
                     }`}
                   >
-                    <span>{node.name}</span>
+                    <span>{flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}<span>{node.name}</span></span>
                     <input
                       type="checkbox"
                       aria-label={t("settingsPage.latencyMonitorsAssignNode", { name: node.name })}

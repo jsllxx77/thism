@@ -84,4 +84,11 @@ describe("node card redesign", () => {
     expect(screen.queryByText("10.0.0.1")).not.toBeInTheDocument()
     expect(screen.getByText("linux/amd64")).toBeInTheDocument()
   })
+
+  it("shows a country flag before the node name when country code is available", () => {
+    render(<NodeCard node={createNode({ country_code: "HK" })} />)
+
+    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+  })
 })

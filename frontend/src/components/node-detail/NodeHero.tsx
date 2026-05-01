@@ -1,6 +1,7 @@
 import { Clock3, Layers3, MapPinned } from "lucide-react"
 import type { Node } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
+import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { Badge } from "../ui/badge"
 import { Card, CardContent } from "../ui/card"
 
@@ -21,6 +22,7 @@ export function NodeHero({ node, showIP = true, uptimeSeconds }: Props) {
         ? node.latest_metrics.uptime_seconds
         : undefined
   const formattedUptime = formatUptimeDuration(resolvedUptimeSeconds)
+  const flagEmoji = countryCodeToFlagEmoji(node?.country_code)
 
   return (
     <Card className="panel-card enterprise-hero rounded-[28px]">
@@ -29,7 +31,10 @@ export function NodeHero({ node, showIP = true, uptimeSeconds }: Props) {
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="enterprise-kicker text-[11px] font-semibold uppercase tracking-[0.24em]">{t("nodeDetail.heroEyebrow")}</p>
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-100 md:text-[2rem]">{node?.name ?? t("common.unknownNode")}</h2>
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-100 md:text-[2rem]">
+                {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
+                <span>{node?.name ?? t("common.unknownNode")}</span>
+              </h2>
               <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-400">{t("nodeDetail.heroDescription")}</p>
             </div>
 

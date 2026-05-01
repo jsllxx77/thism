@@ -122,6 +122,32 @@ describe("node detail page states", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't load node details. Please try again.")
   })
 
+  it("shows a country flag in the node detail hero when country code is available", async () => {
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        country_code: "HK",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
+
+    render(<NodeDetail nodeId="node-1" accessMode="guest" />)
+
+    expect(await screen.findByText("alpha")).toBeInTheDocument()
+    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+  })
+
   it("shows docker details when docker is available", async () => {
     nodeMock.mockResolvedValue({
       node: {

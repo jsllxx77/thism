@@ -79,7 +79,7 @@ describe("notifications card", () => {
     sendTestNotificationMock.mockResolvedValue({ ok: true })
     nodesMock.mockResolvedValue({
       nodes: [
-        { id: "node-1", name: "Alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        { id: "node-1", name: "Alpha", country_code: "HK", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
         { id: "node-2", name: "Beta", ip: "2.2.2.2", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: false },
       ],
     })
@@ -92,6 +92,17 @@ describe("notifications card", () => {
       processed: 0,
       dropped: 0,
     })
+  })
+
+  it("shows a country flag in notification node selection lists when available", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
+    expect(screen.getAllByText("🇭🇰").length).toBeGreaterThanOrEqual(1)
+    await user.type(screen.getByLabelText("Search nodes by name or ID"), "Alpha")
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("🇭🇰").length).toBeGreaterThanOrEqual(1)
   })
 
   it("loads notification settings and saves telegram targets", async () => {

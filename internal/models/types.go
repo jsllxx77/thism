@@ -8,6 +8,7 @@ type Node struct {
 	IP            string               `json:"ip"`
 	OS            string               `json:"os"`
 	Arch          string               `json:"arch"`
+	CountryCode   string               `json:"country_code,omitempty"`
 	AgentVersion  string               `json:"agent_version,omitempty"`
 	CreatedAt     int64                `json:"created_at"`
 	LastSeen      int64                `json:"last_seen"`

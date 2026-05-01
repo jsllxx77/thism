@@ -3,6 +3,7 @@ import { useLanguage } from "../../i18n/language"
 import { api } from "../../lib/api"
 import type { Node } from "../../lib/api"
 import { copyTextToClipboard } from "../../lib/clipboard"
+import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { Button } from "../ui/button"
 import {
   Dialog,
@@ -172,6 +173,13 @@ export function NodesTable({ nodes, onUpdated }: Props) {
 
   const statusLabel = (online: boolean) => online ? t("Online") : t("Offline")
   const formatCreatedDate = (createdAt: number) => createdAt ? new Date(createdAt * 1000).toLocaleDateString(language) : "—"
+  const renderNodeName = (node: Node) => {
+    const flagEmoji = countryCodeToFlagEmoji(node.country_code)
+    return <>
+      {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
+      <span>{node.name}</span>
+    </>
+  }
 
   return (
     <section className="panel-card enterprise-surface rounded-[28px] p-5 space-y-4">
@@ -212,7 +220,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
             <article key={node.id} className="enterprise-inner-surface rounded-2xl p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{node.name}</p>
+                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{renderNodeName(node)}</p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">{node.ip || "—"}</p>
                 </div>
                 <span
@@ -276,7 +284,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
             <tbody>
               {rows.map((node) => (
                 <tr key={node.id} className="border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70">
-                  <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{node.name}</td>
+                  <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{renderNodeName(node)}</td>
                   <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.ip || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.os && node.arch ? `${node.os}/${node.arch}` : "—"}</td>

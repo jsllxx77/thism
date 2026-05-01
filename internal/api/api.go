@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"github.com/thism-dev/thism/internal/alerting"
+	"github.com/thism-dev/thism/internal/geo"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/notify"
@@ -315,12 +316,16 @@ func constantTimeStringEqual(a, b string) bool {
 // If frontendHandler is non-nil it is used as a fallback for unmatched routes;
 // otherwise unmatched routes return 404.
 func NewRouter(s *store.Store, h *hub.Hub, adminToken string, frontendHandler http.Handler) http.Handler {
-	return NewRouterWithAuth(s, h, AuthConfig{AdminToken: adminToken}, frontendHandler)
+	return NewRouterWithAuthAndGeo(s, h, AuthConfig{AdminToken: adminToken}, frontendHandler, nil)
 }
 
 // NewRouterWithAuth builds and returns the HTTP router with configurable
 // admin login credentials.
 func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler) http.Handler {
+	return NewRouterWithAuthAndGeo(s, h, auth, frontendHandler, nil)
+}
+
+func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler, countryResolver geo.CountryResolver) http.Handler {
 	authState := newAuthManager(auth, s)
 
 	// Load persisted credentials if present, otherwise bootstrap from startup
@@ -382,11 +387,11 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 		})
 
 		r.Get("/api/nodes", func(w http.ResponseWriter, req *http.Request) {
-			handleListNodes(w, req, s, h)
+			handleListNodes(w, req, s, h, countryResolver)
 		})
 
 		r.Get("/api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
-			handleGetNode(w, req, s, h)
+			handleGetNode(w, req, s, h, countryResolver)
 		})
 
 		r.Get("/api/meta/version", func(w http.ResponseWriter, req *http.Request) {
@@ -1821,7 +1826,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // REST handlers
 // -----------------------------------------------------------------------
 
-func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub, countryResolver geo.CountryResolver) {
 	nodes, err := s.ListNodesWithLatestMetrics()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1838,6 +1843,7 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 	for _, n := range nodes {
 		current := *n
 		_, current.Online = onlineSet[current.ID]
+		current.CountryCode = resolveCountryCode(countryResolver, current.IP)
 		if role == accessRoleGuest {
 			current.IP = ""
 		}
@@ -1847,7 +1853,7 @@ func handleListNodes(w http.ResponseWriter, r *http.Request, s *store.Store, h *
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": result})
 }
 
-func handleGetNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+func handleGetNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub, countryResolver geo.CountryResolver) {
 	nodeID := chi.URLParam(r, "id")
 	node, err := s.GetNodeWithLatestMetrics(nodeID)
 	if err != nil {
@@ -1861,6 +1867,7 @@ func handleGetNode(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 
 	current := *node
 	current.Online = h != nil && h.IsOnline(current.ID)
+	current.CountryCode = resolveCountryCode(countryResolver, current.IP)
 	if accessRoleFromRequest(r) == accessRoleGuest {
 		current.IP = ""
 	}
@@ -2769,6 +2776,13 @@ func writeLatencyMonitorConfigToConn(conn *websocket.Conn, s *store.Store, nodeI
 	}); err != nil {
 		log.Printf("latency monitors: initial write to node %s failed: %v", nodeID, err)
 	}
+}
+
+func resolveCountryCode(resolver geo.CountryResolver, ip string) string {
+	if resolver == nil {
+		return ""
+	}
+	return resolver.ResolveCountryCode(ip)
 }
 
 func resolveNodeIP(r *http.Request, payloadIP string) string {

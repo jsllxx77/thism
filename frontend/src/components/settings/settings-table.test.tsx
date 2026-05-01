@@ -166,4 +166,17 @@ describe("settings nodes table", () => {
     expect(onlineCells.length).toBeGreaterThanOrEqual(2)
     expect(offlineCells.length).toBeGreaterThanOrEqual(1)
   })
+
+  it("shows a country flag before the node name in settings nodes table when country code is available", () => {
+    render(
+      <NodesTable
+        nodes={[
+          node({ id: "n1", name: "alpha", country_code: "HK", online: true }),
+        ]}
+      />
+    )
+
+    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+  })
 })

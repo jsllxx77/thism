@@ -30,6 +30,12 @@ type blockingAlertSender struct {
 	release chan struct{}
 }
 
+type staticCountryResolver map[string]string
+
+func (r staticCountryResolver) ResolveCountryCode(ip string) string {
+	return r[ip]
+}
+
 func (s *blockingAlertSender) Send(_ models.NotificationSettings, _ models.AlertEvent) error {
 	select {
 	case s.started <- struct{}{}:
@@ -985,7 +991,7 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 		t.Fatalf("UpsertNode: %v", err)
 	}
 
-	router := api.NewRouterWithAuth(
+	router := api.NewRouterWithAuthAndGeo(
 		s,
 		h,
 		api.AuthConfig{
@@ -997,6 +1003,7 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("frontend"))
 		}),
+		staticCountryResolver{"10.0.0.9": "HK"},
 	)
 
 	guestReq := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
@@ -1051,8 +1058,9 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 
 	var body struct {
 		Nodes []struct {
-			Name string `json:"name"`
-			IP   string `json:"ip"`
+			Name        string `json:"name"`
+			IP          string `json:"ip"`
+			CountryCode string `json:"country_code"`
 		} `json:"nodes"`
 	}
 	if err := json.Unmarshal(nodesResp.Body.Bytes(), &body); err != nil {
@@ -1063,6 +1071,9 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 	}
 	if body.Nodes[0].IP != "" {
 		t.Fatalf("expected guest node IP to be redacted, got %q", body.Nodes[0].IP)
+	}
+	if body.Nodes[0].CountryCode != "HK" {
+		t.Fatalf("expected guest node country code to be preserved, got %q", body.Nodes[0].CountryCode)
 	}
 }
 

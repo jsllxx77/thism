@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/gorilla/websocket v1.5.3
+	github.com/oschwald/maxminddb-golang/v2 v2.0.0
 	github.com/shirou/gopsutil/v3 v3.24.5
 	golang.org/x/crypto v0.48.0
 	modernc.org/sqlite v1.46.1

@@ -69,10 +69,12 @@ describe("node table", () => {
 
     const sortByName = screen.getByRole("button", { name: "Node Name" })
     const rowNameCell = screen.getByText("alpha")
+    const rowNameButton = screen.getByRole("button", { name: "Open node alpha" })
     const statusCell = screen.getByText("Online")
 
     expect(sortByName.className).toContain("dark:hover:text-slate-200")
-    expect(rowNameCell.className).toContain("dark:text-slate-100")
+    expect(rowNameButton.className).toContain("dark:text-slate-100")
+    expect(rowNameCell.tagName).toBe("SPAN")
     expect(statusCell.className).toContain("dark:text-slate-300")
   })
 
@@ -92,5 +94,12 @@ describe("node table", () => {
     await user.keyboard("{Enter}")
 
     expect(onSelect).toHaveBeenCalledWith("n1")
+  })
+
+  it("shows a country flag before the node name in table view when country code is available", () => {
+    render(<NodeTable nodes={[node({ id: "n1", name: "alpha", country_code: "HK", online: true })]} onSelectNode={vi.fn()} />)
+
+    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+    expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 })

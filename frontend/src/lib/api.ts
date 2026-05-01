@@ -36,6 +36,7 @@ export type Node = {
   ip: string
   os: string
   arch: string
+  country_code?: string
   agent_version?: string
   created_at: number
   last_seen: number

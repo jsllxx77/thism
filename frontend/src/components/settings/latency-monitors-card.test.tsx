@@ -54,12 +54,29 @@ describe("latency monitors card", () => {
     })
   })
 
+  it("shows a country flag in latency monitor node assignment when available", async () => {
+    const user = userEvent.setup()
+    render(
+      <LatencyMonitorsCard
+        nodes={[
+          { id: "node-1", name: "Alpha", country_code: "HK", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "New monitor" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("🇭🇰")).toBeInTheDocument()
+    expect(within(dialog).getByText("Alpha")).toBeInTheDocument()
+  })
+
   it("renders existing monitors and creates a new monitor with all nodes selected by default", async () => {
     const user = userEvent.setup()
     render(
       <LatencyMonitorsCard
         nodes={[
-          { id: "node-1", name: "Alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+          { id: "node-1", name: "Alpha", country_code: "HK", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
           { id: "node-2", name: "Beta", ip: "2.2.2.2", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
         ]}
       />

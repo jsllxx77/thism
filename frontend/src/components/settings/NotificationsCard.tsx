@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
+import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { api, type DispatcherRuntimeStats, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
 import { Input } from "../ui/input"
@@ -155,6 +156,15 @@ export function NotificationsCard({ active = true }: Props) {
       }))
 
   const selectedNodeIDs = useMemo(() => settings.node_scope_node_ids ?? [], [settings.node_scope_node_ids])
+
+  const renderNodeName = (node: { name?: string; id: string; country_code?: string }) => {
+    const label = node.name || node.id
+    const flagEmoji = countryCodeToFlagEmoji(node.country_code)
+    return <>
+      {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
+      <span>{label}</span>
+    </>
+  }
 
   const filteredNodes = useMemo(() => {
     const keyword = nodeSearch.trim().toLowerCase()
@@ -509,7 +519,7 @@ export function NotificationsCard({ active = true }: Props) {
                         onClick={() => toggleNode(node.id)}
                         className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
-                        {node.name || node.id} ×
+                        {renderNodeName(node)} ×
                       </button>
                     ))}
                   </div>
@@ -520,7 +530,7 @@ export function NotificationsCard({ active = true }: Props) {
                     return (
                       <label key={node.id} className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
                         <span className="flex flex-col">
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{node.name || node.id}</span>
+                          <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{renderNodeName(node)}</span>
                           <span className="text-xs text-slate-500 dark:text-slate-400">{node.id}</span>
                         </span>
                         <input
