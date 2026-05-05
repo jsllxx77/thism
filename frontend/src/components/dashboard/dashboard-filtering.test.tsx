@@ -33,14 +33,24 @@ describe("dashboard filtering", () => {
     })
     expect(screen.getByText("Nodes")).toBeInTheDocument()
 
-    expect(screen.getByLabelText("Status filter")).toHaveClass("h-11")
+    const statusGroup = screen.getByRole("group", { name: "Status filter" })
+    const allButton = screen.getByRole("button", { name: "All" })
+    const onlineButton = screen.getByRole("button", { name: "Online" })
+    const offlineButton = screen.getByRole("button", { name: "Offline" })
+
+    expect(statusGroup.className).toContain("enterprise-inner-surface")
+    expect(allButton).toHaveClass("h-11")
+    expect(onlineButton).toHaveClass("h-11")
+    expect(offlineButton).toHaveClass("h-11")
     expect(screen.getByLabelText("Search nodes")).toHaveClass("h-11")
     expect(screen.getByRole("button", { name: "Reset filters" })).toHaveClass("h-11")
 
     const filterShell = container.querySelector("section.panel-card") as HTMLElement | null
     expect(filterShell?.className).toContain("enterprise-surface")
-    expect(screen.getByLabelText("Status filter").className).toContain("shadow-none")
+    expect(statusGroup.className).toContain("shadow-none")
     expect(screen.getByLabelText("Search nodes").className).toContain("shadow-none")
+    expect(allButton.getAttribute("aria-pressed")).toBe("true")
+    expect(onlineButton.getAttribute("aria-pressed")).toBe("false")
 
     const toggleShell = screen.getByRole("button", { name: "Cards View" }).parentElement as HTMLElement | null
     expect(toggleShell?.className).toContain("enterprise-inner-surface")
@@ -48,9 +58,11 @@ describe("dashboard filtering", () => {
     expect(screen.getByRole("button", { name: "Cards View" }).className).toContain("dark:border-white/10")
     expect(screen.getByRole("button", { name: "Cards View" }).className).toContain("dark:ring-white/10")
 
-    await user.selectOptions(screen.getByLabelText("Status filter"), "online")
+    await user.click(onlineButton)
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.queryByText("beta")).not.toBeInTheDocument()
+    expect(onlineButton.getAttribute("aria-pressed")).toBe("true")
+    expect(allButton.getAttribute("aria-pressed")).toBe("false")
 
     await user.clear(screen.getByLabelText("Search nodes"))
     await user.type(screen.getByLabelText("Search nodes"), "alp")
@@ -64,6 +76,7 @@ describe("dashboard filtering", () => {
     await user.click(screen.getByRole("button", { name: "Reset filters" }))
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("beta")).toBeInTheDocument()
+    expect(allButton.getAttribute("aria-pressed")).toBe("true")
   })
 
   it("shows an empty state when no node matches active filters", async () => {

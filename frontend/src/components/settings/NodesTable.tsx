@@ -32,6 +32,11 @@ function isMobileViewport(): boolean {
 export function NodesTable({ nodes, onUpdated }: Props) {
   const { language, t, translateError } = useLanguage()
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
+  const statusOptions: Array<{ value: "all" | "online" | "offline"; label: string }> = [
+    { value: "all", label: t("All") },
+    { value: "online", label: t("Online") },
+    { value: "offline", label: t("Offline") },
+  ]
   const [nameAsc, setNameAsc] = useState(false)
   const [busyNodeID, setBusyNodeID] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -189,19 +194,33 @@ export function NodesTable({ nodes, onUpdated }: Props) {
       </div>
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <label className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-          {t("Settings status filter")}
-          <select
+        <div className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+          <span>{t("Settings status filter")}</span>
+          <div
+            role="group"
             aria-label={t("Settings status filter")}
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as "all" | "online" | "offline")}
-            className="enterprise-outline-control h-10 rounded-xl border px-3 py-1.5 text-slate-700 shadow-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-950/90 dark:text-slate-200"
+            className="enterprise-inner-surface inline-flex w-full gap-1 rounded-2xl p-1.5 shadow-none md:w-auto md:p-1"
           >
-            <option value="all">{t("All")}</option>
-            <option value="online">{t("Online")}</option>
-            <option value="offline">{t("Offline")}</option>
-          </select>
-        </label>
+            {statusOptions.map((option) => {
+              const active = statusFilter === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setStatusFilter(option.value)}
+                  className={`h-10 flex-1 cursor-pointer rounded-xl border border-transparent px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] transition-all duration-200 focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset active:translate-y-px active:scale-[0.99] md:flex-initial ${
+                    active
+                      ? "border border-slate-200/80 bg-slate-50/90 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:ring-1 dark:ring-inset dark:ring-white/10 dark:shadow-none"
+                      : "text-slate-600 hover:bg-white/85 dark:text-slate-200 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
 
       {actionError && (

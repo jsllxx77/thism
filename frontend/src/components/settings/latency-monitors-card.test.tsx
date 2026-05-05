@@ -113,6 +113,36 @@ describe("latency monitors card", () => {
     expect(await screen.findByText("Latency monitor saved.")).toBeInTheDocument()
   })
 
+  it("requires confirmation before deleting a monitor", async () => {
+    const user = userEvent.setup()
+    deleteLatencyMonitorMock.mockResolvedValue({ ok: true })
+
+    render(
+      <LatencyMonitorsCard
+        nodes={[
+          { id: "node-1", name: "Alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Delete monitor" }))
+    const dialog = await screen.findByRole("dialog", { name: "Delete monitor" })
+    expect(deleteLatencyMonitorMock).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("dialog", { name: "Delete monitor" })).not.toBeInTheDocument()
+    expect(deleteLatencyMonitorMock).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "Delete monitor" }))
+    const confirmDialog = await screen.findByRole("dialog", { name: "Delete monitor" })
+    await user.click(within(confirmDialog).getByRole("button", { name: "Delete monitor" }))
+
+    await waitFor(() => expect(deleteLatencyMonitorMock).toHaveBeenCalledWith("monitor-1"))
+    expect(await screen.findByText("Latency monitor deleted.")).toBeInTheDocument()
+  })
+
   it("shows an error state when monitor loading fails", async () => {
     latencyMonitorsMock.mockRejectedValueOnce(new Error("boom"))
 

@@ -15,15 +15,20 @@ describe("dark contrast for dashboard controls", () => {
       />
     )
 
-    const statusSelect = screen.getByLabelText("Status filter")
+    const statusGroup = screen.getByRole("group", { name: "Status filter" })
+    const activeStatusButton = screen.getByRole("button", { name: "All" })
+    const inactiveStatusButton = screen.getByRole("button", { name: "Online" })
     const searchInput = screen.getByLabelText("Search nodes")
     const resetButton = screen.getByRole("button", { name: "Reset filters" })
     const filterShell = container.firstElementChild as HTMLElement | null
 
     expect(filterShell?.className).toContain("enterprise-surface")
     expect(filterShell?.className).not.toContain("bg-[linear-gradient(135deg")
-    expect(statusSelect.className).toContain("dark:bg-slate-950")
-    expect(statusSelect.className).toContain("dark:text-slate-200")
+    expect(statusGroup.className).toContain("enterprise-inner-surface")
+    expect(statusGroup.className).toContain("shadow-none")
+    expect(activeStatusButton.className).toContain("dark:bg-slate-900")
+    expect(activeStatusButton.className).toContain("dark:text-slate-50")
+    expect(inactiveStatusButton.className).toContain("dark:text-slate-200")
     expect(searchInput.className).toContain("dark:bg-slate-950")
     expect(searchInput.className).toContain("dark:text-slate-100")
     expect(resetButton.className).toContain("dark:text-slate-200")

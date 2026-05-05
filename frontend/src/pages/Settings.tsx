@@ -94,6 +94,10 @@ export function Settings({ refreshNonce = 0 }: Props) {
   const [loggingOut, setLoggingOut] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
+  const passwordFormValid = useMemo(
+    () => currentPassword.trim() !== "" && newPassword.trim() !== "" && confirmPassword.trim() !== "" && newPassword !== currentPassword && newPassword === confirmPassword,
+    [confirmPassword, currentPassword, newPassword],
+  )
   const [versionMeta, setVersionMeta] = useState<VersionMeta | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -428,7 +432,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
                 <Button
                   type="submit"
-                  disabled={changingPassword}
+                  disabled={changingPassword || !passwordFormValid}
                   className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium"
                 >
                   {changingPassword ? t("Updating...") : t("Update Password")}

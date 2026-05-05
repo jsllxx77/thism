@@ -93,16 +93,29 @@ describe("settings change password", () => {
     versionMetaMock.mockResolvedValue({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" })
   })
 
-  it("validates password confirmation before submitting", async () => {
+  it("keeps update password disabled until the form is valid", async () => {
     const user = userEvent.setup()
     renderSettings()
 
-    await user.type(screen.getByLabelText(/current password/i), "old-pass")
-    await user.type(screen.getByLabelText(/^new password$/i), "new-pass")
-    await user.type(screen.getByLabelText(/confirm new password/i), "different-pass")
-    await user.click(screen.getByRole("button", { name: /update password/i }))
+    const updateButton = await screen.findByRole("button", { name: /update password/i })
+    expect(updateButton).toBeDisabled()
 
-    expect(screen.getByRole("alert")).toHaveTextContent("New password and confirmation do not match.")
+    await user.type(screen.getByLabelText(/current password/i), "old-pass")
+    expect(updateButton).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/^new password$/i), "old-pass")
+    expect(updateButton).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/confirm new password/i), "different-pass")
+    expect(updateButton).toBeDisabled()
+
+    await user.clear(screen.getByLabelText(/^new password$/i))
+    await user.type(screen.getByLabelText(/^new password$/i), "new-pass")
+    expect(updateButton).toBeDisabled()
+
+    await user.clear(screen.getByLabelText(/confirm new password/i))
+    await user.type(screen.getByLabelText(/confirm new password/i), "new-pass")
+    expect(updateButton).not.toBeDisabled()
     expect(changePasswordMock).not.toHaveBeenCalled()
   })
 

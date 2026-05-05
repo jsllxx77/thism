@@ -3,6 +3,14 @@ import { useLanguage } from "../../i18n/language"
 import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { api, type DispatcherRuntimeStats, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog"
 import { Input } from "../ui/input"
 
 const defaultTarget = (): TelegramTarget => ({ chat_id: "", topic_id: undefined, name: "" })
@@ -60,6 +68,38 @@ const normalizeNotificationSettings = (response: Partial<NotificationSettings>):
   }
 }
 
+function buildNotificationPayload(settings: NotificationSettings, selectedNodeIDs: string[]) {
+  return {
+    enabled: settings.enabled,
+    channel: settings.channel,
+    telegram_bot_token: settings.telegram_bot_token,
+    telegram_targets: settings.telegram_targets
+      .filter((target: TelegramTarget) => target.chat_id.trim() !== "")
+      .map((target: TelegramTarget) => ({
+        name: target.name?.trim() ?? "",
+        chat_id: target.chat_id.trim(),
+        topic_id: typeof target.topic_id === "number" && Number.isFinite(target.topic_id) ? target.topic_id : undefined,
+      })),
+    enabled_node_ids: settings.node_scope_mode === "include" ? selectedNodeIDs : [],
+    node_scope_mode: settings.node_scope_mode,
+    node_scope_node_ids: selectedNodeIDs,
+    cpu_warning_percent: Number(settings.cpu_warning_percent),
+    cpu_critical_percent: Number(settings.cpu_critical_percent),
+    mem_warning_percent: Number(settings.mem_warning_percent),
+    mem_critical_percent: Number(settings.mem_critical_percent),
+    disk_warning_percent: Number(settings.disk_warning_percent),
+    disk_critical_percent: Number(settings.disk_critical_percent),
+    cooldown_minutes: Number(settings.cooldown_minutes),
+    time_zone_mode: settings.time_zone_mode ?? "system",
+    time_zone: settings.time_zone_mode === "custom" ? settings.time_zone?.trim() ?? "" : "",
+    notify_node_offline: settings.notify_node_offline,
+    notify_node_online: settings.notify_node_online,
+    node_offline_grace_minutes: Number(settings.node_offline_grace_minutes),
+    dispatcher_queue_capacity: Number(settings.dispatcher_queue_capacity),
+    notify_dispatcher_drops: settings.notify_dispatcher_drops,
+  }
+}
+
 type Props = {
   active?: boolean
 }
@@ -69,6 +109,7 @@ export function NotificationsCard({ active = true }: Props) {
   const dispatcherHealthRequest = (api as { dispatcherRuntimeStats?: () => Promise<DispatcherRuntimeStats> }).dispatcherRuntimeStats
   const dispatcherHealthSupported = typeof dispatcherHealthRequest === "function"
   const [settings, setSettings] = useState<NotificationSettings>(defaultState)
+  const [savedSettings, setSavedSettings] = useState<NotificationSettings | null>(null)
   const [nodes, setNodes] = useState<Node[]>([])
   const [dispatcherStats, setDispatcherStats] = useState<DispatcherRuntimeStats | null>(null)
   const [customTimezoneEntryMode, setCustomTimezoneEntryMode] = useState<NotificationTimezoneEntryMode>("preset")
@@ -76,6 +117,8 @@ export function NotificationsCard({ active = true }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [pendingAddTarget, setPendingAddTarget] = useState(false)
+  const [removeTargetIndex, setRemoveTargetIndex] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -90,6 +133,7 @@ export function NotificationsCard({ active = true }: Props) {
         setNodes(nodesResponse.nodes)
         const nextSettings = normalizeNotificationSettings(response)
         setSettings(nextSettings)
+        setSavedSettings(nextSettings)
         setCustomTimezoneEntryMode(inferNotificationTimezoneEntryMode(nextSettings.time_zone))
       } catch {
         if (!cancelled) {
@@ -146,6 +190,34 @@ export function NotificationsCard({ active = true }: Props) {
     }))
   }
 
+  const confirmAddTarget = () => {
+    setSettings((current: NotificationSettings) => ({
+      ...current,
+      telegram_targets: [...current.telegram_targets, defaultTarget()],
+    }))
+    setPendingAddTarget(false)
+  }
+
+  const requestRemoveTarget = (index: number) => {
+    setRemoveTargetIndex(index)
+  }
+
+  const confirmRemoveTarget = () => {
+    if (removeTargetIndex == null) return
+    setSettings((current: NotificationSettings) => {
+      const nextTargets = current.telegram_targets.filter((_target: TelegramTarget, idx: number) => idx !== removeTargetIndex)
+      return {
+        ...current,
+        telegram_targets: nextTargets.length > 0 ? nextTargets : [defaultTarget()],
+      }
+    })
+    setRemoveTargetIndex(null)
+  }
+
+  const cancelRemoveTarget = () => {
+    setRemoveTargetIndex(null)
+  }
+
   const buildTargetsPayload = (targets: TelegramTarget[]) =>
     targets
       .filter((target: TelegramTarget) => target.chat_id.trim() !== "")
@@ -175,6 +247,24 @@ export function NotificationsCard({ active = true }: Props) {
       return name.includes(keyword) || id.includes(keyword)
     })
   }, [nodeSearch, nodes])
+
+  const hasDraftTelegramBotToken = (settings.telegram_bot_token ?? "").trim() !== ""
+  const hasConfiguredOrDraftTelegramToken = settings.telegram_bot_token_set || hasDraftTelegramBotToken
+  const validTelegramTargets = useMemo(() => buildTargetsPayload(settings.telegram_targets), [settings.telegram_targets])
+  const canSendTestNotification = hasConfiguredOrDraftTelegramToken && validTelegramTargets.length > 0
+  const hasUnsavedTelegramToken = hasDraftTelegramBotToken
+  const hasUnsavedChanges = useMemo(() => {
+    if (hasUnsavedTelegramToken) {
+      return true
+    }
+    if (loading || !savedSettings) {
+      return false
+    }
+
+    const baselinePayload = buildNotificationPayload(savedSettings, savedSettings.node_scope_node_ids ?? [])
+    const currentPayload = buildNotificationPayload(settings, selectedNodeIDs)
+    return JSON.stringify(currentPayload) !== JSON.stringify(baselinePayload)
+  }, [hasUnsavedTelegramToken, loading, savedSettings, selectedNodeIDs, settings])
 
   const selectedNodes = useMemo(
     () => nodes.filter((node) => selectedNodeIDs.includes(node.id)),
@@ -263,6 +353,7 @@ export function NotificationsCard({ active = true }: Props) {
       const response = await api.updateNotificationSettings(payload)
       const nextSettings = normalizeNotificationSettings(response)
       setSettings(nextSettings)
+      setSavedSettings(nextSettings)
       setCustomTimezoneEntryMode(inferNotificationTimezoneEntryMode(nextSettings.time_zone))
       setSuccess(t("settingsPage.notificationsSaved"))
     } catch (err) {
@@ -273,14 +364,18 @@ export function NotificationsCard({ active = true }: Props) {
   }
 
   const handleSendTest = async () => {
+    if (!canSendTestNotification) {
+      setError(t("settingsPage.notificationsTestRequirementsHint"))
+      setSuccess(null)
+      return
+    }
     setTesting(true)
     setError(null)
     setSuccess(null)
     try {
-      const targets = buildTargetsPayload(settings.telegram_targets)
       await api.sendTestNotification({
         telegram_bot_token: settings.telegram_bot_token,
-        target: targets[0],
+        target: validTelegramTargets[0],
       })
       setSuccess(t("settingsPage.notificationsTestSent"))
     } catch (err) {
@@ -321,12 +416,19 @@ export function NotificationsCard({ active = true }: Props) {
               placeholder={settings.telegram_bot_token_set ? t("settingsPage.telegramBotTokenConfigured") : "123456:ABC..."}
               className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100"
             />
+            {settings.telegram_bot_token_set ? (
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{t("settingsPage.telegramBotTokenPendingHint")}</p>
+            ) : null}
           </label>
+
+          {hasUnsavedChanges ? (
+            <p className="text-xs font-medium text-amber-600 dark:text-amber-300">{t("settingsPage.notificationsUnsavedChanges")}</p>
+          ) : null}
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{t("settingsPage.telegramTargets")}</p>
-              <Button type="button" className="h-9 rounded-xl px-3 text-xs" onClick={() => setSettings((current: NotificationSettings) => ({ ...current, telegram_targets: [...current.telegram_targets, defaultTarget()] }))}>
+              <Button type="button" className="h-9 rounded-xl px-3 text-xs" onClick={() => setPendingAddTarget(true)}>
                 {t("settingsPage.addTelegramTarget")}
               </Button>
             </div>
@@ -340,10 +442,22 @@ export function NotificationsCard({ active = true }: Props) {
                   {t("settingsPage.telegramChatId")}
                   <Input value={target.chat_id} onChange={(event) => updateTarget(index, { chat_id: event.target.value })} className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100" />
                 </label>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                  {t("settingsPage.telegramTopicId")}
-                  <Input value={target.topic_id ?? ""} onChange={(event) => updateTarget(index, { topic_id: event.target.value === "" ? undefined : Number(event.target.value) })} className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100" />
-                </label>
+                <div className="flex flex-col gap-2">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                    {t("settingsPage.telegramTopicId")}
+                    <Input value={target.topic_id ?? ""} onChange={(event) => updateTarget(index, { topic_id: event.target.value === "" ? undefined : Number(event.target.value) })} className="enterprise-outline-control mt-2 rounded-xl border dark:bg-slate-950/90 dark:text-slate-100" />
+                  </label>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl px-3 text-xs text-red-600 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200"
+                      onClick={() => requestRemoveTarget(index)}
+                    >
+                      {t("settingsPage.removeTelegramTarget")}
+                    </Button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -552,7 +666,7 @@ export function NotificationsCard({ active = true }: Props) {
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
               <span className="flex flex-col">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOffline")}</span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_offline ? "已开启" : "已关闭"}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_offline ? t("settingsPage.notificationsEnabledStatusOn") : t("settingsPage.notificationsEnabledStatusOff")}</span>
               </span>
               <button
                 type="button"
@@ -570,7 +684,7 @@ export function NotificationsCard({ active = true }: Props) {
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
               <span className="flex flex-col">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyNodeOnline")}</span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_online ? "已开启" : "已关闭"}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_node_online ? t("settingsPage.notificationsEnabledStatusOn") : t("settingsPage.notificationsEnabledStatusOff")}</span>
               </span>
               <button
                 type="button"
@@ -588,7 +702,7 @@ export function NotificationsCard({ active = true }: Props) {
             <label className="enterprise-inner-surface flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 dark:border-white/10">
               <span className="flex flex-col">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("settingsPage.notifyDispatcherDrops")}</span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_dispatcher_drops ? "已开启" : "已关闭"}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{settings.notify_dispatcher_drops ? t("settingsPage.notificationsEnabledStatusOn") : t("settingsPage.notificationsEnabledStatusOff")}</span>
               </span>
               <button
                 type="button"
@@ -620,14 +734,60 @@ export function NotificationsCard({ active = true }: Props) {
             <Button type="submit" disabled={saving || testing} className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium">
               {saving ? t("settingsPage.notificationsSaving") : t("settingsPage.notificationsSave")}
             </Button>
-            <Button type="button" disabled={saving || testing} className="h-10 rounded-xl px-4 text-sm font-medium" onClick={() => void handleSendTest()}>
+            <Button
+              type="button"
+              disabled={saving || testing || !canSendTestNotification}
+              className="h-10 rounded-xl px-4 text-sm font-medium"
+              onClick={() => void handleSendTest()}
+            >
               {testing ? t("settingsPage.notificationsTesting") : t("settingsPage.notificationsTestSend")}
             </Button>
+            {!canSendTestNotification ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.notificationsTestRequirementsHint")}</p>
+            ) : null}
             {success && <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{success}</p>}
             {error && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">{error}</p>}
           </div>
         </form>
       )}
+
+      <Dialog open={pendingAddTarget} onOpenChange={setPendingAddTarget}>
+        <DialogContent aria-label={t("settingsPage.confirmAddTelegramTargetTitle")} className="enterprise-hero max-w-md rounded-[28px] border p-6">
+          <DialogHeader>
+            <DialogTitle>{t("settingsPage.confirmAddTelegramTargetTitle")}</DialogTitle>
+            <DialogDescription>{t("settingsPage.confirmAddTelegramTargetDescription")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingAddTarget(false)} className="rounded-xl">
+              {t("Cancel")}
+            </Button>
+            <Button type="button" onClick={confirmAddTarget} className="rounded-xl">
+              {t("settingsPage.addTelegramTarget")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={removeTargetIndex !== null} onOpenChange={(open) => {
+        if (!open) {
+          cancelRemoveTarget()
+        }
+      }}>
+        <DialogContent aria-label={t("settingsPage.removeTelegramTargetTitle")} className="enterprise-hero max-w-md rounded-[28px] border p-6">
+          <DialogHeader>
+            <DialogTitle>{t("settingsPage.removeTelegramTargetTitle")}</DialogTitle>
+            <DialogDescription>{t("settingsPage.removeTelegramTargetDescription", { name: settings.telegram_targets[removeTargetIndex ?? 0]?.name?.trim() || settings.telegram_targets[removeTargetIndex ?? 0]?.chat_id || t("settingsPage.telegramTargets") })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={cancelRemoveTarget} className="rounded-xl">
+              {t("Cancel")}
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmRemoveTarget} className="rounded-xl">
+              {t("settingsPage.removeTelegramTarget")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

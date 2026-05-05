@@ -45,7 +45,7 @@ describe("settings nodes table", () => {
       last_seen: 1733011200,
       online: true,
     })
-    installCommandMock.mockResolvedValue({ command: "curl -fsSL -H \"Authorization: Bearer t1\" \"http://localhost/install.sh?name=alpha\" | bash" })
+    installCommandMock.mockResolvedValue({ command: "curl -fsSL -H \"Authorization: Bearer *** \"http://localhost/install.sh?name=alpha\" | bash" })
     deleteNodeMock.mockResolvedValue({ ok: true })
 
     Object.defineProperty(navigator, "clipboard", {
@@ -69,16 +69,29 @@ describe("settings nodes table", () => {
     const renameButtons = screen.getAllByRole("button", { name: "Rename" })
     const scriptButtons = screen.getAllByRole("button", { name: "Get Script" })
     const removeButtons = screen.getAllByRole("button", { name: "Delete" })
+    const statusGroup = screen.getByRole("group", { name: "Settings status filter" })
+    const allButton = screen.getByRole("button", { name: "All" })
+    const onlineButton = screen.getByRole("button", { name: "Online" })
+    const offlineButton = screen.getByRole("button", { name: "Offline" })
 
     expect(renameButtons.length).toBeGreaterThan(0)
     expect(scriptButtons.length).toBeGreaterThan(0)
     expect(removeButtons.length).toBeGreaterThan(0)
+    expect(statusGroup.className).toContain("enterprise-inner-surface")
+    expect(statusGroup.className).toContain("shadow-none")
+    expect(allButton).toHaveClass("h-10")
+    expect(onlineButton).toHaveClass("h-10")
+    expect(offlineButton).toHaveClass("h-10")
+    expect(allButton.getAttribute("aria-pressed")).toBe("true")
+    expect(onlineButton.getAttribute("aria-pressed")).toBe("false")
 
-    await user.selectOptions(screen.getByLabelText("Settings status filter"), "online")
+    await user.click(onlineButton)
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.queryByText("zeta")).not.toBeInTheDocument()
+    expect(onlineButton.getAttribute("aria-pressed")).toBe("true")
+    expect(allButton.getAttribute("aria-pressed")).toBe("false")
 
-    await user.selectOptions(screen.getByLabelText("Settings status filter"), "all")
+    await user.click(allButton)
     await user.click(screen.getByRole("button", { name: "Name" }))
     const rows = screen.getAllByRole("row").slice(1)
     expect(rows[0]).toHaveTextContent("alpha")
@@ -97,7 +110,7 @@ describe("settings nodes table", () => {
     expect(await screen.findByText("Install Command")).toBeInTheDocument()
     expect(onUpdated).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole("button", { name: "Copy command" }))
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("curl -fsSL -H \"Authorization: Bearer t1\" \"http://localhost/install.sh?name=alpha\" | bash")
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("curl -fsSL -H \"Authorization: Bearer *** \"http://localhost/install.sh?name=alpha\" | bash")
     await user.click(screen.getByRole("button", { name: "Done" }))
     expect(onUpdated).toHaveBeenCalledTimes(1)
 

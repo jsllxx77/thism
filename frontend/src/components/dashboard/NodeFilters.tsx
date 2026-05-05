@@ -14,23 +14,42 @@ type Props = {
 
 export function NodeFilters({ status, search, onStatusChange, onSearchChange, onReset }: Props) {
   const { t } = useLanguage()
+  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
+    { value: "all", label: t("dashboard.filters.all") },
+    { value: "online", label: t("dashboard.filters.online") },
+    { value: "offline", label: t("dashboard.filters.offline") },
+  ]
 
   return (
     <section className="panel-card enterprise-surface rounded-[24px] p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
-        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
-          {t("dashboard.filters.status")}
-          <select
+        <div className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+          <span>{t("dashboard.filters.status")}</span>
+          <div
+            role="group"
             aria-label={t("dashboard.filters.status")}
-            value={status}
-            onChange={(event) => onStatusChange(event.target.value as StatusFilter)}
-            className="enterprise-outline-control h-11 rounded-xl border px-3 py-1.5 text-sm shadow-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-950 dark:text-slate-200 md:h-10"
+            className="enterprise-inner-surface inline-flex w-full gap-1 rounded-2xl p-1.5 shadow-none md:w-auto md:p-1"
           >
-            <option value="all">{t("dashboard.filters.all")}</option>
-            <option value="online">{t("dashboard.filters.online")}</option>
-            <option value="offline">{t("dashboard.filters.offline")}</option>
-          </select>
-        </label>
+            {statusOptions.map((option) => {
+              const active = status === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onStatusChange(option.value)}
+                  className={`h-11 flex-1 cursor-pointer rounded-xl border border-transparent px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] transition-all duration-200 focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset active:translate-y-px active:scale-[0.99] md:h-10 md:flex-initial ${
+                    active
+                      ? "border border-slate-200/80 bg-slate-50/90 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:ring-1 dark:ring-inset dark:ring-white/10 dark:shadow-none"
+                      : "text-slate-600 hover:bg-white/85 dark:text-slate-200 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <label className="flex-1 flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
           {t("dashboard.filters.search")}

@@ -4,7 +4,7 @@ import { api, type LatencyMonitor, type LatencyMonitorType, type Node } from "..
 import { useLanguage } from "../../i18n/language"
 import { countryCodeToFlagEmoji } from "../../lib/flags"
 import { Button } from "../ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog"
 import { Input } from "../ui/input"
 
 type Props = {
@@ -41,6 +41,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<LatencyMonitor | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(() => defaultForm(nodes))
@@ -145,19 +146,27 @@ export function LatencyMonitorsCard({ nodes }: Props) {
     }
   }
 
-  const handleDelete = async (monitorID: string) => {
+  const handleDelete = async () => {
+    if (!deleteTarget) {
+      return
+    }
+
     setError(null)
     setSuccess(null)
+    setSaving(true)
     try {
       const request = (api as { deleteLatencyMonitor?: typeof api.deleteLatencyMonitor }).deleteLatencyMonitor
       if (!request) {
         throw new Error("latency monitor delete unavailable")
       }
-      await request(monitorID)
+      await request(deleteTarget.id)
       await loadMonitors()
+      setDeleteTarget(null)
       setSuccess(t("settingsPage.latencyMonitorsDeleted"))
     } catch {
       setError(t("settingsPage.latencyMonitorsSaveFailed"))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -213,7 +222,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
                     <Pencil className="h-3.5 w-3.5" />
                     {t("settingsPage.latencyMonitorsEdit")}
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => void handleDelete(monitor.id)} className="h-9 rounded-xl px-3 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200">
+                  <Button type="button" variant="outline" onClick={() => setDeleteTarget(monitor)} className="h-9 rounded-xl px-3 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200">
                     <Trash2 className="h-3.5 w-3.5" />
                     {t("settingsPage.latencyMonitorsDelete")}
                   </Button>
@@ -318,6 +327,23 @@ export function LatencyMonitorsCard({ nodes }: Props) {
               {t("common.cancel")}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(nextOpen) => !saving && !nextOpen && setDeleteTarget(null)}>
+        <DialogContent aria-label={t("settingsPage.latencyMonitorsDelete")} className="enterprise-hero max-w-md rounded-[28px] border p-6">
+          <DialogHeader>
+            <DialogTitle>{t("settingsPage.latencyMonitorsDelete")}</DialogTitle>
+            <DialogDescription>{t("settingsPage.latencyMonitorsDeleteDescription", { name: deleteTarget?.name ?? "" })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={saving} className="rounded-xl">
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void handleDelete()} disabled={!deleteTarget || saving} className="rounded-xl">
+              {t("settingsPage.latencyMonitorsDelete")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>

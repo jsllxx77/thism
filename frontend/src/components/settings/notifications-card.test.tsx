@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NotificationsCard } from "./NotificationsCard"
 
@@ -144,6 +144,33 @@ describe("notifications card", () => {
     expect(await screen.findByText("Notification settings updated.")).toBeInTheDocument()
   })
 
+  it("requires confirmation before adding a telegram target and supports removing it", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
+    expect(screen.getAllByLabelText("Chat ID")).toHaveLength(1)
+
+    await user.click(screen.getByRole("button", { name: "Add target" }))
+    expect(await screen.findByRole("dialog", { name: "Add Telegram target" })).toBeInTheDocument()
+    expect(screen.getAllByLabelText("Chat ID")).toHaveLength(1)
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("dialog", { name: "Add Telegram target" })).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText("Chat ID")).toHaveLength(1)
+
+    await user.click(screen.getByRole("button", { name: "Add target" }))
+    const addDialog = await screen.findByRole("dialog", { name: "Add Telegram target" })
+    await user.click(within(addDialog).getByRole("button", { name: "Add target" }))
+    expect(screen.getAllByLabelText("Chat ID")).toHaveLength(2)
+
+    const removeButtons = screen.getAllByRole("button", { name: "Remove target" })
+    await user.click(removeButtons[1])
+    const removeDialog = await screen.findByRole("dialog", { name: "Remove Telegram target" })
+    await user.click(within(removeDialog).getByRole("button", { name: "Remove target" }))
+    expect(screen.getAllByLabelText("Chat ID")).toHaveLength(1)
+  })
+
   it("offers common notification timezone presets before manual entry", async () => {
     const user = userEvent.setup()
     render(<NotificationsCard />)
@@ -199,6 +226,69 @@ describe("notifications card", () => {
       target: { name: "Ops", chat_id: "-100123", topic_id: 99 },
     })
     expect(await screen.findByText("Test notification sent.")).toBeInTheDocument()
+  })
+
+  it("disables test notification until token and target requirements are met", async () => {
+    const user = userEvent.setup()
+    notificationSettingsMock.mockResolvedValueOnce({
+      enabled: true,
+      channel: "telegram",
+      telegram_bot_token_set: false,
+      telegram_targets: [{ name: "", chat_id: "", topic_id: undefined }],
+      time_zone_mode: "system",
+      time_zone: "",
+      system_time_zone: "Local (UTC+08:00)",
+      effective_time_zone: "Local (UTC+08:00)",
+      enabled_node_ids: [],
+      node_scope_mode: "all",
+      node_scope_node_ids: [],
+      cpu_warning_percent: 80,
+      cpu_critical_percent: 90,
+      mem_warning_percent: 81,
+      mem_critical_percent: 91,
+      disk_warning_percent: 82,
+      disk_critical_percent: 92,
+      cooldown_minutes: 15,
+      notify_node_offline: true,
+      notify_node_online: true,
+      node_offline_grace_minutes: 2,
+      dispatcher_queue_capacity: 32,
+      notify_dispatcher_drops: true,
+    })
+
+    render(<NotificationsCard />)
+
+    const sendButton = await screen.findByRole("button", { name: "Send test notification" })
+    expect(sendButton).toBeDisabled()
+    expect(screen.getByText("Add a Telegram bot token and at least one target to send a test notification.")).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Telegram bot token"), "123:abc")
+    await user.type(screen.getByLabelText("Chat ID"), "-100999")
+
+    await waitFor(() => expect(sendButton).not.toBeDisabled())
+  })
+
+  it("shows unsaved token guidance and localized toggle states", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByText("This token is only saved after you click Save notifications. Test notifications use the current input.")).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Telegram bot token"), "new-token")
+    expect(screen.getByText("You have unsaved changes.")).toBeInTheDocument()
+    expect(screen.getAllByText("Enabled").length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("shows unsaved changes when non-token notification fields are edited", async () => {
+    const user = userEvent.setup()
+    render(<NotificationsCard />)
+
+    expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
+    expect(screen.queryByText("You have unsaved changes.")).not.toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("CPU warning %"))
+    await user.type(screen.getByLabelText("CPU warning %"), "79")
+
+    expect(screen.getByText("You have unsaved changes.")).toBeInTheDocument()
   })
 
   it("shows a normal dispatcher health summary when the queue is clear", async () => {
