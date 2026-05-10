@@ -4,9 +4,17 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestOpenCountryResolverReturnsNilWhenGeoIPDatabaseIsUnavailable(t *testing.T) {
+	resolver := openCountryResolver(filepath.Join(t.TempDir(), "missing.mmdb"))
+	if resolver != nil {
+		t.Fatal("expected missing GeoIP database to disable country resolver without failing startup")
+	}
+}
 
 func TestNewHTTPServerConfiguresTimeouts(t *testing.T) {
 	server := newHTTPServer(":12026", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

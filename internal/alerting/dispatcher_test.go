@@ -45,6 +45,22 @@ func (s *dropAwareSender) Send(_ models.NotificationSettings, event models.Alert
 	return nil
 }
 
+type blockingDropSender struct {
+	started chan struct{}
+	release chan struct{}
+	events  chan models.AlertEvent
+}
+
+func (s *blockingDropSender) Send(_ models.NotificationSettings, event models.AlertEvent) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-s.release
+	s.events <- event
+	return nil
+}
+
 func TestDispatcherEnqueueMetricsDoesNotBlockOnSlowSender(t *testing.T) {
 	st, err := store.New(":memory:")
 	if err != nil {
@@ -490,6 +506,73 @@ func TestDispatcherSendsDropAlertWhenConfigured(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected dispatcher drop alert to be emitted")
+	}
+
+	close(sender.release)
+	dispatcher.Close()
+}
+
+func TestDispatcherDropAlertsDoNotSpawnWhilePreviousAlertIsInFlight(t *testing.T) {
+	st, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+
+	settings := testNotificationSettings()
+	settings.DispatcherQueueCapacity = 1
+	settings.NotifyDispatcherDrops = true
+	settings.CooldownMinutes = 0
+	if err := st.UpsertNotificationSettings(settings); err != nil {
+		t.Fatalf("UpsertNotificationSettings: %v", err)
+	}
+
+	sender := &blockingDropSender{
+		started: make(chan struct{}, 8),
+		release: make(chan struct{}),
+		events:  make(chan models.AlertEvent, 8),
+	}
+	dispatcher := NewDispatcherWithCapacity(st, sender, 1)
+
+	node := &models.Node{ID: "node-1", Name: "alpha"}
+	metrics := &models.MetricsPayload{
+		TS:   1000,
+		CPU:  95,
+		Mem:  models.MemStats{Used: 10, Total: 100},
+		Disk: []models.DiskStats{{Used: 10, Total: 100}},
+	}
+
+	if ok := dispatcher.EnqueueMetrics(node, metrics); !ok {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected worker to begin first send")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, false, 1001); !ok {
+		t.Fatal("expected second enqueue to fill queue successfully")
+	}
+	if ok := dispatcher.EnqueueHeartbeat(node, true, 1002); ok {
+		t.Fatal("expected third enqueue to be dropped")
+	}
+
+	select {
+	case <-sender.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected first dispatcher drop alert to start")
+	}
+
+	for i := 0; i < 5; i++ {
+		if ok := dispatcher.EnqueueHeartbeat(node, true, int64(1003+i)); ok {
+			t.Fatalf("expected extra enqueue %d to drop while queue is full", i)
+		}
+	}
+
+	select {
+	case <-sender.started:
+		t.Fatal("expected no additional dispatcher drop alert while one is already in flight")
+	case <-time.After(100 * time.Millisecond):
 	}
 
 	close(sender.release)

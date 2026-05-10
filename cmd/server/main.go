@@ -18,6 +18,15 @@ import (
 	"github.com/thism-dev/thism/internal/store"
 )
 
+func openCountryResolver(dbPath string) geo.CountryResolver {
+	countryResolver, err := geo.NewResolver(dbPath)
+	if err != nil {
+		log.Printf("geoip: disabled country resolver: %v", err)
+		return nil
+	}
+	return countryResolver
+}
+
 func main() {
 	port := flag.String("port", "12026", "HTTP port")
 	dbPath := flag.String("db", "./thism.db", "SQLite database path")
@@ -46,8 +55,10 @@ func main() {
 	h := hub.New(s)
 	go h.Run()
 
-	countryResolver := geo.MustNewResolver(*geoIPDBPath)
-	defer countryResolver.Close()
+	countryResolver := openCountryResolver(*geoIPDBPath)
+	if closer, ok := countryResolver.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
 
 	router := api.NewRouterWithAuthAndGeo(s, h, api.AuthConfig{
 		AdminToken: *adminToken,

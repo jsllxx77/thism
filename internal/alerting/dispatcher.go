@@ -64,24 +64,25 @@ var dispatcherRuntimeStats struct {
 // Dispatcher moves alert evaluation and notification delivery off the agent
 // websocket hot path while preserving in-order processing per connection.
 type Dispatcher struct {
-	mu               sync.Mutex
-	cond             *sync.Cond
-	queue            []dispatchJob
-	queueCapacity    int
-	closed           bool
-	closeOnce        sync.Once
-	stats            DispatcherStats
-	lastDropLogAt    time.Time
-	droppedAtLastLog uint64
-	now              func() time.Time
-	logf             func(string, ...any)
-	dropLogInterval  time.Duration
+	mu                           sync.Mutex
+	cond                         *sync.Cond
+	queue                        []dispatchJob
+	queueCapacity                int
+	closed                       bool
+	closeOnce                    sync.Once
+	stats                        DispatcherStats
+	lastDropLogAt                time.Time
+	droppedAtLastLog             uint64
+	now                          func() time.Time
+	logf                         func(string, ...any)
+	dropLogInterval              time.Duration
 	runtimeConfigLoader          func() dispatcherRuntimeConfig
 	runtimeConfig                dispatcherRuntimeConfig
 	runtimeConfigLoadedAt        time.Time
 	runtimeConfigRefreshInterval time.Duration
-	wg               sync.WaitGroup
-	evaluator        *Evaluator
+	dropAlertInFlight            bool
+	wg                           sync.WaitGroup
+	evaluator                    *Evaluator
 }
 
 func NewDispatcher(st *store.Store, sender Sender) *Dispatcher {
@@ -92,11 +93,11 @@ func NewDispatcherWithCapacity(st *store.Store, sender Sender, capacity int) *Di
 	capacity = normalizeDispatcherQueueCapacity(capacity)
 
 	dispatcher := &Dispatcher{
-		queueCapacity:   capacity,
-		evaluator:       &Evaluator{Store: st, Sender: sender},
-		now:             time.Now,
-		logf:            log.Printf,
-		dropLogInterval: DefaultDispatcherDropLogInterval,
+		queueCapacity:                capacity,
+		evaluator:                    &Evaluator{Store: st, Sender: sender},
+		now:                          time.Now,
+		logf:                         log.Printf,
+		dropLogInterval:              DefaultDispatcherDropLogInterval,
 		runtimeConfigRefreshInterval: DefaultRuntimeConfigRefreshInterval,
 		stats: DispatcherStats{
 			Capacity: capacity,
@@ -171,11 +172,15 @@ func (d *Dispatcher) enqueue(job dispatchJob) bool {
 		recordDispatcherDropped()
 		shouldLog, droppedSinceLastLog, totalDropped, queueDepth, capacity := d.shouldLogDropLocked()
 		logf := d.logf
+		shouldSendDropAlert := shouldLog && config.notifyDispatcherDrops && !d.dropAlertInFlight
+		if shouldSendDropAlert {
+			d.dropAlertInFlight = true
+		}
 		d.mu.Unlock()
 		if shouldLog && logf != nil {
 			logf("alert dispatcher: dropping queued jobs due to full queue (dropped_since_last_log=%d total_dropped=%d queue_depth=%d capacity=%d)", droppedSinceLastLog, totalDropped, queueDepth, capacity)
 		}
-		if config.notifyDispatcherDrops {
+		if shouldSendDropAlert {
 			go d.sendDropAlert(config.settings, totalDropped, queueDepth, capacity)
 		}
 		return false
@@ -476,8 +481,21 @@ func (d *Dispatcher) applyQueueCapacity(capacity int) {
 	}
 }
 
+func (d *Dispatcher) finishDropAlert() {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.dropAlertInFlight = false
+	d.mu.Unlock()
+}
+
 func (d *Dispatcher) sendDropAlert(settings models.NotificationSettings, totalDropped uint64, queueDepth, capacity int) {
-	if d == nil || d.evaluator == nil || d.evaluator.Store == nil || d.evaluator.Sender == nil {
+	if d == nil {
+		return
+	}
+	defer d.finishDropAlert()
+	if d.evaluator == nil || d.evaluator.Store == nil || d.evaluator.Sender == nil {
 		return
 	}
 	if !settings.Enabled || settings.Channel != string(models.NotificationChannelTelegram) || len(settings.TelegramTargets) == 0 {
