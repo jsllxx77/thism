@@ -99,10 +99,10 @@ describe("notifications card", () => {
     render(<NotificationsCard />)
 
     expect(await screen.findByRole("heading", { name: "Notifications", level: 3 })).toBeInTheDocument()
-    expect(screen.getAllByText("🇭🇰").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByRole("img", { name: "HK" }).length).toBeGreaterThanOrEqual(1)
     await user.type(screen.getByLabelText("Search nodes by name or ID"), "Alpha")
     expect(screen.getAllByText("Alpha").length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText("🇭🇰").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByRole("img", { name: "HK" }).length).toBeGreaterThanOrEqual(1)
   })
 
   it("loads notification settings and saves telegram targets", async () => {

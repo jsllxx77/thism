@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
-import { countryCodeToFlagEmoji } from "../../lib/flags"
+import { CountryFlag } from "../CountryFlag"
 import { api, type DispatcherRuntimeStats, type Node, type NotificationSettings, type TelegramTarget } from "../../lib/api"
 import { Button } from "../ui/button"
 import {
@@ -231,11 +231,10 @@ export function NotificationsCard({ active = true }: Props) {
 
   const renderNodeName = (node: { name?: string; id: string; country_code?: string }) => {
     const label = node.name || node.id
-    const flagEmoji = countryCodeToFlagEmoji(node.country_code)
-    return <>
-      {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
-      <span>{label}</span>
-    </>
+    return <span className="inline-flex max-w-full items-center">
+      <CountryFlag countryCode={node.country_code} className="mr-1" />
+      <span className="truncate">{label}</span>
+    </span>
   }
 
   const filteredNodes = useMemo(() => {

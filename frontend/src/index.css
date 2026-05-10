@@ -1,3 +1,5 @@
+@import "flag-icons/css/flag-icons.min.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -228,6 +230,57 @@ h3 {
 table th,
 table td {
   font-variant-numeric: tabular-nums;
+}
+
+.country-flag.fi {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  vertical-align: middle;
+  border-radius: 0.16rem;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.country-flag.fi::before {
+  content: "";
+}
+
+.country-flag__emoji {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.country-flag__code {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1;
+  color: #475569;
+  background: rgba(248, 250, 252, 0.92);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dark .country-flag {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.dark .country-flag__code {
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.92);
 }
 
 @media (prefers-reduced-motion: reduce) {

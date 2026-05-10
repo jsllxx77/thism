@@ -3,7 +3,7 @@ import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
 import { formatBytesPerSecond } from "../lib/units"
-import { countryCodeToFlagEmoji } from "../lib/flags"
+import { CountryFlag } from "./CountryFlag"
 import { Badge } from "./ui/badge"
 import { Card, CardContent } from "./ui/card"
 
@@ -78,7 +78,6 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
   const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
-  const flagEmoji = countryCodeToFlagEmoji(node.country_code)
   const handleClick = onClick ?? (onSelectNode ? () => onSelectNode(node.id) : undefined)
 
   return (
@@ -94,9 +93,9 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
         <CardContent className="p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
-                <span>{node.name}</span>
+              <h3 className="flex min-w-0 items-center text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <CountryFlag countryCode={node.country_code} className="mr-1" />
+                <span className="truncate">{node.name}</span>
               </h3>
               <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{subtitle}</p>
             </div>

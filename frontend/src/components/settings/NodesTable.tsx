@@ -3,7 +3,7 @@ import { useLanguage } from "../../i18n/language"
 import { api } from "../../lib/api"
 import type { Node } from "../../lib/api"
 import { copyTextToClipboard } from "../../lib/clipboard"
-import { countryCodeToFlagEmoji } from "../../lib/flags"
+import { CountryFlag } from "../CountryFlag"
 import { Button } from "../ui/button"
 import {
   Dialog,
@@ -179,11 +179,10 @@ export function NodesTable({ nodes, onUpdated }: Props) {
   const statusLabel = (online: boolean) => online ? t("Online") : t("Offline")
   const formatCreatedDate = (createdAt: number) => createdAt ? new Date(createdAt * 1000).toLocaleDateString(language) : "—"
   const renderNodeName = (node: Node) => {
-    const flagEmoji = countryCodeToFlagEmoji(node.country_code)
-    return <>
-      {flagEmoji ? <span className="mr-1" aria-hidden="true">{flagEmoji}</span> : null}
-      <span>{node.name}</span>
-    </>
+    return <span className="inline-flex max-w-full items-center">
+      <CountryFlag countryCode={node.country_code} className="mr-1" />
+      <span className="truncate">{node.name}</span>
+    </span>
   }
 
   return (

@@ -189,7 +189,7 @@ describe("settings nodes table", () => {
       />
     )
 
-    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("fi-hk")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 })

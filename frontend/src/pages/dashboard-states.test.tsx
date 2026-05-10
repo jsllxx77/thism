@@ -155,7 +155,7 @@ describe("dashboard page states", () => {
     render(<Dashboard onSelectNode={() => {}} accessMode="guest" />)
 
     expect(await screen.findByText("alpha")).toBeInTheDocument()
-    expect(screen.getByText("🇭🇰")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("fi-hk")
     expect(screen.queryByRole("button", { name: "Table View" })).not.toBeInTheDocument()
     expect(screen.queryByText("1.1.1.1")).not.toBeInTheDocument()
     expect(screen.getByText("linux/amd64")).toBeInTheDocument()

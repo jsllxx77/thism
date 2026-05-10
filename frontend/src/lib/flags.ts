@@ -1,6 +1,15 @@
-export function countryCodeToFlagEmoji(countryCode?: string | null): string {
+export function normalizeCountryCode(countryCode?: string | null): string {
   const normalized = (countryCode ?? "").trim().toUpperCase()
-  if (!/^[A-Z]{2}$/.test(normalized)) {
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : ""
+}
+
+export function countryCodeToFlagLabel(countryCode?: string | null): string {
+  return normalizeCountryCode(countryCode)
+}
+
+export function countryCodeToFlagEmoji(countryCode?: string | null): string {
+  const normalized = normalizeCountryCode(countryCode)
+  if (!normalized) {
     return ""
   }
 

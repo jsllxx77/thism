@@ -67,7 +67,7 @@ describe("latency monitors card", () => {
     expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "New monitor" }))
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("🇭🇰")).toBeInTheDocument()
+    expect(within(dialog).getByRole("img", { name: "HK" })).toHaveClass("fi-hk")
     expect(within(dialog).getByText("Alpha")).toBeInTheDocument()
   })
 

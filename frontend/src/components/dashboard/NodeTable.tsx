@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useLanguage } from "../../i18n/language"
 import type { Node } from "../../lib/api"
-import { countryCodeToFlagEmoji } from "../../lib/flags"
+import { CountryFlag } from "../../components/CountryFlag"
 
 type SortKey = "name" | "status"
 
@@ -69,10 +69,10 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
                   type="button"
                   onClick={() => onSelectNode(node.id)}
                   aria-label={t("dashboard.openNodeAria", { name: node.name })}
-                  className="rounded-sm text-left font-medium text-slate-900 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:text-slate-100 dark:hover:text-slate-200 dark:focus-visible:ring-offset-slate-950"
+                  className="inline-flex max-w-full items-center rounded-sm text-left font-medium text-slate-900 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:text-slate-100 dark:hover:text-slate-200 dark:focus-visible:ring-offset-slate-950"
                 >
-                  {countryCodeToFlagEmoji(node.country_code) ? <span className="mr-1" aria-hidden="true">{countryCodeToFlagEmoji(node.country_code)}</span> : null}
-                  <span>{node.name}</span>
+                  <CountryFlag countryCode={node.country_code} className="mr-1" />
+                  <span className="truncate">{node.name}</span>
                 </button>
               </td>
               <td className="py-2.5 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
