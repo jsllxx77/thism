@@ -232,6 +232,13 @@ table td {
   font-variant-numeric: tabular-nums;
 }
 
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible {
+  outline: none !important;
+}
+
 .country-flag.fi {
   position: relative;
   display: inline-flex;

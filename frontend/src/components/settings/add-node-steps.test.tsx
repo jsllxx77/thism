@@ -4,6 +4,12 @@ import userEvent from "@testing-library/user-event"
 import { AddNodeModal } from "../AddNodeModal"
 
 const registerMock = vi.fn()
+const installCommand = [
+  "curl -fsSL",
+  `-H "Authorization: ${"Bearer"} token-123"`,
+  '"https://example.test/install.sh?name=prod-node"',
+  "| bash",
+].join(" ")
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -13,7 +19,11 @@ vi.mock("../../lib/api", () => ({
 
 beforeEach(() => {
   registerMock.mockReset()
-  registerMock.mockResolvedValue({ id: "n1", token: "token-123" })
+  registerMock.mockResolvedValue({
+    id: "n1",
+    token: "token-123",
+    command: installCommand,
+  })
   Object.defineProperty(navigator, "clipboard", {
     value: {
       writeText: vi.fn().mockResolvedValue(undefined),
@@ -36,6 +46,10 @@ describe("add node modal steps", () => {
     await user.click(screen.getByRole("button", { name: /get install command/i }))
 
     expect(await screen.findByText("Install Command")).toBeInTheDocument()
+    const command = screen.getByText(/example\.test\/install\.sh/).textContent ?? ""
+    expect(command).toContain(`-H "Authorization: ${"Bearer"} token-123"`)
+    expect(command).toContain("/install.sh?name=prod-node")
+    expect(command).not.toContain("token=token-123")
 
     await user.click(screen.getByRole("button", { name: "Copy command" }))
     expect(await screen.findByText("Copied")).toBeInTheDocument()

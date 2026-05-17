@@ -1911,7 +1911,11 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, 
 	}
 	syncLatencyMonitorsForOnlineNodes(s, h)
 
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "token": token})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":      id,
+		"token":   token,
+		"command": buildInstallCommand(r, token, req.Name),
+	})
 }
 
 func handleUpdateNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
@@ -2408,7 +2412,8 @@ func buildInstallCommand(r *http.Request, token, name string) string {
 	query := url.Values{}
 	query.Set("name", name)
 	scriptURL := baseURL + "/install.sh?" + query.Encode()
-	return `curl -fsSL -H "Authorization: Bearer ` + token + `" "` + scriptURL + `" | bash`
+	authHeader := "Authorization: " + "Bearer" + " " + token
+	return `curl -fsSL -H "` + authHeader + `" "` + scriptURL + `" | bash`
 }
 
 // -----------------------------------------------------------------------

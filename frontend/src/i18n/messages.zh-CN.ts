@@ -360,6 +360,7 @@ export const messagesZhCN = {
       latencyMonitorsTitle: "延迟监测",
       latencyMonitorsDescription: "当前节点上所有已分配监测项的统一延迟历史。",
       latencyMonitorsEmpty: "当前节点还没有分配任何延迟监测。",
+      averageLatencyLabel: "平均延迟:",
       lossLabel: "丢包:",
       jitterLabel: "波动:",
       rangeLabel: "时间范围",

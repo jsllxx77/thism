@@ -1376,6 +1376,19 @@ func TestRegisterNode(t *testing.T) {
 	if resp["id"] == "" {
 		t.Error("expected non-empty id in response")
 	}
+	command := resp["command"]
+	if command == "" {
+		t.Fatal("expected non-empty install command in response")
+	}
+	if !strings.Contains(command, `-H "Authorization: Bearer `) {
+		t.Fatalf("expected install command to use bearer header, got: %s", command)
+	}
+	if strings.Contains(command, "token=") {
+		t.Fatalf("expected install command not to put token in query string, got: %s", command)
+	}
+	if !strings.Contains(command, "/install.sh?name=web-1") {
+		t.Fatalf("expected install command to keep name query param, got: %s", command)
+	}
 }
 
 func TestLatencyMonitorCRUD(t *testing.T) {

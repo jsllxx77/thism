@@ -299,7 +299,7 @@ export const api = {
   services: (id: string) => req<{ services: ServiceCheck[] }>(`/api/nodes/${id}/services`),
   docker: (id: string) => req<DockerSnapshot>(`/api/nodes/${id}/docker`),
   register: (name: string) =>
-    req<{ id: string; token: string }>("/api/nodes/register", {
+    req<{ id: string; token: string; command: string }>("/api/nodes/register", {
       method: "POST",
       body: JSON.stringify({ name }),
     }),

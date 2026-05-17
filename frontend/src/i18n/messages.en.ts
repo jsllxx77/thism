@@ -360,6 +360,7 @@ export const messagesEn = {
       latencyMonitorsTitle: "Latency Monitors",
       latencyMonitorsDescription: "Unified latency history for every assigned monitor on this node.",
       latencyMonitorsEmpty: "No latency monitors are assigned to this node yet.",
+      averageLatencyLabel: "Avg latency:",
       lossLabel: "Loss:",
       jitterLabel: "Jitter:",
       rangeLabel: "Time range",

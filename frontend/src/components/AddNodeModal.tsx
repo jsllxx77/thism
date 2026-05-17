@@ -36,12 +36,8 @@ export function AddNodeModal({ onClose, onCreated }: Props) {
     setError("")
     try {
       const response = await api.register(name.trim())
-      const host = window.location.host
-      const scheme = window.location.protocol === "https:" ? "https" : "http"
-      const params = new URLSearchParams({ token: response.token, name: name.trim() })
-      const command = `curl -fsSL "${scheme}://${host}/install.sh?${params.toString()}" | bash`
 
-      setResult({ token: response.token, command })
+      setResult({ token: response.token, command: response.command })
       setStep(2)
       onCreated()
     } catch (requestError: unknown) {

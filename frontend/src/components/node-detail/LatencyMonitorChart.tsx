@@ -40,11 +40,15 @@ function formatPercent(value?: number | null): string {
   return `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`
 }
 
-function formatJitter(value?: number | null): string {
+function formatLatency(value?: number | null): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "—"
   }
   return `${value.toFixed(1)} ms`
+}
+
+function formatJitter(value?: number | null): string {
+  return formatLatency(value)
 }
 
 function TooltipContent({
@@ -137,6 +141,28 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
     }
     return latest
   }, [results])
+  const averageLatencyByMonitorID = useMemo(() => {
+    const totals = new Map<string, { sum: number; count: number }>()
+    const knownMonitorIDs = new Set(monitors.map((monitor) => monitor.id))
+
+    for (const result of results) {
+      if (!knownMonitorIDs.has(result.monitor_id) || !result.success || typeof result.latency_ms !== "number" || !Number.isFinite(result.latency_ms)) {
+        continue
+      }
+      const current = totals.get(result.monitor_id) ?? { sum: 0, count: 0 }
+      current.sum += result.latency_ms
+      current.count += 1
+      totals.set(result.monitor_id, current)
+    }
+
+    const averages = new Map<string, number>()
+    for (const [monitorID, total] of totals.entries()) {
+      if (total.count > 0) {
+        averages.set(monitorID, total.sum / total.count)
+      }
+    }
+    return averages
+  }, [monitors, results])
 
   const showDateInTimeLabels = range >= 86400
   const formatXAxis = (value: number) =>
@@ -161,25 +187,69 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
           <p className="text-xs text-slate-500 dark:text-slate-400">{t("nodeDetail.latencyMonitorsDescription")}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {monitors.map((monitor, index) => {
             const active = normalizedVisibleSeries[monitor.id] ?? true
+            const seriesColor = SERIES_COLORS[index % SERIES_COLORS.length]
+            const latestResult = latestResultByMonitorID.get(monitor.id)
             return (
               <button
                 key={monitor.id}
                 type="button"
                 aria-pressed={active}
                 onClick={() => setVisibleSeries((current) => ({ ...current, [monitor.id]: !(current[monitor.id] ?? true) }))}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`group flex min-h-[98px] flex-col rounded-2xl border px-3.5 py-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${
                   active
-                    ? "border-slate-300 bg-slate-100 text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-50"
-                    : "border-slate-200 bg-white/80 text-slate-500 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-400"
+                    ? "border-slate-300 bg-white/90 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-50"
+                    : "border-slate-200 bg-white/55 text-slate-500 opacity-70 dark:border-white/8 dark:bg-slate-950/55 dark:text-slate-400"
                 }`}
-                style={active ? { boxShadow: `inset 0 0 0 1px ${SERIES_COLORS[index % SERIES_COLORS.length]}33` } : undefined}
+                style={
+                  active
+                    ? {
+                        borderColor: `${seriesColor}66`,
+                        boxShadow: `inset 0 0 0 1px ${seriesColor}22, 0 10px 26px -20px ${seriesColor}`,
+                      }
+                    : undefined
+                }
               >
-                <span className="block text-left leading-tight">{monitor.name}</span>
-                <span className="mt-1 block text-[10px] font-medium leading-tight text-slate-500 dark:text-slate-400">
-                  {`${t("nodeDetail.lossLabel")} ${formatPercent(latestResultByMonitorID.get(monitor.id)?.loss_percent)}  ${t("nodeDetail.jitterLabel")} ${formatJitter(latestResultByMonitorID.get(monitor.id)?.jitter_ms)}`}
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: seriesColor, boxShadow: active ? `0 0 12px ${seriesColor}99` : undefined }}
+                    aria-hidden="true"
+                  />
+                  <span className="block min-w-0 truncate text-[13px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-slate-50">
+                    {monitor.name}
+                  </span>
+                </span>
+
+                <span className="mt-2.5 flex items-end justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-medium leading-none text-slate-500 dark:text-slate-400">
+                      {t("nodeDetail.averageLatencyLabel")}
+                    </span>{" "}
+                    <span className="mt-1 block text-[20px] font-semibold leading-none tracking-tight text-slate-950 dark:text-white tabular-nums">
+                      {formatLatency(averageLatencyByMonitorID.get(monitor.id))}
+                    </span>
+                  </span>
+                  <span className="grid min-w-[118px] grid-cols-2 gap-1.5">
+                    <span className="rounded-xl bg-slate-100/80 px-2 py-1.5 dark:bg-white/[0.04]">
+                      <span className="block text-[10px] font-medium leading-none text-slate-500 dark:text-slate-400">
+                        {t("nodeDetail.lossLabel")}
+                      </span>{" "}
+                      <span className="mt-1 block text-[12px] font-semibold leading-none text-slate-800 dark:text-slate-100 tabular-nums">
+                        {formatPercent(latestResult?.loss_percent)}
+                      </span>
+                    </span>
+                    <span className="rounded-xl bg-slate-100/80 px-2 py-1.5 dark:bg-white/[0.04]">
+                      <span className="block text-[10px] font-medium leading-none text-slate-500 dark:text-slate-400">
+                        {t("nodeDetail.jitterLabel")}
+                      </span>{" "}
+                      <span className="mt-1 block text-[12px] font-semibold leading-none text-slate-800 dark:text-slate-100 tabular-nums">
+                        {formatJitter(latestResult?.jitter_ms)}
+                      </span>
+                    </span>
+                  </span>
                 </span>
               </button>
             )

@@ -59,6 +59,28 @@ describe("latency monitor chart", () => {
     expect(toggle).toHaveTextContent("Jitter: 4.2 ms")
   })
 
+  it("renders each monitor's successful average latency inside its card for the selected range", () => {
+    render(
+      <LatencyMonitorChart
+        range={3600}
+        monitors={[
+          { id: "monitor-1", name: "Guangdong Telecom IPv4", type: "tcp", target: "gd-ct-v4.ip.zstaticcdn.com:80", interval_seconds: 60, auto_assign_new_nodes: true, assigned_node_count: 1, assigned_node_ids: ["node-1"], created_at: 1, updated_at: 1 },
+          { id: "monitor-2", name: "Beijing HTTP", type: "http", target: "https://example.com/healthz", interval_seconds: 60, auto_assign_new_nodes: true, assigned_node_count: 1, assigned_node_ids: ["node-1"], created_at: 1, updated_at: 1 },
+        ]}
+        results={[
+          { monitor_id: "monitor-1", node_id: "node-1", ts: 100, latency_ms: 20, success: true },
+          { monitor_id: "monitor-1", node_id: "node-1", ts: 160, latency_ms: 40, success: true },
+          { monitor_id: "monitor-2", node_id: "node-1", ts: 160, latency_ms: 60, success: true },
+          { monitor_id: "monitor-1", node_id: "node-1", ts: 220, latency_ms: null, success: false, error_message: "dial timeout" },
+        ]}
+      />
+    )
+
+    expect(screen.queryByLabelText(/Avg latency:/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Guangdong Telecom IPv4/i })).toHaveTextContent("Avg latency: 30.0 ms")
+    expect(screen.getByRole("button", { name: /Beijing HTTP/i })).toHaveTextContent("Avg latency: 60.0 ms")
+  })
+
   it("keeps each monitor as an independent series when timestamps are staggered", () => {
     const { chartData, seriesByMonitorID } = buildLatencyMonitorSeries(
       [
