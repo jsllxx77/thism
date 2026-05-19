@@ -334,6 +334,19 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	if strings.Contains(script, `systemctl enable --now thism-agent`) {
 		t.Fatalf("expected install script to avoid enable --now because it won't restart an already-running service, got: %s", script)
 	}
+	// Token must not appear on the ExecStart command line (would otherwise leak
+	// via /proc/<pid>/cmdline). The unit body should reference ${TOKEN} from
+	// EnvironmentFile, and the literal token value should only appear in the
+	// install-script TOKEN= assignment and the ${ENV_FILE} write block.
+	if strings.Contains(script, "ExecStart=/usr/local/bin/thism-agent --server ${WS_SCHEME}") {
+		t.Fatalf("expected install script to use EnvironmentFile rather than inline ws/token args, got: %s", script)
+	}
+	if !strings.Contains(script, "EnvironmentFile=/etc/default/thism-agent") {
+		t.Fatalf("expected install script to register an EnvironmentFile, got: %s", script)
+	}
+	if !strings.Contains(script, `install -m 0600 /dev/null "${ENV_FILE}"`) {
+		t.Fatalf("expected install script to create env file with 0600 mode, got: %s", script)
+	}
 }
 
 func TestFrontendRequiresAdminAuth(t *testing.T) {

@@ -2446,6 +2446,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"BASE=\"" + baseURL + "\"\n\n" +
 		"TARGET_BIN=\"/usr/local/bin/thism-agent\"\n" +
 		"VERSION_FILE=\"/usr/local/bin/.thism-agent.version\"\n" +
+		"ENV_FILE=\"/etc/default/thism-agent\"\n" +
 		"TMP_BIN=\"/usr/local/bin/.thism-agent.$$\"\n" +
 		"trap 'rm -f \"${TMP_BIN}\"' EXIT\n\n" +
 		"ARCH=$(uname -m)\n" +
@@ -2471,13 +2472,21 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"  https://*) WS_SCHEME=\"wss\" ;;\n" +
 		"esac\n" +
 		"WS_HOST=$(echo \"$BASE\" | sed 's|^https\\?://||')\n\n" +
-		"cat > /etc/systemd/system/thism-agent.service <<UNIT\n" +
+		"install -m 0600 /dev/null \"${ENV_FILE}\"\n" +
+		"{\n" +
+		"  printf 'SERVER=%s\\n' \"${WS_SCHEME}://${WS_HOST}\"\n" +
+		"  printf 'TOKEN=%s\\n' \"${TOKEN}\"\n" +
+		"  printf 'NAME=%s\\n' \"${NAME}\"\n" +
+		"} > \"${ENV_FILE}\"\n\n" +
+		"cat > /etc/systemd/system/thism-agent.service <<'UNIT'\n" +
 		"[Unit]\n" +
 		"Description=ThisM Agent\n" +
 		"After=network-online.target\n" +
 		"Wants=network-online.target\n\n" +
 		"[Service]\n" +
-		"ExecStart=/usr/local/bin/thism-agent --server ${WS_SCHEME}://${WS_HOST} --token ${TOKEN} --name ${NAME}\n" +
+		"EnvironmentFile=/etc/default/thism-agent\n" +
+		"UMask=0077\n" +
+		"ExecStart=/usr/local/bin/thism-agent --server ${SERVER} --token ${TOKEN} --name ${NAME}\n" +
 		"Restart=always\n" +
 		"RestartSec=5\n\n" +
 		"[Install]\n" +

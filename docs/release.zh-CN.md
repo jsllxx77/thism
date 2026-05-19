@@ -29,7 +29,20 @@ Docker 构建时会把统一构建元数据注入到二进制：
 
 从 v0.6.0 开始，agent 自更新通道要求每个替换二进制都附带有效的 Ed25519 签名（与 SHA-256 校验和并存）。**没有内嵌公钥的 agent 会拒绝任何更新（fail closed）**。
 
-如果你发布自己的构建（fork、内部镜像、自托管发行版），下面的步骤是必做的。官方公开镜像 `ghcr.io/thism-dev/thism` 出厂带项目自己的固定公钥，自托管者无法在不重新构建 agent 的前提下为它签发更新。
+上游 release 工作流（`.github/workflows/release.yml`）会在 repository 配置了下列 secret 后**自动**为每次发布签名：
+
+| Secret 名 | 值 |
+|----------|----|
+| `THISM_RELEASE_PUBLIC_KEY` | base64 Ed25519 公钥（`release.pub.b64` 内容）|
+| `THISM_RELEASE_PRIVATE_KEY` | base64 Ed25519 私钥（`release.priv.b64` 内容）|
+
+配置好两个 secret 后，每次推送 `v*` tag 都会构建出 `dist/` 中已包含签名 agent 和 `.sig` 文件的 Docker 镜像，并把同一组文件作为 release 资产附加到 GitHub Release。下游用户拉 `ghcr.io/thism-dev/thism:latest` 即可获得带签名校验的自更新，无需额外配置。
+
+若 release 工作流**未**配置这两个 secret，CI 会直接失败，避免静默地发布一份永远无法自更新的 agent。
+
+### Fork 项目
+
+如果你 fork 项目并发布自己的 GHCR 镜像，下面的步骤是必做的。官方公开镜像 `ghcr.io/thism-dev/thism` 出厂带上游项目自己的固定公钥，fork 无法在不重新构建 agent 的前提下为它签发更新。
 
 ### 一次性密钥生成
 

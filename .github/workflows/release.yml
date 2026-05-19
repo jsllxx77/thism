@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -15,6 +15,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Build signed agent binaries
+        env:
+          RELEASE_PUBLIC_KEY: ${{ secrets.THISM_RELEASE_PUBLIC_KEY }}
+          THISM_RELEASE_PRIVATE_KEY: ${{ secrets.THISM_RELEASE_PRIVATE_KEY }}
+        run: |
+          if [ -z "${RELEASE_PUBLIC_KEY}" ] || [ -z "${THISM_RELEASE_PRIVATE_KEY}" ]; then
+            echo "::error::THISM_RELEASE_PUBLIC_KEY and THISM_RELEASE_PRIVATE_KEY repository secrets are required for signed releases"
+            exit 1
+          fi
+          make build-sign-tool
+          RELEASE_PUBLIC_KEY="${RELEASE_PUBLIC_KEY}" make build-agent-all
+          ./bin/thism-sign sign-dist -dir dist
+
+      - name: Verify signed dist
+        run: |
+          test -f dist/thism-agent-linux-amd64
+          test -f dist/thism-agent-linux-arm64
+          test -f dist/thism-agent-linux-amd64.sig
+          test -f dist/thism-agent-linux-arm64.sig
+          ls -la dist/
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -59,3 +86,15 @@ jobs:
             THISM_VERSION=${{ steps.meta.outputs.version }}
             THISM_COMMIT=${{ github.sha }}
             THISM_BUILD_TIME=${{ steps.meta.outputs.build_time }}
+            PREBUILT_AGENTS=1
+
+      - name: Attach signed agents to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/thism-agent-linux-amd64
+            dist/thism-agent-linux-arm64
+            dist/thism-agent-linux-amd64.sig
+            dist/thism-agent-linux-arm64.sig
+            dist/thism-agent-linux-amd64.version
+            dist/thism-agent-linux-arm64.version

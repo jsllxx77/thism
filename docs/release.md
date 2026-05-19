@@ -29,7 +29,20 @@ Dev builds vs formal releases:
 
 Starting with v0.6.0, the agent self-update channel requires every replacement binary to carry a valid Ed25519 signature in addition to the SHA-256 hash. Agents that were built without a pinned public key refuse to apply any update — they fail closed.
 
-If you publish your own builds (forks, internal mirrors, self-hosted distributions), you must run the steps below; the upstream public image (`ghcr.io/thism-dev/thism`) ships with the project's own pinned key, and self-hosters cannot sign updates for it without rebuilding the agent.
+The upstream release workflow (`.github/workflows/release.yml`) signs every published agent binary automatically when the repository has the following secrets configured:
+
+| Secret | Value |
+|--------|-------|
+| `THISM_RELEASE_PUBLIC_KEY` | base64 Ed25519 public key (the bytes from `release.pub.b64`) |
+| `THISM_RELEASE_PRIVATE_KEY` | base64 Ed25519 private key (the bytes from `release.priv.b64`) |
+
+With both secrets configured, every `v*` tag push produces a Docker image whose `dist/` already contains signed agents plus matching `.sig` sidecar files, and the same files are attached to the GitHub Release as assets. Downstream users running `ghcr.io/thism-dev/thism:latest` get signed self-updates without any additional setup on their side.
+
+If the repository runs the release workflow **without** the secrets configured, the workflow fails fast — it refuses to publish an unsigned release rather than silently shipping agents that cannot self-update.
+
+### Forking the project
+
+If you fork the project and publish your own GHCR image, run the steps below; the upstream public image (`ghcr.io/thism-dev/thism`) ships with the upstream project's pinned key, and your fork cannot sign updates for that image without rebuilding the agent.
 
 ### One-time keypair setup
 
