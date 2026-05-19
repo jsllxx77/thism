@@ -30,6 +30,7 @@ import (
 	psnet "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/thism-dev/thism/internal/models"
+	"github.com/thism-dev/thism/internal/security/release"
 )
 
 const DefaultReportInterval = 5 * time.Second
@@ -241,6 +242,7 @@ type agentReleaseManifest struct {
 	TargetVersion        string `json:"target_version"`
 	DownloadURL          string `json:"download_url"`
 	SHA256               string `json:"sha256"`
+	Signature            string `json:"signature,omitempty"`
 	CheckIntervalSeconds int    `json:"check_interval_seconds"`
 }
 
@@ -305,6 +307,7 @@ func (c *Collector) maybeApplyRelease(manifest agentReleaseManifest, currentChec
 		TargetVersion: manifest.TargetVersion,
 		DownloadURL:   manifest.DownloadURL,
 		SHA256:        manifest.SHA256,
+		Signature:     manifest.Signature,
 	}
 	return c.selfUpdateFunc(cmd, func(models.UpdateJobTargetStatus, string, string) error { return nil })
 }
@@ -998,6 +1001,9 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 	actualChecksum := strings.ToLower(hex.EncodeToString(digest[:]))
 	if strings.ToLower(strings.TrimSpace(cmd.SHA256)) != actualChecksum {
 		return fmt.Errorf("sha256 mismatch")
+	}
+	if err := release.VerifyBinary(binaryData, cmd.Signature); err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
 	}
 	exePath, err := os.Executable()
 	if err != nil {

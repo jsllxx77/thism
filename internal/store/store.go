@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -98,7 +99,20 @@ func New(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	restrictSQLiteFilePermissions(path)
 	return s, nil
+}
+
+// restrictSQLiteFilePermissions tightens the on-disk permissions of the SQLite
+// database and its WAL/SHM sidecar files to 0600. The DB contains admin
+// password hashes and integration tokens, so it must not be world-readable.
+func restrictSQLiteFilePermissions(path string) {
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		_ = os.Chmod(p, 0o600)
+	}
 }
 
 func (s *Store) configureConnectionPragmas() error {
@@ -258,6 +272,7 @@ CREATE TABLE IF NOT EXISTS update_jobs (
     target_version TEXT NOT NULL,
     download_url   TEXT NOT NULL,
     sha256         TEXT NOT NULL,
+    signature      TEXT NOT NULL DEFAULT '',
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL DEFAULT 0,
     created_by     TEXT NOT NULL DEFAULT '',
@@ -332,7 +347,10 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 	if err := s.ensureColumn("monitor_results", "jitter_ms", "REAL"); err != nil {
 		return err
 	}
-	return s.ensureColumn("update_jobs", "updated_at", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.ensureColumn("update_jobs", "updated_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.ensureColumn("update_jobs", "signature", "TEXT NOT NULL DEFAULT ''")
 }
 
 func (s *Store) ensureColumn(table, column, definition string) error {
@@ -1337,9 +1355,9 @@ func (s *Store) CreateUpdateJob(job *models.UpdateJob) error {
 		updatedAt = createdAt
 	}
 	_, err := s.db.Exec(`
-INSERT INTO update_jobs (id, kind, target_version, download_url, sha256, created_at, updated_at, created_by, status)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, job.ID, job.Kind, job.TargetVersion, job.DownloadURL, job.SHA256, createdAt, updatedAt, job.CreatedBy, job.Status)
+INSERT INTO update_jobs (id, kind, target_version, download_url, sha256, signature, created_at, updated_at, created_by, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, job.ID, job.Kind, job.TargetVersion, job.DownloadURL, job.SHA256, job.Signature, createdAt, updatedAt, job.CreatedBy, job.Status)
 	return err
 }
 
@@ -1381,12 +1399,12 @@ VALUES (?, ?, ?, '', ?, '')
 
 func (s *Store) GetUpdateJob(jobID string) (*models.UpdateJob, error) {
 	row := s.db.QueryRow(`
-SELECT id, kind, target_version, download_url, sha256, created_at, updated_at, created_by, status
+SELECT id, kind, target_version, download_url, sha256, signature, created_at, updated_at, created_by, status
 FROM update_jobs WHERE id = ?
 `, jobID)
 
 	var job models.UpdateJob
-	if err := row.Scan(&job.ID, &job.Kind, &job.TargetVersion, &job.DownloadURL, &job.SHA256, &job.CreatedAt, &job.UpdatedAt, &job.CreatedBy, &job.Status); err != nil {
+	if err := row.Scan(&job.ID, &job.Kind, &job.TargetVersion, &job.DownloadURL, &job.SHA256, &job.Signature, &job.CreatedAt, &job.UpdatedAt, &job.CreatedBy, &job.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

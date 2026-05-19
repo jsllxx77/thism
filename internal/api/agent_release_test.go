@@ -135,3 +135,84 @@ func TestAgentReleaseManifestPrefersArtifactVersionFile(t *testing.T) {
 		t.Fatalf("expected target_version from artifact sidecar, got %#v", body["target_version"])
 	}
 }
+
+func TestAgentReleaseManifestExposesSignatureSidecar(t *testing.T) {
+	fixture := []byte("test-agent-release-binary")
+	tempDir := t.TempDir()
+	distDir := filepath.Join(tempDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("create dist dir: %v", err)
+	}
+	binaryPath := filepath.Join(distDir, "thism-agent-linux-amd64")
+	if err := os.WriteFile(binaryPath, fixture, 0o755); err != nil {
+		t.Fatalf("write agent fixture: %v", err)
+	}
+	const sigHex = "abcdef0123456789"
+	if err := os.WriteFile(binaryPath+".sig", []byte(sigHex+"\n"), 0o644); err != nil {
+		t.Fatalf("write sig sidecar: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-release?os=linux&arch=amd64", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["signature"] != sigHex {
+		t.Fatalf("expected signature %q, got %#v", sigHex, body["signature"])
+	}
+}
+
+func TestAgentReleaseManifestEmptySignatureWithoutSidecar(t *testing.T) {
+	fixture := []byte("test-agent-release-binary")
+	tempDir := t.TempDir()
+	distDir := filepath.Join(tempDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("create dist dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "thism-agent-linux-amd64"), fixture, 0o755); err != nil {
+		t.Fatalf("write agent fixture: %v", err)
+	}
+
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-release?os=linux&arch=amd64", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if sig, ok := body["signature"]; ok && sig != "" {
+		t.Fatalf("expected absent or empty signature, got %#v", sig)
+	}
+}

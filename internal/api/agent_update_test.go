@@ -209,6 +209,7 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 		"target_version": "1.2.3",
 		"download_url":   "https://updates.example/thism-agent",
 		"sha256":         "abc123",
+		"signature":      "deadbeef",
 	}
 	raw, _ := json.Marshal(requestBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/agent-updates", bytes.NewReader(raw))
@@ -261,6 +262,7 @@ func TestCreateBatchSelfUpdateMarksOfflineNodesSkipped(t *testing.T) {
 		"target_version": "1.2.3",
 		"download_url":   "https://updates.example/thism-agent",
 		"sha256":         "abc123",
+		"signature":      "deadbeef",
 	}
 	raw, _ := json.Marshal(requestBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/agent-updates", bytes.NewReader(raw))

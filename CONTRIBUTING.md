@@ -36,7 +36,7 @@ npm run build
 ### Full local verification
 
 ```bash
-make dev-restart TOKEN=thism2026 PORT=12026 ADMIN_USER=admin ADMIN_PASS=thism-admin-2026
+make dev-restart TOKEN="$(openssl rand -hex 32)" PORT=12026 ADMIN_USER=admin ADMIN_PASS="$(openssl rand -base64 24)"
 ```
 
 This rebuilds the frontend, rebuilds the Go server binary, and restarts the local development runtime.

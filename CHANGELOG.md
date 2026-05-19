@@ -6,6 +6,19 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-20
+
+### Security
+
+- Agent self-update binaries are now verified with Ed25519 signatures alongside the existing SHA-256 hash; the verifier public key is pinned into the agent at build time via `-X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64`, and agents without a pinned key now fail closed (refuse to apply any binary update). Includes a new `thism-sign` CLI for offline key generation and binary signing, and corresponding `make release-keygen` / `make sign-dist` targets.
+- Removed the hard-coded `thism2026` development admin token from the Makefile and the dev systemd unit. The Makefile dev targets now require a `TOKEN=` value, and the dev systemd unit now requires `/etc/default/thism-dev-server` to be provided rather than falling back to a baked-in default.
+- SQLite database file (and its `-wal` / `-shm` sidecars) are now created with mode `0600` on every store open, preventing other local users from reading admin password hashes, integration tokens, and node metadata.
+
+### Added
+
+- `signature` field on the agent self-update API (`/api/agent-updates`, `/api/agent-update-jobs`) and the auto-update manifest (`/api/agent-release`), populated from a sibling `<binary>.sig` file in the dist directory.
+- Lazy mount and dedicated Monitoring tab placement for the Latency Monitors card so the Agent tab opens faster.
+
 ### Fixed
 
 - Dashboard card rendering churn by removing the page-wide 1s refresh loop, memoizing node cards, and isolating live last-seen updates to the label itself

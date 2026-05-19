@@ -183,6 +183,7 @@ type AgentCommand struct {
 	TargetVersion string           `json:"target_version"`
 	DownloadURL   string           `json:"download_url"`
 	SHA256        string           `json:"sha256"`
+	Signature     string           `json:"signature,omitempty"`
 }
 
 type AgentCommandStatus struct {
@@ -198,6 +199,7 @@ type UpdateJob struct {
 	TargetVersion string           `json:"target_version"`
 	DownloadURL   string           `json:"download_url"`
 	SHA256        string           `json:"sha256"`
+	Signature     string           `json:"signature,omitempty"`
 	CreatedAt     int64            `json:"created_at"`
 	UpdatedAt     int64            `json:"updated_at"`
 	CreatedBy     string           `json:"created_by"`
@@ -219,6 +221,7 @@ type AgentCommandPayload struct {
 	TargetVersion string           `json:"target_version"`
 	DownloadURL   string           `json:"download_url"`
 	SHA256        string           `json:"sha256"`
+	Signature     string           `json:"signature,omitempty"`
 }
 
 type AgentCommandStatusPayload struct {

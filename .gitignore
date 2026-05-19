@@ -16,3 +16,6 @@ skills-lock.json
 docs/plans/
 .codex
 .omx/
+release.priv.b64
+release.pub.b64
+*.priv.b64

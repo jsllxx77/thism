@@ -2003,6 +2003,7 @@ type createAgentUpdateJobRequest struct {
 	TargetVersion string   `json:"target_version"`
 	DownloadURL   string   `json:"download_url"`
 	SHA256        string   `json:"sha256"`
+	Signature     string   `json:"signature"`
 }
 
 type updateJobResponse struct {
@@ -2043,7 +2044,7 @@ func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
 		return
 	}
-	if s == nil || len(req.NodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" {
+	if s == nil || len(req.NodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
 		return
 	}
@@ -2070,6 +2071,7 @@ func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store
 		TargetVersion: req.TargetVersion,
 		DownloadURL:   req.DownloadURL,
 		SHA256:        req.SHA256,
+		Signature:     strings.TrimSpace(req.Signature),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		CreatedBy:     "admin",
@@ -2094,6 +2096,7 @@ func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store
 			TargetVersion: req.TargetVersion,
 			DownloadURL:   req.DownloadURL,
 			SHA256:        req.SHA256,
+			Signature:     job.Signature,
 		}
 		if err := h.SendToAgent(nodeID, models.WSMessage{Type: "agent_command", Payload: cmd}); err != nil {
 			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusFailed, err.Error(), "")
@@ -2143,6 +2146,7 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 		TargetVersion string   `json:"target_version"`
 		DownloadURL   string   `json:"download_url"`
 		SHA256        string   `json:"sha256"`
+		Signature     string   `json:"signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -2161,7 +2165,7 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 		seen[nodeID] = struct{}{}
 		nodeIDs = append(nodeIDs, nodeID)
 	}
-	if len(nodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" {
+	if len(nodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
@@ -2171,7 +2175,7 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 		return
 	}
 	now := time.Now().Unix()
-	job := &models.UpdateJob{ID: jobID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: strings.TrimSpace(req.TargetVersion), DownloadURL: strings.TrimSpace(req.DownloadURL), SHA256: strings.TrimSpace(req.SHA256), CreatedAt: now, UpdatedAt: now, CreatedBy: "admin", Status: models.UpdateJobStatusPending}
+	job := &models.UpdateJob{ID: jobID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: strings.TrimSpace(req.TargetVersion), DownloadURL: strings.TrimSpace(req.DownloadURL), SHA256: strings.TrimSpace(req.SHA256), Signature: strings.TrimSpace(req.Signature), CreatedAt: now, UpdatedAt: now, CreatedBy: "admin", Status: models.UpdateJobStatusPending}
 	if err := s.CreateUpdateJob(job); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -2190,7 +2194,7 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, "node offline", "")
 			continue
 		}
-		msg := models.WSMessage{Type: "agent_command", Payload: models.AgentCommandPayload{JobID: job.ID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: job.TargetVersion, DownloadURL: job.DownloadURL, SHA256: job.SHA256}}
+		msg := models.WSMessage{Type: "agent_command", Payload: models.AgentCommandPayload{JobID: job.ID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: job.TargetVersion, DownloadURL: job.DownloadURL, SHA256: job.SHA256, Signature: job.Signature}}
 		if err := h.SendToAgent(nodeID, msg); err != nil {
 			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, err.Error(), "")
 			continue
@@ -2509,12 +2513,26 @@ func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	digest := sha256.Sum256(raw)
 	checksum := strings.ToLower(hex.EncodeToString(digest[:]))
 	targetVersion := resolveAgentTargetVersion(osName, arch)
+	signature := readAgentBinarySignature(filePath)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"target_version":         targetVersion,
 		"download_url":           buildDownloadURL(r, filename),
 		"sha256":                 checksum,
+		"signature":              signature,
 		"check_interval_seconds": int((30 * time.Minute).Seconds()),
 	})
+}
+
+// readAgentBinarySignature returns the hex-encoded Ed25519 signature
+// associated with the given binary path. The signature is read from a
+// sibling file named "<binaryPath>.sig". Returns an empty string when no
+// signature file is present; the agent will then refuse the update.
+func readAgentBinarySignature(binaryPath string) string {
+	raw, err := os.ReadFile(binaryPath + ".sig")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func resolveAgentBinaryFilename(osName, arch string) (string, bool) {
