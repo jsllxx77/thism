@@ -6,6 +6,18 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-20
+
+### Fixed
+
+- The upstream Docker image previously shipped unsigned agents with no pinned release public key, so every user who installed via the standard "Add Node → install command → bash" flow ended up with an agent that could install and connect but never self-update. The Docker build now consumes pre-signed agents produced by the release workflow (gated on the `THISM_RELEASE_PUBLIC_KEY` and `THISM_RELEASE_PRIVATE_KEY` repository secrets), and the workflow fails fast rather than publishing an unsigned image.
+- The systemd unit emitted by the panel's install script no longer places the node token on the `ExecStart` command line. The install script now writes `/etc/default/thism-agent` (mode 0600) and the unit references it via `EnvironmentFile=`, so the token no longer leaks via `/proc/<pid>/cmdline`.
+
+### Changed
+
+- `.github/workflows/release.yml` now requires both signing secrets, builds and signs the agent binaries with `thism-sign` before invoking Docker Buildx, and attaches the signed binaries plus `.sig` sidecars to the GitHub Release.
+- `Dockerfile` accepts `PREBUILT_AGENTS` and `RELEASE_PUBLIC_KEY` build args. CI uses `PREBUILT_AGENTS=1` to consume the pre-signed dist artifacts; local `docker build` defaults to compiling the agents in-container without a pinned key (self-update will fail closed, matching the v0.6.0 contract).
+
 ## [0.6.0] - 2026-05-20
 
 ### Security
