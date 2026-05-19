@@ -106,5 +106,6 @@ See [Release flow](docs/release.md) for the full workflow, key rotation, and fai
 - [systemd deployment templates](docs/systemd.md): use the bundled unit files for manual host installs
 - [Development workflow](docs/development.md): local contributor loop, frontend validation, and test/build commands
 - [Release flow](docs/release.md): tag-driven release process and published image tags
+- [Security roadmap](docs/security-roadmap.md): outstanding hardening work and history of what shipped in 0.6.x
 - [Architecture overview](docs/architecture.md): server, agent, transport, storage, and deployment model
 - [Contributing](CONTRIBUTING.md): repository contribution guidelines
