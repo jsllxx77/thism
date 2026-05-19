@@ -211,8 +211,14 @@ describe("settings section tabs", () => {
     })
 
     expect(await screen.findByRole("heading", { name: "Automatic Updates", level: 3 })).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: "Latency Monitors", level: 3 })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Latency Monitors", level: 3 })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /add node/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("tab", { name: "Monitoring" }))
+    await waitFor(() => {
+      expect(window.location.search).toBe("?section=monitoring")
+    })
+    expect(await screen.findByRole("heading", { name: "Latency Monitors", level: 3 })).toBeInTheDocument()
   })
 
   it("preserves unsaved notification form input across section switches", async () => {

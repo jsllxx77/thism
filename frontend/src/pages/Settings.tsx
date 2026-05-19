@@ -339,12 +339,12 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
         <TabsContent value="agent" {...getTabsContentProps("agent")} hidden={activeSection !== "agent"} className="space-y-6">
           <AgentAutoUpdateCard nodes={effectiveNodes} />
-          <LatencyMonitorsCard nodes={effectiveNodes} />
         </TabsContent>
 
         <TabsContent value="monitoring" {...getTabsContentProps("monitoring")} hidden={activeSection !== "monitoring"} className="space-y-6">
           <MetricsRetentionCard />
           <DashboardVisibilityCard />
+          <LatencyMonitorsCard nodes={effectiveNodes} />
         </TabsContent>
 
         <TabsContent value="alerts" {...getTabsContentProps("alerts")} hidden={activeSection !== "alerts"} className="space-y-6">
