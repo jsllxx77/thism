@@ -3,7 +3,9 @@ Description=ThisM Agent
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/thism-agent --server ws://YOUR_SERVER_HOST:8080 --token YOUR_NODE_TOKEN --name YOUR_NODE_NAME
+EnvironmentFile=/etc/default/thism-agent
+UMask=0077
+ExecStart=/usr/local/bin/thism-agent --server ${SERVER} --token ${TOKEN} --name ${NAME}
 Restart=always
 RestartSec=5
 

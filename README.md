@@ -10,6 +10,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Lightweight Linux agents for monitored nodes
 - SQLite storage with no external database requirement
 - Server-hosted agent install script and release manifest
+- Ed25519-signed agent self-updates (fail-closed when the public key is missing)
 - Built-in ICMP, TCP, and HTTP latency monitoring from selected nodes
 - Prebuilt GHCR image plus Docker Compose deployment path
 
@@ -84,6 +85,20 @@ To configure a monitor:
 3. Open `Latency Monitors`.
 4. Create a monitor, choose the target, interval, and nodes that should run it.
 5. Open a node detail page to view the latency chart for the monitors assigned to that node.
+
+## Releases and Update Integrity
+
+Starting with v0.6.0, ThisM agents verify every self-update binary with an Ed25519 signature in addition to the SHA-256 hash. Agents built without a pinned release public key refuse to apply any update (fail closed).
+
+If you only run the upstream Docker image, no extra setup is needed; the upstream agents ship with the project's pinned public key.
+
+If you publish your own builds (fork, internal mirror, self-hosted distribution), you must:
+
+1. Generate a release keypair offline (`make release-keygen`) and keep the private key off the server.
+2. Build agents with the public key baked in (`RELEASE_PUBLIC_KEY="$(cat release.pub.b64)" make build-agent-all`).
+3. Sign the produced binaries (`make sign-dist`) so the manifest endpoint can serve the `.sig` sidecar files.
+
+See [Release flow](docs/release.md) for the full workflow, key rotation, and failure modes.
 
 ## More Documentation
 
