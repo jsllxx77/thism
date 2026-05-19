@@ -6,6 +6,23 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-20
+
+### Security
+
+- Both the server and the agent now accept their sensitive flags from `THISM_*` environment variables (`THISM_TOKEN`, `THISM_ADMIN_USER`, `THISM_ADMIN_PASS`, `THISM_AGENT_SERVER`, `THISM_AGENT_TOKEN`, `THISM_AGENT_NAME`). The bundled systemd templates and the in-product install script invoke the binaries with no flags at all, so the secrets never reach `/proc/<pid>/cmdline`. Existing deployments that still use `--token` on `ExecStart=` keep working unchanged; flags take precedence over env vars when both are set.
+
+### Changed
+
+- `deploy/thism-server.service` and `deploy/thism-agent.service` no longer place credential flags on `ExecStart=`; they rely on `EnvironmentFile=/etc/default/thism-*` providing `THISM_*` variables.
+- The install script emitted by the panel writes `/etc/default/thism-agent` with `THISM_AGENT_*` keys and registers a unit whose `ExecStart=` is just `/usr/local/bin/thism-agent`.
+- `docs/systemd.md` (en + zh) document the new flow, explain why `ExecStart=... --token ${TOKEN} ...` still leaks via `/proc/cmdline` even with `EnvironmentFile=`, and show how to migrate existing installs.
+
+### Upgrading
+
+- Server: replace `/etc/systemd/system/thism-server.service` with the new template and rewrite `/etc/default/thism-server` so each key is prefixed with `THISM_` (e.g. `TOKEN=` becomes `THISM_TOKEN=`). Then `systemctl daemon-reload` + `systemctl restart thism-server`.
+- Agents: re-run the install command from the panel; the new script writes the new env file and unit. Agents that don't get re-installed keep working with their old `--token`-on-`ExecStart` unit (no functional regression, only the `/proc/cmdline` leak persists for them).
+
 ## [0.6.1] - 2026-05-20
 
 ### Fixed

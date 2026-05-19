@@ -5,7 +5,7 @@ After=network.target
 [Service]
 EnvironmentFile=/etc/default/thism-server
 UMask=0077
-ExecStart=/usr/local/bin/thism-server --port ${PORT} --db /var/lib/thism/data.db --token ${TOKEN} --admin-user ${ADMIN_USER} --admin-pass ${ADMIN_PASS}
+ExecStart=/usr/local/bin/thism-server
 Restart=always
 RestartSec=5
 User=thism

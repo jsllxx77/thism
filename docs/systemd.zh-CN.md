@@ -2,7 +2,7 @@
 
 [English](systemd.md) | 简体中文
 
-`deploy/` 下的文件是用于手动主机部署的模板。两个 unit 文件都通过 `EnvironmentFile=` 加载凭据，**不会**把 token/密码放在 `ExecStart` 命令行——命令行参数会通过 `/proc/<pid>/cmdline` 暴露给本机所有用户，所以管理 token 和管理员密码必须避开命令行。
+`deploy/` 下的文件是用于手动主机部署的模板。两个 unit 文件都通过 `EnvironmentFile=` 加载凭据，`ExecStart` **不**传任何敏感参数——两个二进制都从 `THISM_*` 环境变量读取。这样 token 和管理员密码既不在 unit 文件里，也不在 `/proc/<pid>/cmdline` 里。
 
 启用前请先确认：
 
@@ -17,10 +17,10 @@ sudo cp deploy/thism-server.service /etc/systemd/system/
 
 sudo install -m 0600 /dev/null /etc/default/thism-server
 sudo tee /etc/default/thism-server >/dev/null <<EOF
-PORT=8080
-TOKEN=$(openssl rand -hex 32)
-ADMIN_USER=admin
-ADMIN_PASS=$(openssl rand -base64 24)
+THISM_PORT=8080
+THISM_TOKEN=$(openssl rand -hex 32)
+THISM_ADMIN_USER=admin
+THISM_ADMIN_PASS=$(openssl rand -base64 24)
 EOF
 
 sudo useradd --system --home-dir /var/lib/thism --shell /usr/sbin/nologin thism 2>/dev/null || true
@@ -30,7 +30,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now thism-server
 ```
 
-请记录 `/etc/default/thism-server` 里生成的 `TOKEN` 和 `ADMIN_PASS`，登录 Web UI 与调用管理 API 都需要它们。
+请记录 `/etc/default/thism-server` 里生成的 `THISM_TOKEN` 和 `THISM_ADMIN_PASS`，登录 Web UI 与调用管理 API 都需要它们。
 
 ## Agent Unit
 
@@ -39,9 +39,9 @@ sudo cp deploy/thism-agent.service /etc/systemd/system/
 
 sudo install -m 0600 /dev/null /etc/default/thism-agent
 sudo tee /etc/default/thism-agent >/dev/null <<EOF
-SERVER=ws://YOUR_SERVER_HOST:8080
-TOKEN=YOUR_NODE_TOKEN
-NAME=YOUR_NODE_NAME
+THISM_AGENT_SERVER=ws://YOUR_SERVER_HOST:8080
+THISM_AGENT_TOKEN=YOUR_NODE_TOKEN
+THISM_AGENT_NAME=YOUR_NODE_NAME
 EOF
 
 sudo systemctl daemon-reload
@@ -52,4 +52,6 @@ sudo systemctl enable --now thism-agent
 
 ## 为什么不把凭据放在 `ExecStart` 上？
 
-`ExecStart=... --token YOUR_TOKEN ...` 会出现在 `/proc/<pid>/cmdline`，Linux 默认配置下该文件全局可读——任何本机用户（包括无特权服务账户）都能读到。`EnvironmentFile=` 加 `0600` 权限的 env 文件配合，才能把凭据限制为只有 root 和服务本身可见。
+即便配置了 `EnvironmentFile=`，如果 unit 写成 `ExecStart=... --token ${TOKEN} ...`，systemd 会在 exec **前**把 `${TOKEN}` 展开成真值传给 argv，于是 `/proc/<pid>/cmdline` 仍然能读到 token。Linux 默认配置下该文件全局可读——任何本机用户都能读到。改走 `THISM_*` 环境变量路径，二进制直接从进程环境拿凭据，命令行上彻底不出现。
+
+两个二进制仍保留对应的 CLI flag（`--token`、`--admin-user` 等）用于向后兼容，但模板和系统内的安装脚本不再使用它们。

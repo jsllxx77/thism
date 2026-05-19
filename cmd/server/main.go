@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -27,20 +28,31 @@ func openCountryResolver(dbPath string) geo.CountryResolver {
 	return countryResolver
 }
 
+// envOr returns the value of the named environment variable when set,
+// otherwise the provided fallback. Used so flag defaults can read
+// sensitive values from the environment, keeping them off the command
+// line (and out of /proc/<pid>/cmdline).
+func envOr(name, fallback string) string {
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+	return fallback
+}
+
 func main() {
-	port := flag.String("port", "12026", "HTTP port")
-	dbPath := flag.String("db", "./thism.db", "SQLite database path")
-	adminToken := flag.String("token", "", "Admin token for API auth")
-	adminUser := flag.String("admin-user", "", "Admin username for login page authentication")
-	adminPass := flag.String("admin-pass", "", "Admin password for login page authentication")
-	geoIPDBPath := flag.String("geoip-db", geo.DefaultDBPath, "Path to local GeoIP mmdb database")
+	port := flag.String("port", envOr("THISM_PORT", "12026"), "HTTP port")
+	dbPath := flag.String("db", envOr("THISM_DB", "./thism.db"), "SQLite database path")
+	adminToken := flag.String("token", os.Getenv("THISM_TOKEN"), "Admin token for API auth (env: THISM_TOKEN)")
+	adminUser := flag.String("admin-user", os.Getenv("THISM_ADMIN_USER"), "Admin username for login page authentication (env: THISM_ADMIN_USER)")
+	adminPass := flag.String("admin-pass", os.Getenv("THISM_ADMIN_PASS"), "Admin password for login page authentication (env: THISM_ADMIN_PASS)")
+	geoIPDBPath := flag.String("geoip-db", envOr("THISM_GEOIP_DB", geo.DefaultDBPath), "Path to local GeoIP mmdb database")
 	flag.Parse()
 
 	if *adminToken == "" {
-		log.Fatal("--token is required")
+		log.Fatal("admin token is required: pass --token or set THISM_TOKEN")
 	}
 	if (*adminUser == "") != (*adminPass == "") {
-		log.Fatal("--admin-user and --admin-pass must be provided together")
+		log.Fatal("admin-user and admin-pass must be provided together (via flags or THISM_ADMIN_USER / THISM_ADMIN_PASS)")
 	}
 
 	s, err := store.New(*dbPath)

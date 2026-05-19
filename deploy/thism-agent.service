@@ -5,7 +5,7 @@ After=network.target
 [Service]
 EnvironmentFile=/etc/default/thism-agent
 UMask=0077
-ExecStart=/usr/local/bin/thism-agent --server ${SERVER} --token ${TOKEN} --name ${NAME}
+ExecStart=/usr/local/bin/thism-agent
 Restart=always
 RestartSec=5
 

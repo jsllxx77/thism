@@ -2474,9 +2474,9 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"WS_HOST=$(echo \"$BASE\" | sed 's|^https\\?://||')\n\n" +
 		"install -m 0600 /dev/null \"${ENV_FILE}\"\n" +
 		"{\n" +
-		"  printf 'SERVER=%s\\n' \"${WS_SCHEME}://${WS_HOST}\"\n" +
-		"  printf 'TOKEN=%s\\n' \"${TOKEN}\"\n" +
-		"  printf 'NAME=%s\\n' \"${NAME}\"\n" +
+		"  printf 'THISM_AGENT_SERVER=%s\\n' \"${WS_SCHEME}://${WS_HOST}\"\n" +
+		"  printf 'THISM_AGENT_TOKEN=%s\\n' \"${TOKEN}\"\n" +
+		"  printf 'THISM_AGENT_NAME=%s\\n' \"${NAME}\"\n" +
 		"} > \"${ENV_FILE}\"\n\n" +
 		"cat > /etc/systemd/system/thism-agent.service <<'UNIT'\n" +
 		"[Unit]\n" +
@@ -2486,7 +2486,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"[Service]\n" +
 		"EnvironmentFile=/etc/default/thism-agent\n" +
 		"UMask=0077\n" +
-		"ExecStart=/usr/local/bin/thism-agent --server ${SERVER} --token ${TOKEN} --name ${NAME}\n" +
+		"ExecStart=/usr/local/bin/thism-agent\n" +
 		"Restart=always\n" +
 		"RestartSec=5\n\n" +
 		"[Install]\n" +

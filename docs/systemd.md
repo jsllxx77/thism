@@ -2,7 +2,7 @@
 
 [简体中文](systemd.zh-CN.md)
 
-The files in `deploy/` are templates for manual host installs. Both unit files load their secrets from an `EnvironmentFile=` instead of placing them on the `ExecStart` command line — command-line arguments are exposed to every local user via `/proc/<pid>/cmdline`, which is why tokens and admin passwords must not live there.
+The files in `deploy/` are templates for manual host installs. Both unit files load their credentials from an `EnvironmentFile=` and pass **no** sensitive flags on `ExecStart` — both binaries read `THISM_*` environment variables. This keeps tokens and admin passwords out of both the unit file on disk and `/proc/<pid>/cmdline`.
 
 Before enabling them:
 
@@ -17,10 +17,10 @@ sudo cp deploy/thism-server.service /etc/systemd/system/
 
 sudo install -m 0600 /dev/null /etc/default/thism-server
 sudo tee /etc/default/thism-server >/dev/null <<EOF
-PORT=8080
-TOKEN=$(openssl rand -hex 32)
-ADMIN_USER=admin
-ADMIN_PASS=$(openssl rand -base64 24)
+THISM_PORT=8080
+THISM_TOKEN=$(openssl rand -hex 32)
+THISM_ADMIN_USER=admin
+THISM_ADMIN_PASS=$(openssl rand -base64 24)
 EOF
 
 sudo useradd --system --home-dir /var/lib/thism --shell /usr/sbin/nologin thism 2>/dev/null || true
@@ -30,7 +30,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now thism-server
 ```
 
-Record the generated `TOKEN` and `ADMIN_PASS` from `/etc/default/thism-server`; you will need them to log into the web UI and to call the admin API.
+Record the generated `THISM_TOKEN` and `THISM_ADMIN_PASS` from `/etc/default/thism-server`; you will need them to log into the web UI and to call the admin API.
 
 ## Agent Unit
 
@@ -39,9 +39,9 @@ sudo cp deploy/thism-agent.service /etc/systemd/system/
 
 sudo install -m 0600 /dev/null /etc/default/thism-agent
 sudo tee /etc/default/thism-agent >/dev/null <<EOF
-SERVER=ws://YOUR_SERVER_HOST:8080
-TOKEN=YOUR_NODE_TOKEN
-NAME=YOUR_NODE_NAME
+THISM_AGENT_SERVER=ws://YOUR_SERVER_HOST:8080
+THISM_AGENT_TOKEN=YOUR_NODE_TOKEN
+THISM_AGENT_NAME=YOUR_NODE_NAME
 EOF
 
 sudo systemctl daemon-reload
@@ -52,4 +52,7 @@ sudo systemctl enable --now thism-agent
 
 ## Why not put secrets on `ExecStart`?
 
-`ExecStart=... --token YOUR_TOKEN ...` ends up in `/proc/<pid>/cmdline`, which is world-readable on a default Linux install. Any local user — including unprivileged service accounts — can read it. The `EnvironmentFile=` pattern, combined with `0600` ownership on the env file, keeps the secret accessible only to root and to the service itself.
+Even with `EnvironmentFile=`, a unit body of `ExecStart=... --token ${TOKEN} ...` causes systemd to expand `${TOKEN}` **before** exec, so the actual argv contains the literal secret. That argv is then visible via `/proc/<pid>/cmdline`, which is world-readable on a default Linux install. The `THISM_*` env-var read path lets the binary pick up credentials from its environment without ever putting them on the command line.
+
+Both binaries accept the equivalent CLI flags (`--token`, `--admin-user`, etc.) for backward compatibility, but the templates and the in-product install script no longer use them.
+
