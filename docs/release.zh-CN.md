@@ -10,9 +10,9 @@
 
 Release 工作流只会在推送 `v*` 标签时执行，并发布：
 
-- `ghcr.io/thism-dev/thism:v1.4.0`
-- `ghcr.io/thism-dev/thism:sha-<shortsha>`
-- `ghcr.io/thism-dev/thism:latest`
+- `ghcr.io/jsllxx77/thism:v1.4.0`
+- `ghcr.io/jsllxx77/thism:sha-<shortsha>`
+- `ghcr.io/jsllxx77/thism:latest`
 
 Docker 构建时会把统一构建元数据注入到二进制：
 
@@ -36,13 +36,13 @@ Docker 构建时会把统一构建元数据注入到二进制：
 | `THISM_RELEASE_PUBLIC_KEY` | base64 Ed25519 公钥（`release.pub.b64` 内容）|
 | `THISM_RELEASE_PRIVATE_KEY` | base64 Ed25519 私钥（`release.priv.b64` 内容）|
 
-配置好两个 secret 后，每次推送 `v*` tag 都会构建出 `dist/` 中已包含签名 agent 和 `.sig` 文件的 Docker 镜像，并把同一组文件作为 release 资产附加到 GitHub Release。下游用户拉 `ghcr.io/thism-dev/thism:latest` 即可获得带签名校验的自更新，无需额外配置。
+配置好两个 secret 后，每次推送 `v*` tag 都会构建出 `dist/` 中已包含签名 agent 和 `.sig` 文件的 Docker 镜像，并把同一组文件作为 release 资产附加到 GitHub Release。下游用户拉 `ghcr.io/jsllxx77/thism:latest` 即可获得带签名校验的自更新，无需额外配置。
 
 若 release 工作流**未**配置这两个 secret，CI 会直接失败，避免静默地发布一份永远无法自更新的 agent。
 
 ### Fork 项目
 
-如果你 fork 项目并发布自己的 GHCR 镜像，下面的步骤是必做的。官方公开镜像 `ghcr.io/thism-dev/thism` 出厂带上游项目自己的固定公钥，fork 无法在不重新构建 agent 的前提下为它签发更新。
+如果你 fork 项目并发布自己的 GHCR 镜像，下面的步骤是必做的。项目公开镜像 `ghcr.io/jsllxx77/thism` 出厂带本项目自己的固定公钥，fork 无法在不重新构建 agent 的前提下为它签发更新。
 
 ### 一次性密钥生成
 

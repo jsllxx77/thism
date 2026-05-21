@@ -1,6 +1,6 @@
 services:
   thism-server:
-    image: ${THISM_IMAGE:-ghcr.io/thism-dev/thism:latest}
+    image: ${THISM_IMAGE:-ghcr.io/jsllxx77/thism:latest}
     container_name: thism-server
     ports:
       - "${THISM_PORT:-8080}:8080"

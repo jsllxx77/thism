@@ -19,7 +19,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 ### One-command Docker Compose install
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/install-compose.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/install-compose.sh)
 ```
 
 The installer will:
@@ -27,7 +27,7 @@ The installer will:
 1. Create a deployment directory
 2. Download `compose.yaml` and `.env.example`
 3. Generate a random admin password and API token on first run
-4. Start `thism-server` from `ghcr.io/thism-dev/thism:latest`
+4. Start `thism-server` from `ghcr.io/jsllxx77/thism:latest`
 
 Prerequisites:
 
@@ -42,8 +42,8 @@ The generated credentials are stored in `~/thism-deploy/.env`. Treat that file a
 ```bash
 mkdir -p ~/thism-deploy
 cd ~/thism-deploy
-curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/docker-compose.yml -o compose.yaml
-curl -fsSL https://raw.githubusercontent.com/thism-dev/thism/main/deploy/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/docker-compose.yml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/.env.example -o .env
 
 # edit .env before first start
 docker compose up -d
@@ -81,7 +81,7 @@ Current monitor types:
 To configure a monitor:
 
 1. Open `Settings`.
-2. Switch to the `Agent` section.
+2. Switch to the `Monitoring` section.
 3. Open `Latency Monitors`.
 4. Create a monitor, choose the target, interval, and nodes that should run it.
 5. Open a node detail page to view the latency chart for the monitors assigned to that node.

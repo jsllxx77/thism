@@ -25,7 +25,7 @@ make build
 默认发布镜像：
 
 ```bash
-ghcr.io/thism-dev/thism:latest
+ghcr.io/jsllxx77/thism:latest
 ```
 
 无需 Compose，直接运行：
@@ -33,7 +33,7 @@ ghcr.io/thism-dev/thism:latest
 ```bash
 docker run --name thism-server -p 8080:8080 \
   -v thism-data:/data \
-  ghcr.io/thism-dev/thism:latest \
+  ghcr.io/jsllxx77/thism:latest \
   --port 8080 --db /data/thism.db --token your-admin-token \
   --admin-user admin --admin-pass strong-password
 ```

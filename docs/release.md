@@ -10,9 +10,9 @@ Formal releases are tag-driven only:
 
 The release workflow runs only for pushed `v*` tags and publishes:
 
-- `ghcr.io/thism-dev/thism:v1.4.0`
-- `ghcr.io/thism-dev/thism:sha-<shortsha>`
-- `ghcr.io/thism-dev/thism:latest`
+- `ghcr.io/jsllxx77/thism:v1.4.0`
+- `ghcr.io/jsllxx77/thism:sha-<shortsha>`
+- `ghcr.io/jsllxx77/thism:latest`
 
 Build metadata is injected into the binaries during Docker builds:
 
@@ -36,13 +36,13 @@ The upstream release workflow (`.github/workflows/release.yml`) signs every publ
 | `THISM_RELEASE_PUBLIC_KEY` | base64 Ed25519 public key (the bytes from `release.pub.b64`) |
 | `THISM_RELEASE_PRIVATE_KEY` | base64 Ed25519 private key (the bytes from `release.priv.b64`) |
 
-With both secrets configured, every `v*` tag push produces a Docker image whose `dist/` already contains signed agents plus matching `.sig` sidecar files, and the same files are attached to the GitHub Release as assets. Downstream users running `ghcr.io/thism-dev/thism:latest` get signed self-updates without any additional setup on their side.
+With both secrets configured, every `v*` tag push produces a Docker image whose `dist/` already contains signed agents plus matching `.sig` sidecar files, and the same files are attached to the GitHub Release as assets. Downstream users running `ghcr.io/jsllxx77/thism:latest` get signed self-updates without any additional setup on their side.
 
 If the repository runs the release workflow **without** the secrets configured, the workflow fails fast — it refuses to publish an unsigned release rather than silently shipping agents that cannot self-update.
 
 ### Forking the project
 
-If you fork the project and publish your own GHCR image, run the steps below; the upstream public image (`ghcr.io/thism-dev/thism`) ships with the upstream project's pinned key, and your fork cannot sign updates for that image without rebuilding the agent.
+If you fork the project and publish your own GHCR image, run the steps below; the project image (`ghcr.io/jsllxx77/thism`) ships with this project's pinned key, and your fork cannot sign updates for that image without rebuilding the agent.
 
 ### One-time keypair setup
 

@@ -25,7 +25,7 @@ Open `http://localhost:8080` in your browser. You will be redirected to `/login`
 Published runtime image:
 
 ```bash
-ghcr.io/thism-dev/thism:latest
+ghcr.io/jsllxx77/thism:latest
 ```
 
 Run it without Compose:
@@ -33,7 +33,7 @@ Run it without Compose:
 ```bash
 docker run --name thism-server -p 8080:8080 \
   -v thism-data:/data \
-  ghcr.io/thism-dev/thism:latest \
+  ghcr.io/jsllxx77/thism:latest \
   --port 8080 --db /data/thism.db --token your-admin-token \
   --admin-user admin --admin-pass strong-password
 ```

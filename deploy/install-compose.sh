@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-THISM_GITHUB_REPO="${THISM_GITHUB_REPO:-thism-dev/thism}"
+THISM_GITHUB_REPO="${THISM_GITHUB_REPO:-jsllxx77/thism}"
 THISM_REF="${THISM_REF:-main}"
-THISM_IMAGE="${THISM_IMAGE:-ghcr.io/thism-dev/thism:latest}"
+THISM_IMAGE="${THISM_IMAGE:-ghcr.io/jsllxx77/thism:latest}"
 THISM_INSTALL_DIR="${THISM_INSTALL_DIR:-$HOME/thism-deploy}"
 THISM_PORT="${THISM_PORT:-8080}"
 THISM_ADMIN_USER="${THISM_ADMIN_USER:-admin}"
