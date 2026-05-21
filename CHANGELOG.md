@@ -6,6 +6,18 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-21
+
+### Added
+
+- Added `deploy/uninstall-agent.sh` for one-command cleanup of a monitored host's local agent files, systemd service, environment file, and version marker. The script and README remind operators to delete the node from the ThisM panel separately if it should no longer be listed.
+- Added `deploy/uninstall-server.sh` for one-command server cleanup across the Docker Compose and manual systemd deployment paths. The script stops the server and removes local service/deployment files while preserving server data by default; set `THISM_REMOVE_DATA=1` to remove stored data as well.
+
+### Changed
+
+- Updated README install links, Docker image references, and release docs to use the active `jsllxx77/thism` GitHub and GHCR coordinates.
+- Updated the latency monitor setup steps to point to the `Monitoring` settings section.
+
 ## [0.6.2] - 2026-05-20
 
 ### Security
