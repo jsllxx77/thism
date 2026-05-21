@@ -68,6 +68,14 @@ docker compose up -d
 
 如果节点已经存在，之后需要再次获取命令，可以进入 `设置` -> `节点管理`，在对应节点行点击 `获取脚本`。
 
+如需在被监控 Linux 主机上卸载 agent：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/uninstall-agent.sh)
+```
+
+该脚本会删除本机的 `systemd` 服务、环境配置文件、agent 二进制和版本文件。它不会删除 ThisM 服务端里的节点记录。如果不想让该节点继续显示在面板中，还需要进入 `设置` -> `节点管理` 手动删除对应节点。
+
 ## 延迟监测
 
 ThisM 支持由 agent 主动执行延迟探测，并在节点详情页展示延迟曲线。

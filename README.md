@@ -68,6 +68,14 @@ The generated command installs `thism-agent` into `/usr/local/bin`, writes a `sy
 
 If the node already exists and you need the command again, open `Settings` -> `Node Management` and click `Get Script` on that node row.
 
+To uninstall an agent from a monitored Linux host:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/uninstall-agent.sh)
+```
+
+This removes the local `systemd` service, environment file, agent binary, and version file. It does not delete the node record from the ThisM server. If you no longer want the node listed in the panel, open `Settings` -> `Node Management` and delete it there as well.
+
 ## Latency Monitoring
 
 ThisM can run active latency checks from your agents and plot the results on the node detail page.
