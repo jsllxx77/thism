@@ -37,6 +37,14 @@ When it finishes, open `http://<server-ip-or-domain>:8080` from your browser and
 
 The generated credentials are stored in `~/thism-deploy/.env`. Treat that file as sensitive because it contains the API token and the web UI administrator password.
 
+To uninstall the server from the host:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/uninstall-server.sh)
+```
+
+The uninstall script stops the server and removes the local service/deployment files. It preserves Docker volume data and `/var/lib/thism` by default. To remove stored server data as well, run it with `THISM_REMOVE_DATA=1`. Agents installed on monitored hosts are not removed automatically; run the agent uninstall script on each host if needed.
+
 ### Manual Docker Compose deployment
 
 ```bash

@@ -37,6 +37,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/i
 
 生成的凭据会保存在 `~/thism-deploy/.env`。这个文件包含 API Token 和 Web 管理员密码，应按敏感文件妥善保管。
 
+如需在当前主机上卸载 server：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/uninstall-server.sh)
+```
+
+卸载脚本会停止 server，并删除本机服务/部署文件。默认会保留 Docker 数据卷和 `/var/lib/thism`。如果也要删除服务端保存的数据，请使用 `THISM_REMOVE_DATA=1` 执行。其他被监控主机上的 agent 不会自动删除，如需清理，请分别在对应主机执行 agent 卸载脚本。
+
 ### 手动 Docker Compose 部署
 
 ```bash
