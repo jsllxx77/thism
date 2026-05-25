@@ -15,7 +15,7 @@ describe("CountryFlag", () => {
     expect(screen.queryByText("HK")).not.toBeInTheDocument()
   })
 
-  it.each(["HK", "SG", "AU"])("includes a graphical fallback for %s when flag emoji fonts collapse", (countryCode) => {
+  it.each(["HK", "SG", "AU", "US"])("includes a graphical fallback for %s when flag emoji fonts collapse", (countryCode) => {
     render(<CountryFlag countryCode={countryCode} />)
 
     const flag = screen.getByRole("img", { name: countryCode })

@@ -59,6 +59,46 @@ const flagFallbacks: Partial<Record<string, FlagFallbackRenderer>> = {
       </g>
     </svg>
   ),
+  US: (className) => (
+    <svg className={className} viewBox="0 0 64 48" aria-hidden="true" focusable="false">
+      <rect width="64" height="48" fill="#fff" />
+      <g fill="#b22234">
+        <rect width="64" height="3.7" y="0" />
+        <rect width="64" height="3.7" y="7.4" />
+        <rect width="64" height="3.7" y="14.8" />
+        <rect width="64" height="3.7" y="22.2" />
+        <rect width="64" height="3.7" y="29.5" />
+        <rect width="64" height="3.7" y="36.9" />
+        <rect width="64" height="3.7" y="44.3" />
+      </g>
+      <rect width="28" height="25.9" fill="#3c3b6e" />
+      <g fill="#fff">
+        <circle cx="4" cy="4" r="1" />
+        <circle cx="9" cy="4" r="1" />
+        <circle cx="14" cy="4" r="1" />
+        <circle cx="19" cy="4" r="1" />
+        <circle cx="24" cy="4" r="1" />
+        <circle cx="6.5" cy="8" r="1" />
+        <circle cx="11.5" cy="8" r="1" />
+        <circle cx="16.5" cy="8" r="1" />
+        <circle cx="21.5" cy="8" r="1" />
+        <circle cx="4" cy="12" r="1" />
+        <circle cx="9" cy="12" r="1" />
+        <circle cx="14" cy="12" r="1" />
+        <circle cx="19" cy="12" r="1" />
+        <circle cx="24" cy="12" r="1" />
+        <circle cx="6.5" cy="16" r="1" />
+        <circle cx="11.5" cy="16" r="1" />
+        <circle cx="16.5" cy="16" r="1" />
+        <circle cx="21.5" cy="16" r="1" />
+        <circle cx="4" cy="20" r="1" />
+        <circle cx="9" cy="20" r="1" />
+        <circle cx="14" cy="20" r="1" />
+        <circle cx="19" cy="20" r="1" />
+        <circle cx="24" cy="20" r="1" />
+      </g>
+    </svg>
+  ),
 }
 
 export const CountryFlag = memo(function CountryFlag({ countryCode, className = "", size = "md" }: CountryFlagProps) {
