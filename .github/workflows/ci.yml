@@ -34,7 +34,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Run backend tests
-        run: go test ./...
+        run: go test $(go list ./... | grep -v '/frontend/node_modules/')
 
   frontend:
     runs-on: ubuntu-latest

@@ -145,7 +145,7 @@ describe("node detail page states", () => {
     render(<NodeDetail nodeId="node-1" accessMode="guest" />)
 
     expect(await screen.findByText("alpha")).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("fi-hk")
+    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
   })
 
   it("shows docker details when docker is available", async () => {

@@ -1184,15 +1184,20 @@ func TestChangePasswordUpdatesLoginCredentials(t *testing.T) {
 		t.Fatalf("expected 200 for initial login, got %d: %s", loginResp.Code, loginResp.Body.String())
 	}
 
-	var sessionCookie *http.Cookie
+	var sessionCookie, csrfCookie *http.Cookie
 	for _, cookie := range loginResp.Result().Cookies() {
-		if cookie.Name == "thism_admin" {
+		switch cookie.Name {
+		case "thism_admin":
 			sessionCookie = cookie
-			break
+		case "thism_csrf":
+			csrfCookie = cookie
 		}
 	}
 	if sessionCookie == nil {
 		t.Fatal("expected thism_admin cookie to be set on login")
+	}
+	if csrfCookie == nil {
+		t.Fatal("expected thism_csrf cookie to be set on login")
 	}
 
 	changeReq := httptest.NewRequest(
@@ -1201,7 +1206,9 @@ func TestChangePasswordUpdatesLoginCredentials(t *testing.T) {
 		strings.NewReader(`{"current_password":"secret-pass","new_password":"new-pass-123"}`),
 	)
 	changeReq.Header.Set("Content-Type", "application/json")
+	changeReq.Header.Set("X-CSRF-Token", csrfCookie.Value)
 	changeReq.AddCookie(sessionCookie)
+	changeReq.AddCookie(csrfCookie)
 	changeResp := httptest.NewRecorder()
 	router.ServeHTTP(changeResp, changeReq)
 	if changeResp.Code != http.StatusOK {

@@ -3,6 +3,10 @@ package collector
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,6 +65,10 @@ type websocketConn interface {
 type websocketDialFunc func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error)
 
 var (
+	// ServerTLSSPKISHA256Base64 pins the agent to a server certificate public key
+	// when injected at build time with -ldflags.
+	ServerTLSSPKISHA256Base64 string
+
 	cpuInfoFunc                 = cpu.Info
 	cpuPercentFunc              = cpu.Percent
 	cpuTimesFunc                = cpu.Times
@@ -76,8 +84,94 @@ var (
 	nowFunc                     = time.Now
 	collectProcessSamplesFunc   = collectProcessSamples
 	collectDockerContainersFunc = collectDockerContainers
-	httpClient                  = &http.Client{Timeout: 2 * time.Minute}
+	httpClient                  = newSelfUpdateHTTPClient()
 )
+
+func newSelfUpdateHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tlsConfig, err := tlsConfigWithServerPin(transport.TLSClientConfig)
+	var roundTripper http.RoundTripper = transport
+	if err != nil {
+		roundTripper = pinningRoundTripper{base: transport, tlsPinErr: err}
+	} else if tlsConfig != nil {
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{
+		Timeout:   2 * time.Minute,
+		Transport: roundTripper,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+type pinningRoundTripper struct {
+	base      http.RoundTripper
+	tlsPinErr error
+}
+
+func (rt pinningRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req != nil && req.URL != nil && strings.EqualFold(req.URL.Scheme, "https") && rt.tlsPinErr != nil {
+		return nil, rt.tlsPinErr
+	}
+	return rt.base.RoundTrip(req)
+}
+
+func tlsConfigWithServerPin(base *tls.Config) (*tls.Config, error) {
+	pin, err := parseServerTLSSPKIPin()
+	if err != nil {
+		return nil, err
+	}
+	if pin == nil {
+		if base == nil {
+			return nil, nil
+		}
+		return base.Clone(), nil
+	}
+
+	var config *tls.Config
+	if base != nil {
+		config = base.Clone()
+	} else {
+		config = &tls.Config{}
+	}
+	existingVerifyConnection := config.VerifyConnection
+	config.VerifyConnection = func(state tls.ConnectionState) error {
+		if existingVerifyConnection != nil {
+			if err := existingVerifyConnection(state); err != nil {
+				return err
+			}
+		}
+		if matchesPinnedSPKI(state.PeerCertificates, pin) {
+			return nil
+		}
+		return errors.New("tls spki pin mismatch")
+	}
+	return config, nil
+}
+
+func parseServerTLSSPKIPin() ([]byte, error) {
+	raw := strings.TrimSpace(ServerTLSSPKISHA256Base64)
+	if raw == "" {
+		return nil, nil
+	}
+	pin, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tls spki pin: %w", err)
+	}
+	if len(pin) != sha256.Size {
+		return nil, fmt.Errorf("invalid tls spki pin: expected %d-byte sha256 digest", sha256.Size)
+	}
+	return pin, nil
+}
+
+func matchesPinnedSPKI(certs []*x509.Certificate, pin []byte) bool {
+	if len(certs) == 0 {
+		return false
+	}
+	digest := sha256.Sum256(certs[0].RawSubjectPublicKeyInfo)
+	return subtle.ConstantTimeCompare(digest[:], pin) == 1
+}
 
 // Collector gathers system metrics and pushes them to the ThisM server via WebSocket.
 type Collector struct {
@@ -1146,6 +1240,17 @@ func isResetLikeError(err error) bool {
 
 func defaultWebsocketDial(mode dialMode, targetURL string, headers http.Header) (websocketConn, error) {
 	dialer := *websocket.DefaultDialer
+	parsedTarget, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(parsedTarget.Scheme, "wss") {
+		tlsConfig, err := tlsConfigWithServerPin(dialer.TLSClientConfig)
+		if err != nil {
+			return nil, err
+		}
+		dialer.TLSClientConfig = tlsConfig
+	}
 	if mode == dialModeIPv4 {
 		netDialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 		dialer.NetDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {

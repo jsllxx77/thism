@@ -4,6 +4,7 @@
 	build-sign-tool release-keygen sign-dist
 
 GO ?= go
+GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/frontend/node_modules/')
 GOCACHE_DIR ?= /tmp/go-build
 PORT ?= 12026
 TOKEN ?=
@@ -13,7 +14,8 @@ VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X github.com/thism-dev/thism/internal/version.Version=$(VERSION) -X github.com/thism-dev/thism/internal/version.Commit=$(COMMIT) -X github.com/thism-dev/thism/internal/version.BuildTime=$(BUILD_TIME)
-AGENT_LDFLAGS := $(LDFLAGS)$(if $(RELEASE_PUBLIC_KEY), -X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64=$(RELEASE_PUBLIC_KEY),)
+SERVER_TLS_SPKI_SHA256 ?=
+AGENT_LDFLAGS := $(LDFLAGS)$(if $(RELEASE_PUBLIC_KEY), -X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64=$(RELEASE_PUBLIC_KEY),)$(if $(SERVER_TLS_SPKI_SHA256), -X github.com/thism-dev/thism/internal/collector.ServerTLSSPKISHA256Base64=$(SERVER_TLS_SPKI_SHA256),)
 ADMIN_AUTH_ARGS := $(strip $(if $(ADMIN_USER),--admin-user $(ADMIN_USER),) $(if $(ADMIN_PASS),--admin-pass $(ADMIN_PASS),))
 DEV_SYSTEMD_SERVICE ?= thism-server.service
 DEV_SYSTEMD_ENV_FILE ?= /etc/default/thism-dev-server
@@ -78,7 +80,7 @@ dev-restart: dev-rebuild
 	@echo "Server restarted. Logs: /tmp/thism-server.log"
 
 test:
-	GOCACHE=$(GOCACHE_DIR) $(GO) test ./...
+	GOCACHE=$(GOCACHE_DIR) $(GO) test $(GO_PACKAGES)
 
 # Release signing -----------------------------------------------------------
 # RELEASE_PUBLIC_KEY=<base64> is the Ed25519 public key the agent should pin.

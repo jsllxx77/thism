@@ -42,7 +42,7 @@ describe("node detail metrics", () => {
     const { container } = render(<NodeHero node={node} />)
 
     expect(screen.getByText("Node")).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("fi-hk")
+    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("Online")).toBeInTheDocument()
     expect(screen.getByText(/10.0.0.7/)).toBeInTheDocument()

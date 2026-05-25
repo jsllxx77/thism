@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,41 @@ type commandTestConn struct {
 	remoteAddr net.Addr
 	mu         sync.Mutex
 	writes     [][]byte
+}
+
+func TestSelfUpdateDownloadDoesNotFollowRedirects(t *testing.T) {
+	originalHTTPClient := httpClient
+	t.Cleanup(func() {
+		httpClient = originalHTTPClient
+	})
+
+	redirected := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer server.Close()
+
+	httpClient = newSelfUpdateHTTPClient()
+	c := NewWithInterval(server.URL, "token", "node", "", DefaultReportInterval)
+	err := c.runSelfUpdate(models.AgentCommandPayload{
+		DownloadURL: server.URL,
+		SHA256:      "unused",
+		Signature:   "unused",
+	}, func(models.UpdateJobTargetStatus, string, string) error {
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected redirect response to fail self update")
+	}
+	if redirected {
+		t.Fatal("expected self update client to refuse following redirects")
+	}
 }
 
 func (c *commandTestConn) WriteMessage(_ int, data []byte) error {

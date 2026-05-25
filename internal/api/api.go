@@ -38,7 +38,16 @@ var upgrader = websocket.Upgrader{
 
 const adminSessionCookieName = "thism_admin"
 const guestSessionCookieName = "thism_guest"
+const csrfCookieName = "thism_csrf"
 const uiLanguageCookieName = "thism-lang"
+const maxJSONBodyBytes int64 = 1 << 20
+const loginFailureDelay = 250 * time.Millisecond
+const loginFailureWindow = 5 * time.Minute
+const loginFailureLockout = 5
+const websocketReadLimit = 1 << 20
+const websocketPongWait = 60 * time.Second
+const websocketPingPeriod = 45 * time.Second
+const websocketWriteWait = 10 * time.Second
 
 type accessRole string
 
@@ -75,6 +84,12 @@ type authManager struct {
 	username   string
 	password   string
 	sessions   *sessionManager
+	loginGuard *loginAttemptLimiter
+}
+
+type loginAttemptLimiter struct {
+	mu       sync.Mutex
+	failures map[string][]time.Time
 }
 
 type sessionStore interface {
@@ -101,7 +116,48 @@ func newAuthManager(cfg AuthConfig, sessionBackend sessionStore) *authManager {
 		username:   strings.TrimSpace(cfg.Username),
 		password:   cfg.Password,
 		sessions:   newSessionManager(sessionBackend),
+		loginGuard: &loginAttemptLimiter{failures: make(map[string][]time.Time)},
 	}
+}
+
+func (l *loginAttemptLimiter) locked(key string, now time.Time) bool {
+	if l == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	failures := recentLoginFailures(l.failures[key], now)
+	l.failures[key] = failures
+	return len(failures) >= loginFailureLockout
+}
+
+func (l *loginAttemptLimiter) recordFailure(key string, now time.Time) {
+	if l == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.failures[key] = append(recentLoginFailures(l.failures[key], now), now)
+}
+
+func (l *loginAttemptLimiter) clear(key string) {
+	if l == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.failures, key)
+}
+
+func recentLoginFailures(failures []time.Time, now time.Time) []time.Time {
+	cutoff := now.Add(-loginFailureWindow)
+	filtered := failures[:0]
+	for _, failureAt := range failures {
+		if failureAt.After(cutoff) {
+			filtered = append(filtered, failureAt)
+		}
+	}
+	return filtered
 }
 
 func newSessionManager(sessionBackend sessionStore) *sessionManager {
@@ -303,6 +359,7 @@ func (m *authManager) ClearAdminSession(w http.ResponseWriter, r *http.Request) 
 		m.sessions.Delete(adminSessionID(r))
 	}
 	clearSessionCookie(w, r)
+	clearCSRFCookie(w, r)
 }
 
 func constantTimeStringEqual(a, b string) bool {
@@ -353,6 +410,9 @@ func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, fronte
 	}
 
 	r := chi.NewRouter()
+	r.Use(secureHeaders)
+	r.Use(limitRequestBody(maxJSONBodyBytes))
+	r.Use(csrfProtection)
 
 	// ---------------------------------------------------------------
 	// WebSocket endpoints (auth handled inside each handler)
@@ -574,6 +634,7 @@ func writeAdminSessionCookie(w http.ResponseWriter, r *http.Request, sessionID s
 		MaxAge:   int((30 * 24 * time.Hour).Seconds()),
 		Expires:  expiresAt,
 	})
+	writeCSRFCookie(w, r)
 }
 
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
@@ -603,6 +664,7 @@ func setGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsSecure(r),
 	})
+	writeCSRFCookie(w, r)
 }
 
 func clearGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
@@ -611,6 +673,32 @@ func clearGuestSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsSecure(r),
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func writeCSRFCookie(w http.ResponseWriter, r *http.Request) {
+	token, err := generateHexBytes(32)
+	if err != nil {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    token,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsSecure(r),
+	})
+}
+
+func clearCSRFCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    "",
+		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsSecure(r),
 		MaxAge:   -1,
@@ -655,6 +743,67 @@ func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		if requestIsSecure(r) {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func limitRequestBody(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			if r.ContentLength > limit {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func csrfProtection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !requiresCSRFCheck(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := r.Cookie(csrfCookieName)
+		if err != nil || cookie.Value == "" || r.Header.Get("X-CSRF-Token") == "" || !constantTimeStringEqual(cookie.Value, r.Header.Get("X-CSRF-Token")) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "csrf token required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requiresCSRFCheck(r *http.Request) bool {
+	if r == nil || !isStateChangingMethod(r.Method) {
+		return false
+	}
+	if bearerToken(r) != "" {
+		return false
+	}
+	if strings.HasPrefix(r.URL.Path, "/ws/") {
+		return false
+	}
+	_, err := r.Cookie(adminSessionCookieName)
+	return err == nil
+}
+
+func isStateChangingMethod(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions && method != http.MethodTrace
 }
 
 // adminAuth returns a middleware that enforces administrator access.
@@ -1373,8 +1522,16 @@ func handlePasswordLogin(w http.ResponseWriter, r *http.Request, s *store.Store,
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	usernameKey := "user:" + strings.ToLower(strings.TrimSpace(req.Username))
+	ipKey := "ip:" + remoteAddrIP(r.RemoteAddr)
+	now := time.Now()
+	if auth.loginGuard.locked(usernameKey, now) || auth.loginGuard.locked(ipKey, now) {
+		time.Sleep(loginFailureDelay)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidCredentials")})
 		return
 	}
 
@@ -1384,9 +1541,14 @@ func handlePasswordLogin(w http.ResponseWriter, r *http.Request, s *store.Store,
 		}
 		return s.UpsertAdminAuth(username, password)
 	}) {
+		auth.loginGuard.recordFailure(usernameKey, now)
+		auth.loginGuard.recordFailure(ipKey, now)
+		time.Sleep(loginFailureDelay)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidCredentials")})
 		return
 	}
+	auth.loginGuard.clear(usernameKey)
+	auth.loginGuard.clear(ipKey)
 
 	clearGuestSessionCookie(w, r)
 	if err := auth.IssueAdminSession(w, r); err != nil {
@@ -1421,8 +1583,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request, s *store.Store
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	if req.CurrentPassword == "" || req.NewPassword == "" {
@@ -1509,8 +1670,7 @@ func handleUpdateNotificationSettings(w http.ResponseWriter, r *http.Request, s 
 		return
 	}
 	var reqBody models.NotificationSettings
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &reqBody) {
 		return
 	}
 	if strings.TrimSpace(reqBody.TelegramBotToken) == "" {
@@ -1541,8 +1701,7 @@ func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *st
 	var reqBody struct {
 		ShowDashboardCardIP *bool `json:"show_dashboard_card_ip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &reqBody) {
 		return
 	}
 	if reqBody.ShowDashboardCardIP == nil {
@@ -1574,8 +1733,7 @@ func handleSendTestNotification(w http.ResponseWriter, r *http.Request, s *store
 		TelegramBotToken string                 `json:"telegram_bot_token"`
 		Target           *models.TelegramTarget `json:"target"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &reqBody) {
 		return
 	}
 	if strings.TrimSpace(reqBody.TelegramBotToken) != "" {
@@ -1629,8 +1787,7 @@ func handleUpdateMetricsRetention(w http.ResponseWriter, r *http.Request, s *sto
 	var req struct {
 		RetentionDays int `json:"retention_days"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	if !store.IsValidMetricsRetentionDays(req.RetentionDays) {
@@ -1676,12 +1833,12 @@ type latencyMonitorRequest struct {
 	NodeIDs            []string                  `json:"node_ids"`
 }
 
-func decodeLatencyMonitorRequest(r *http.Request) (latencyMonitorRequest, error) {
+func decodeLatencyMonitorRequest(w http.ResponseWriter, r *http.Request) (latencyMonitorRequest, bool) {
 	var req latencyMonitorRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return latencyMonitorRequest{}, err
+	if !decodeJSONBody(w, r, &req) {
+		return latencyMonitorRequest{}, false
 	}
-	return req, nil
+	return req, true
 }
 
 func handleCreateLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
@@ -1689,9 +1846,8 @@ func handleCreateLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
 		return
 	}
-	req, err := decodeLatencyMonitorRequest(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	req, ok := decodeLatencyMonitorRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -1743,9 +1899,8 @@ func handleUpdateLatencyMonitor(w http.ResponseWriter, r *http.Request, s *store
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "latency monitor not found"})
 		return
 	}
-	req, err := decodeLatencyMonitorRequest(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	req, ok := decodeLatencyMonitorRequest(w, r)
+	if !ok {
 		return
 	}
 	autoAssign := existing.AutoAssignNewNodes
@@ -1822,6 +1977,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			return false
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+		return false
+	}
+	return true
+}
+
 // -----------------------------------------------------------------------
 // REST handlers
 // -----------------------------------------------------------------------
@@ -1879,7 +2047,10 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, 
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if req.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
@@ -1934,8 +2105,7 @@ func handleUpdateNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -2040,8 +2210,7 @@ func handleAgentCommandStatus(nodeID string, payload models.AgentCommandStatusPa
 
 func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
 	var req createAgentUpdateJobRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	if s == nil || len(req.NodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
@@ -2148,8 +2317,7 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 		SHA256        string   `json:"sha256"`
 		Signature     string   `json:"signature"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	nodeIDs := make([]string, 0, len(req.NodeIDs))
@@ -2641,12 +2809,9 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 
 func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
 	alertDispatcher := alerting.NewDispatcher(s, notify.NewTelegramSender(nil))
-	token := r.URL.Query().Get("token")
+	token := bearerToken(r)
 	if token == "" {
-		// Also accept bearer token in header for agent connections.
-		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-			token = strings.TrimPrefix(auth, "Bearer ")
-		}
+		token = r.URL.Query().Get("token")
 	}
 	if token == "" {
 		http.Error(w, uiMessage(resolveUILanguage(r), "tokenRequired"), http.StatusUnauthorized)
@@ -2663,6 +2828,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 	if err != nil {
 		return
 	}
+	configureWebsocketRead(conn)
 
 	writeLatencyMonitorConfigToConn(conn, s, node.ID)
 	h.Register(node.ID, conn)
@@ -2808,6 +2974,27 @@ func writeLatencyMonitorConfigToConn(conn *websocket.Conn, s *store.Store, nodeI
 	}); err != nil {
 		log.Printf("latency monitors: initial write to node %s failed: %v", nodeID, err)
 	}
+}
+
+func configureWebsocketRead(conn *websocket.Conn) {
+	if conn == nil {
+		return
+	}
+	conn.SetReadLimit(websocketReadLimit)
+	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	})
+}
+
+func writeWebsocketMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	if conn == nil {
+		return errors.New("websocket connection is nil")
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
+		return err
+	}
+	return conn.WriteMessage(messageType, data)
 }
 
 func resolveCountryCode(resolver geo.CountryResolver, ip string) string {
@@ -2973,11 +3160,21 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h
 	if err != nil {
 		return
 	}
+	configureWebsocketRead(conn)
 	defer conn.Close()
 
 	ch := make(chan models.WSMessage, 32)
 	h.Subscribe(ch)
 	defer h.Unsubscribe(ch)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
 
 	initialMessages, err := dashboardInitialMessages(s, h)
 	if err != nil {
@@ -2989,18 +3186,32 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h
 		if err != nil {
 			continue
 		}
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		if err := writeWebsocketMessage(conn, websocket.TextMessage, data); err != nil {
 			return
 		}
 	}
 
-	for msg := range ch {
-		data, err := json.Marshal(msg)
-		if err != nil {
-			continue
-		}
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			break
+	ticker := time.NewTicker(websocketPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := writeWebsocketMessage(conn, websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			if err := writeWebsocketMessage(conn, websocket.TextMessage, data); err != nil {
+				return
+			}
 		}
 	}
 }

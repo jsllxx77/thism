@@ -1,13 +1,17 @@
 import { getPreferredLanguage } from "../i18n/language"
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
+  const csrfToken = csrfTokenFromCookie()
+  const method = options?.method?.toUpperCase() ?? "GET"
+  const headers = new Headers(options?.headers)
+  headers.set("Content-Type", "application/json")
+  headers.set("Accept-Language", getPreferredLanguage())
+  if (csrfToken && !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
+    headers.set("X-CSRF-Token", csrfToken)
+  }
   const res = await fetch(path, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "Accept-Language": getPreferredLanguage(),
-      ...(options?.headers ?? {}),
-    },
+    headers,
   })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
@@ -22,6 +26,17 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(message)
   }
   return res.json()
+}
+
+function csrfTokenFromCookie(): string {
+  if (typeof document === "undefined") {
+    return ""
+  }
+  const match = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("thism_csrf="))
+  if (!match) {
+    return ""
+  }
+  return decodeURIComponent(match.slice("thism_csrf=".length))
 }
 
 export type AccessMode = "admin" | "guest"
