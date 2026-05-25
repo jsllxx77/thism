@@ -100,7 +100,7 @@ describe("node table", () => {
     render(<NodeTable nodes={[node({ id: "n1", name: "alpha", country_code: "HK", online: true })]} onSelectNode={vi.fn()} />)
 
     expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
-    expect(screen.getByText("HK")).toHaveClass("country-flag__code")
+    expect(screen.getByText("🇭🇰")).toHaveClass("country-flag__emoji")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 

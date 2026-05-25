@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { CountryFlag } from "./CountryFlag"
 
 describe("CountryFlag", () => {
-  it("renders a compact emoji flag with stable country-code fallback text", () => {
+  it("renders a compact emoji flag with country-code metadata", () => {
     render(<CountryFlag countryCode="HK" />)
 
     const flag = screen.getByRole("img", { name: "HK" })
@@ -11,7 +11,8 @@ describe("CountryFlag", () => {
     expect(flag).not.toHaveClass("fi")
     expect(flag).not.toHaveClass("fi-hk")
     expect(flag).toHaveAttribute("data-country-code", "HK")
-    expect(screen.getByText("HK")).toHaveClass("country-flag__code")
+    expect(screen.getByText("🇭🇰")).toHaveClass("country-flag__emoji")
+    expect(screen.queryByText("HK")).not.toBeInTheDocument()
   })
 
   it("does not render for invalid country codes", () => {

@@ -21,16 +21,15 @@ export const CountryFlag = memo(function CountryFlag({ countryCode, className = 
 
   const emoji = countryCodeToFlagEmoji(code)
 
-	  return (
-	    <span
-	      className={`country-flag ${sizeClasses[size]} ${className}`.trim()}
-	      role="img"
+  return (
+    <span
+      className={`country-flag ${sizeClasses[size]} ${className}`.trim()}
+      role="img"
       aria-label={code}
       title={code}
       data-country-code={code}
     >
       <span className="country-flag__emoji" aria-hidden="true">{emoji}</span>
-      <span className="country-flag__code" aria-hidden="true">{code}</span>
     </span>
   )
 })

@@ -89,7 +89,7 @@ describe("node card redesign", () => {
     render(<NodeCard node={createNode({ country_code: "HK" })} />)
 
     expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
-    expect(screen.getByText("HK")).toHaveClass("country-flag__code")
+    expect(screen.getByText("🇭🇰")).toHaveClass("country-flag__emoji")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 
