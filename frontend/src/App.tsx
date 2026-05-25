@@ -6,6 +6,7 @@ import { Dashboard } from "./pages/Dashboard"
 
 const NodeDetail = lazy(async () => ({ default: (await import("./pages/NodeDetail")).NodeDetail }))
 const Settings = lazy(async () => ({ default: (await import("./pages/Settings")).Settings }))
+const Reports = lazy(async () => ({ default: (await import("./pages/Reports")).Reports }))
 const NotFound = lazy(async () => ({ default: (await import("./pages/NotFound")).NotFound }))
 
 type AppShellOutletContext = {
@@ -72,12 +73,21 @@ function SettingsRoute() {
   )
 }
 
+function ReportsRoute() {
+  return (
+    <Suspense fallback={<RouteFallback />}>
+      <Reports />
+    </Suspense>
+  )
+}
+
 export default function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<DashboardRoute />} />
         <Route path="/nodes/:nodeId" element={<NodeDetailRoute />} />
+        <Route path="/reports" element={<ReportsRoute />} />
         <Route path="/settings" element={<SettingsRoute />} />
         <Route
           path="*"

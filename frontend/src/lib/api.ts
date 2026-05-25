@@ -56,8 +56,14 @@ export type Node = {
   created_at: number
   last_seen: number
   online: boolean
+  tags?: string[]
   hardware?: NodeHardware | null
   latest_metrics?: MetricsRow | null
+}
+
+export type NodeUpdatePayload = {
+  name?: string
+  tags?: string[]
 }
 
 export type NodeHardware = {
@@ -281,15 +287,57 @@ export type DispatcherRuntimeStats = {
   dropped: number
 }
 
+export type AvailabilityReportRange = {
+  from: number
+  to: number
+}
+
+export type AvailabilityReportFilter = {
+  tag?: string
+}
+
+export type AvailabilityReportOverview = {
+  total_nodes: number
+  average_availability_percent: number
+  nodes_below_99: number
+  total_offline_duration_seconds: number
+  highest_latency_p95_ms?: number | null
+}
+
+export type NodeAvailabilityReport = {
+  node_id: string
+  name: string
+  tags: string[]
+  last_seen: number
+  availability_percent: number
+  expected_samples: number
+  observed_samples: number
+  offline_duration_seconds: number
+  outage_count: number
+  last_outage_start?: number | null
+  last_outage_end?: number | null
+  latency_p50_ms?: number | null
+  latency_p95_ms?: number | null
+}
+
+export type AvailabilityReport = {
+  range: AvailabilityReportRange
+  filter: AvailabilityReportFilter
+  available_tags: string[]
+  overview: AvailabilityReportOverview
+  nodes: NodeAvailabilityReport[]
+}
+
 export const api = {
   session: () => req<SessionInfo>("/api/auth/session"),
   nodes: () => req<{ nodes: Node[] }>("/api/nodes"),
   node: (id: string) => req<{ node: Node | null }>(`/api/nodes/${id}`),
-  renameNode: (id: string, name: string) =>
+  updateNode: (id: string, payload: NodeUpdatePayload) =>
     req<Node>(`/api/nodes/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(payload),
     }),
+  renameNode: (id: string, name: string) => api.updateNode(id, { name }),
   deleteNode: (id: string) =>
     req<{ ok: boolean }>(`/api/nodes/${id}`, {
       method: "DELETE",
@@ -381,5 +429,12 @@ export const api = {
     }),
   versionMeta: () => req<VersionMeta>("/api/meta/version"),
   dispatcherRuntimeStats: () => req<DispatcherRuntimeStats>("/api/meta/dispatcher"),
+  availabilityReport: (from: number, to: number, tag?: string) => {
+    const params = new URLSearchParams()
+    params.set("from", String(from))
+    params.set("to", String(to))
+    if (tag) params.set("tag", tag)
+    return req<AvailabilityReport>(`/api/reports/availability?${params.toString()}`)
+  },
   agentRelease: (os: string, arch: string) => req<AgentReleaseManifest>(`/api/agent-release?os=${encodeURIComponent(os)}&arch=${encodeURIComponent(arch)}`),
 }

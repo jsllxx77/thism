@@ -50,6 +50,178 @@ func TestStoreNodeCRUD(t *testing.T) {
 	}
 }
 
+func TestStoreNodeTagsNormalizeAndReplace(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-1", []string{" Prod ", "HK", "prod", "", " database "}); err != nil {
+		t.Fatalf("ReplaceNodeTags: %v", err)
+	}
+
+	node, err := s.GetNodeByID("node-1")
+	if err != nil {
+		t.Fatalf("GetNodeByID: %v", err)
+	}
+	if strings.Join(node.Tags, ",") != "database,hk,prod" {
+		t.Fatalf("expected normalized sorted tags, got %#v", node.Tags)
+	}
+
+	if err := s.ReplaceNodeTags("node-1", []string{"edge"}); err != nil {
+		t.Fatalf("ReplaceNodeTags second pass: %v", err)
+	}
+	node, err = s.GetNodeByID("node-1")
+	if err != nil {
+		t.Fatalf("GetNodeByID after replace: %v", err)
+	}
+	if strings.Join(node.Tags, ",") != "edge" {
+		t.Fatalf("expected replaced tag set, got %#v", node.Tags)
+	}
+}
+
+func TestStoreListNodesIncludesTagsAndDeleteCleansThem(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-a", Name: "alpha", Token: "token-a"}); err != nil {
+		t.Fatalf("UpsertNode alpha: %v", err)
+	}
+	if err := s.UpsertNode(&models.Node{ID: "node-b", Name: "beta", Token: "token-b"}); err != nil {
+		t.Fatalf("UpsertNode beta: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-a", []string{"prod", "hk"}); err != nil {
+		t.Fatalf("ReplaceNodeTags alpha: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-b", []string{"dev"}); err != nil {
+		t.Fatalf("ReplaceNodeTags beta: %v", err)
+	}
+
+	nodes, err := s.ListNodes()
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	if strings.Join(nodes[0].Tags, ",") != "hk,prod" {
+		t.Fatalf("expected alpha tags to be hydrated, got %#v", nodes[0].Tags)
+	}
+	if strings.Join(nodes[1].Tags, ",") != "dev" {
+		t.Fatalf("expected beta tags to be hydrated, got %#v", nodes[1].Tags)
+	}
+
+	if err := s.DeleteNode("node-a"); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-a", []string{"ghost"}); err == nil {
+		t.Fatal("expected replacing tags for a deleted node to fail")
+	}
+}
+
+func TestStoreAvailabilityReportComputesOutagesAndLatency(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-a", Name: "alpha", Token: "token-a", LastSeen: 160}); err != nil {
+		t.Fatalf("UpsertNode alpha: %v", err)
+	}
+	if err := s.UpsertNode(&models.Node{ID: "node-b", Name: "beta", Token: "token-b", LastSeen: 160}); err != nil {
+		t.Fatalf("UpsertNode beta: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-a", []string{"prod", "hk"}); err != nil {
+		t.Fatalf("ReplaceNodeTags alpha: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-b", []string{"dev"}); err != nil {
+		t.Fatalf("ReplaceNodeTags beta: %v", err)
+	}
+
+	for _, ts := range []int64{100, 105, 110, 140, 145, 150, 155, 160} {
+		if err := s.InsertMetrics("node-a", &models.MetricsPayload{TS: ts, CPU: 10, Mem: models.MemStats{Used: 1, Total: 2}}); err != nil {
+			t.Fatalf("InsertMetrics alpha %d: %v", ts, err)
+		}
+	}
+	for _, ts := range []int64{100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160} {
+		if err := s.InsertMetrics("node-b", &models.MetricsPayload{TS: ts, CPU: 10, Mem: models.MemStats{Used: 1, Total: 2}}); err != nil {
+			t.Fatalf("InsertMetrics beta %d: %v", ts, err)
+		}
+	}
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "TCP",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "example.com:443",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          100,
+		UpdatedAt:          100,
+	}, []string{"node-a"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+	for index, latency := range []float64{10, 20, 30, 40, 50} {
+		if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+			MonitorID: "monitor-1",
+			NodeID:    "node-a",
+			TS:        int64(100 + index*10),
+			LatencyMs: &latency,
+			Success:   true,
+		}); err != nil {
+			t.Fatalf("InsertLatencyResult %d: %v", index, err)
+		}
+	}
+	if err := s.RollupLatencyResults1m(100, 160); err != nil {
+		t.Fatalf("RollupLatencyResults1m: %v", err)
+	}
+
+	report, err := s.BuildAvailabilityReport(100, 160, "prod")
+	if err != nil {
+		t.Fatalf("BuildAvailabilityReport: %v", err)
+	}
+	if report.Range.From != 100 || report.Range.To != 160 || report.Filter.Tag != "prod" {
+		t.Fatalf("unexpected report range/filter: %#v", report)
+	}
+	if strings.Join(report.AvailableTags, ",") != "dev,hk,prod" {
+		t.Fatalf("expected all tags for selector, got %#v", report.AvailableTags)
+	}
+	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node-a" {
+		t.Fatalf("expected only prod node, got %#v", report.Nodes)
+	}
+
+	row := report.Nodes[0]
+	if row.ExpectedSamples != 13 || row.ObservedSamples != 8 {
+		t.Fatalf("unexpected sample counts: %#v", row)
+	}
+	if row.OutageCount != 1 || row.OfflineDurationSeconds != 25 {
+		t.Fatalf("unexpected outage summary: %#v", row)
+	}
+	if row.LastOutageStart == nil || *row.LastOutageStart != 115 || row.LastOutageEnd == nil || *row.LastOutageEnd != 140 {
+		t.Fatalf("unexpected last outage window: %#v", row)
+	}
+	if row.AvailabilityPercent < 58.3 || row.AvailabilityPercent > 58.4 {
+		t.Fatalf("unexpected availability percent: %.3f", row.AvailabilityPercent)
+	}
+	if row.LatencyP50Ms == nil || *row.LatencyP50Ms != 30 {
+		t.Fatalf("expected p50 latency 30, got %#v", row.LatencyP50Ms)
+	}
+	if row.LatencyP95Ms == nil || *row.LatencyP95Ms != 50 {
+		t.Fatalf("expected p95 latency 50, got %#v", row.LatencyP95Ms)
+	}
+	if report.Overview.TotalNodes != 1 || report.Overview.NodesBelow99 != 1 || report.Overview.TotalOfflineDurationSeconds != 25 {
+		t.Fatalf("unexpected overview: %#v", report.Overview)
+	}
+}
+
 func TestStoreMetrics(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {

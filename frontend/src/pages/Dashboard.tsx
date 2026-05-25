@@ -54,6 +54,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   const [statusRefreshNonce, setStatusRefreshNonce] = useState(0)
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
   const [searchFilter, setSearchFilter] = useState("")
+  const [tagFilter, setTagFilter] = useState("all")
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards")
   const [loadingNodes, setLoadingNodes] = useState(true)
   const [nodesError, setNodesError] = useState<string | null>(null)
@@ -234,9 +235,22 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
       if (searchFilter.trim() && !node.name.toLowerCase().includes(searchFilter.trim().toLowerCase())) {
         return false
       }
+      if (tagFilter !== "all" && !(node.tags ?? []).includes(tagFilter)) {
+        return false
+      }
       return true
     })
-  }, [effectiveNodes, searchFilter, statusFilter])
+  }, [effectiveNodes, searchFilter, statusFilter, tagFilter])
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>()
+    for (const node of effectiveNodes) {
+      for (const tag of node.tags ?? []) {
+        tags.add(tag)
+      }
+    }
+    return [...tags].sort((left, right) => left.localeCompare(right))
+  }, [effectiveNodes])
 
   const showTable = accessMode !== "guest" && viewMode === "table"
 
@@ -288,11 +302,15 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
             <NodeFilters
               status={statusFilter}
               search={searchFilter}
+              tag={tagFilter}
+              availableTags={availableTags}
               onStatusChange={setStatusFilter}
               onSearchChange={setSearchFilter}
+              onTagChange={setTagFilter}
               onReset={() => {
                 setStatusFilter("all")
                 setSearchFilter("")
+                setTagFilter("all")
               }}
             />
             {accessMode !== "guest" && (

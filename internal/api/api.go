@@ -469,6 +469,10 @@ func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, fronte
 		r.Get("/api/settings/dashboard", func(w http.ResponseWriter, req *http.Request) {
 			handleGetDashboardSettings(w, req, s)
 		})
+
+		r.Get("/api/reports/availability", func(w http.ResponseWriter, req *http.Request) {
+			handleGetAvailabilityReport(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -2103,20 +2107,35 @@ func handleUpdateNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	}
 
 	var req struct {
-		Name string `json:"name"`
+		Name *string   `json:"name"`
+		Tags *[]string `json:"tags"`
 	}
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+
+	if req.Name == nil && req.Tags == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name or tags is required"})
 		return
 	}
 
-	if err := s.RenameNode(nodeID, req.Name); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+			return
+		}
+		if err := s.RenameNode(nodeID, name); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	if req.Tags != nil {
+		if err := s.ReplaceNodeTags(nodeID, *req.Tags); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	updated, err := s.GetNodeByID(nodeID)
@@ -2130,6 +2149,43 @@ func handleUpdateNode(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	}
 
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func handleGetAvailabilityReport(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+
+	to := time.Now().Unix()
+	from := to - int64((24 * time.Hour).Seconds())
+	if v := strings.TrimSpace(r.URL.Query().Get("from")); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid from"})
+			return
+		}
+		from = parsed
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("to")); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid to"})
+			return
+		}
+		to = parsed
+	}
+	if to <= from {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid availability report range"})
+		return
+	}
+
+	report, err := s.BuildAvailabilityReport(from, to, r.URL.Query().Get("tag"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 
 func handleDeleteNode(w http.ResponseWriter, r *http.Request, s *store.Store) {

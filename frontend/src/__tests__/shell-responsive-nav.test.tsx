@@ -23,6 +23,10 @@ vi.mock("../pages/Settings", () => ({
   Settings: () => <div>Settings page</div>,
 }))
 
+vi.mock("../pages/Reports", () => ({
+  Reports: () => <div>Reports page</div>,
+}))
+
 vi.mock("../pages/NodeDetail", () => ({
   NodeDetail: ({ nodeId }: { nodeId: string }) => <div>{nodeId}</div>,
 }))
@@ -62,6 +66,7 @@ describe("responsive shell nav", () => {
     expect(languageButton.className).toContain("dark:hover:text-slate-50")
     expect(await screen.findByRole("button", { name: "Refresh data" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Open reports" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open settings" })).toBeInTheDocument()
   })
 
@@ -83,7 +88,16 @@ describe("responsive shell nav", () => {
 
     expect(await screen.findByRole("button", { name: "刷新数据" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "切换深色模式" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "打开报告" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "打开设置" })).toBeInTheDocument()
+  })
+
+  it("navigates to reports from the header shortcut", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("button", { name: "Open reports" }))
+    expect(await screen.findByText("Reports page")).toBeInTheDocument()
   })
 
   it("navigates to settings from the header shortcut", async () => {

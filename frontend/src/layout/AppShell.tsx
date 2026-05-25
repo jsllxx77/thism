@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { BarChart3, LogIn, Moon, RefreshCw, Settings2, Sun } from "lucide-react"
+import { BarChart3, FileText, LogIn, Moon, RefreshCw, Settings2, Sun } from "lucide-react"
 import { api, type AccessMode } from "../lib/api"
 import { Button } from "../components/ui/button"
 import { RouteContainer } from "./RouteContainer"
@@ -24,11 +24,14 @@ export function AppShell() {
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
   const showBack = location.pathname !== "/"
   const onSettingsPage = location.pathname.startsWith("/settings")
+  const onReportsPage = location.pathname.startsWith("/reports")
   const onRootPage = location.pathname === "/"
   const pageTitle = location.pathname.startsWith("/nodes/")
     ? messages.shell.pageTitles.nodeDetail
     : onSettingsPage
       ? messages.shell.pageTitles.settings
+      : onReportsPage
+        ? messages.shell.pageTitles.reports
       : onRootPage
         ? messages.shell.pageTitles.dashboard
         : messages.shell.pageTitles.notFound
@@ -90,6 +93,21 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <Button
+              type="button"
+              variant={onReportsPage ? "default" : "outline"}
+              size="sm"
+              onClick={() => navigate("/reports")}
+              aria-label={messages.shell.actions.openReports}
+              aria-current={onReportsPage ? "page" : undefined}
+              className={
+                onReportsPage
+                  ? "h-11 w-11 bg-primary px-0 text-primary-foreground hover:bg-primary/90 sm:h-9 sm:w-9"
+                  : "h-11 w-11 border-slate-300 bg-white px-0 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:h-9 sm:w-9"
+              }
+            >
+              <FileText className="h-4 w-4" aria-hidden />
+            </Button>
             <Button
               type="button"
               variant="outline"

@@ -28,6 +28,10 @@ vi.mock("../pages/Settings", () => ({
   Settings: () => <h1>Settings</h1>,
 }))
 
+vi.mock("../pages/Reports", () => ({
+  Reports: () => <h1>Reports</h1>,
+}))
+
 vi.mock("../pages/NodeDetail", () => ({
   NodeDetail: ({ nodeId }: { nodeId: string }) => <h1>Node {nodeId}</h1>,
 }))
@@ -81,6 +85,22 @@ describe("app routing", () => {
 
     expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument()
+  })
+
+  it("allows guest users to view reports", async () => {
+    sessionMock.mockResolvedValue({ role: "guest" })
+
+    render(
+      <ThemeModeProvider>
+        <AppThemeProvider>
+          <MemoryRouter initialEntries={["/reports"]}>
+            <App />
+          </MemoryRouter>
+        </AppThemeProvider>
+      </ThemeModeProvider>
+    )
+
+    expect(await screen.findByRole("heading", { name: "Reports" })).toBeInTheDocument()
   })
 
   it("navigates between settings and dashboard using history", async () => {

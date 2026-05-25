@@ -92,4 +92,11 @@ describe("node card redesign", () => {
     expect(screen.getByText("HK")).toHaveClass("country-flag__code")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
+
+  it("renders node tags as compact chips", () => {
+    render(<NodeCard node={createNode({ tags: ["prod", "hk"] })} />)
+
+    expect(screen.getByText("prod")).toBeInTheDocument()
+    expect(screen.getByText("hk")).toBeInTheDocument()
+  })
 })

@@ -21,6 +21,10 @@ vi.mock("../pages/Settings", () => ({
   Settings: () => <div>Settings</div>,
 }))
 
+vi.mock("../pages/Reports", () => ({
+  Reports: () => <div>Reports</div>,
+}))
+
 vi.mock("../pages/NodeDetail", () => ({
   NodeDetail: ({ nodeId }: { nodeId: string }) => <div>{nodeId}</div>,
 }))

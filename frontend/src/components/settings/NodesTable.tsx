@@ -4,6 +4,7 @@ import { api } from "../../lib/api"
 import type { Node } from "../../lib/api"
 import { copyTextToClipboard } from "../../lib/clipboard"
 import { CountryFlag } from "../CountryFlag"
+import { NodeTagChips } from "../NodeTagChips"
 import { Button } from "../ui/button"
 import {
   Dialog,
@@ -43,6 +44,9 @@ export function NodesTable({ nodes, onUpdated }: Props) {
   const [renameTarget, setRenameTarget] = useState<Node | null>(null)
   const [renameName, setRenameName] = useState("")
   const [renameError, setRenameError] = useState<string | null>(null)
+  const [tagsTarget, setTagsTarget] = useState<Node | null>(null)
+  const [tagsInput, setTagsInput] = useState("")
+  const [tagsError, setTagsError] = useState<string | null>(null)
   const [scriptTarget, setScriptTarget] = useState<Node | null>(null)
   const [scriptCommand, setScriptCommand] = useState("")
   const [scriptLoading, setScriptLoading] = useState(false)
@@ -96,6 +100,12 @@ export function NodesTable({ nodes, onUpdated }: Props) {
     setRenameError(null)
   }
 
+  const openTagsDialog = (node: Node) => {
+    setTagsTarget(node)
+    setTagsInput((node.tags ?? []).join(", "))
+    setTagsError(null)
+  }
+
   const handleRenameConfirm = async () => {
     if (!renameTarget) return
 
@@ -119,6 +129,28 @@ export function NodesTable({ nodes, onUpdated }: Props) {
       setRenameError(null)
     } catch (error) {
       setRenameError(error instanceof Error ? translateError(error.message) : t("Action failed. Please try again."))
+    } finally {
+      setBusyNodeID(null)
+    }
+  }
+
+  const handleTagsConfirm = async () => {
+    if (!tagsTarget) return
+
+    const tags = tagsInput
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+
+    setActionError(null)
+    setBusyNodeID(tagsTarget.id)
+    try {
+      await api.updateNode(tagsTarget.id, { tags })
+      await refresh()
+      setTagsTarget(null)
+      setTagsError(null)
+    } catch (error) {
+      setTagsError(error instanceof Error ? translateError(error.message) : t("Action failed. Please try again."))
     } finally {
       setBusyNodeID(null)
     }
@@ -240,6 +272,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{renderNodeName(node)}</p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">{node.ip || "—"}</p>
+                  <NodeTagChips tags={node.tags} className="mt-2" />
                 </div>
                 <span
                   className={`rounded-md border px-2 py-0.5 text-[11px] font-medium ${
@@ -267,9 +300,12 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                 </div>
               </dl>
 
-              <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <button type="button" onClick={() => openRenameDialog(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control h-10 rounded-xl border px-2 text-xs font-medium text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
                   {t("Rename")}
+                </button>
+                <button type="button" onClick={() => openTagsDialog(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control h-10 rounded-xl border px-2 text-xs font-medium text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
+                  {t("settingsTable.editTags")}
                 </button>
                 <button type="button" onClick={() => void handleGetScript(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control h-10 rounded-xl border px-2 text-xs font-medium text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
                   {t("Get Script")}
@@ -292,6 +328,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                   </button>
                 </th>
                 <th className="py-2 pr-3 font-medium">{t("dashboard.table.agent")}</th>
+                <th className="py-2 pr-3 font-medium">{t("settingsTable.tags")}</th>
                 <th className="py-2 pr-3 font-medium">{t("IP")}</th>
                 <th className="py-2 pr-3 font-medium">{t("OS / Arch")}</th>
                 <th className="py-2 pr-3 font-medium">{t("Status")}</th>
@@ -304,6 +341,9 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                 <tr key={node.id} className="border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70">
                   <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{renderNodeName(node)}</td>
                   <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
+                  <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">
+                    <NodeTagChips tags={node.tags} />
+                  </td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.ip || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{node.os && node.arch ? `${node.os}/${node.arch}` : "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">{statusLabel(node.online)}</td>
@@ -312,6 +352,9 @@ export function NodesTable({ nodes, onUpdated }: Props) {
                     <div className="flex gap-1.5">
                       <button type="button" onClick={() => openRenameDialog(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control rounded-xl border px-2.5 py-1.5 text-xs text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
                         {t("Rename")}
+                      </button>
+                      <button type="button" onClick={() => openTagsDialog(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control rounded-xl border px-2.5 py-1.5 text-xs text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
+                        {t("settingsTable.editTags")}
                       </button>
                       <button type="button" onClick={() => void handleGetScript(node)} disabled={busyNodeID === node.id} className="enterprise-outline-control rounded-xl border px-2.5 py-1.5 text-xs text-slate-700 shadow-none disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-950 dark:text-slate-200">
                         {t("Get Script")}
@@ -352,6 +395,42 @@ export function NodesTable({ nodes, onUpdated }: Props) {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setRenameTarget(null)} className="rounded-xl">{t("Cancel")}</Button>
             <Button type="button" onClick={() => void handleRenameConfirm()} disabled={!renameTarget || busyNodeID === renameTarget.id} className="rounded-xl">{t("Save")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={tagsTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTagsTarget(null)
+            setTagsError(null)
+          }
+        }}
+      >
+        <DialogContent className="enterprise-hero max-w-md rounded-[28px] border p-6">
+          <DialogHeader>
+            <DialogTitle>{t("settingsTable.editTagsTitle")}</DialogTitle>
+            <DialogDescription>{t("settingsTable.editTagsDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="node-tags" className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+              {t("settingsTable.tags")}
+            </label>
+            <Input
+              id="node-tags"
+              aria-label={t("settingsTable.tags")}
+              value={tagsInput}
+              onChange={(event) => setTagsInput(event.target.value)}
+              placeholder={t("settingsTable.tagsPlaceholder")}
+              className="h-10 rounded-xl"
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t("settingsTable.tagsHint")}</p>
+            {tagsError && <p className="text-xs text-red-600 dark:text-red-300">{tagsError}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTagsTarget(null)} className="rounded-xl">{t("Cancel")}</Button>
+            <Button type="button" onClick={() => void handleTagsConfirm()} disabled={!tagsTarget || busyNodeID === tagsTarget.id} className="rounded-xl">{t("Save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

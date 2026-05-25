@@ -8,6 +8,7 @@ import { NodesTable } from "./NodesTable"
 vi.mock("../../lib/api", () => ({
   api: {
     renameNode: vi.fn(),
+    updateNode: vi.fn(),
     installCommand: vi.fn(),
     deleteNode: vi.fn(),
   },
@@ -31,6 +32,7 @@ describe("settings nodes table", () => {
   it("renders, filters, sorts, and runs node actions through dialogs", async () => {
     const user = userEvent.setup()
     const renameNodeMock = vi.mocked(api.renameNode)
+    const updateNodeMock = vi.mocked(api.updateNode)
     const installCommandMock = vi.mocked(api.installCommand)
     const deleteNodeMock = vi.mocked(api.deleteNode)
     const onUpdated = vi.fn().mockResolvedValue(undefined)
@@ -45,6 +47,17 @@ describe("settings nodes table", () => {
       last_seen: 1733011200,
       online: true,
     })
+    updateNodeMock.mockResolvedValue({
+      id: "n2",
+      name: "alpha",
+      ip: "127.0.0.1",
+      os: "linux",
+      arch: "amd64",
+      created_at: 1733011200,
+      last_seen: 1733011200,
+      online: true,
+      tags: ["hk", "prod"],
+    })
     installCommandMock.mockResolvedValue({ command: "curl -fsSL -H \"Authorization: Bearer *** \"http://localhost/install.sh?name=alpha\" | bash" })
     deleteNodeMock.mockResolvedValue({ ok: true })
 
@@ -58,7 +71,7 @@ describe("settings nodes table", () => {
         onUpdated={onUpdated}
         nodes={[
           node({ id: "n1", name: "zeta", online: false }),
-          node({ id: "n2", name: "alpha", online: true }),
+          node({ id: "n2", name: "alpha", online: true, tags: ["prod"] }),
         ]}
       />
     )
@@ -105,20 +118,29 @@ describe("settings nodes table", () => {
     expect(renameNodeMock).toHaveBeenCalledWith("n2", "renamed-node")
     expect(onUpdated).toHaveBeenCalledTimes(1)
 
+    await user.click(screen.getAllByRole("button", { name: "Edit tags" })[0])
+    expect(await screen.findByText("Edit Tags")).toBeInTheDocument()
+    const tagsInput = screen.getByLabelText("Tags")
+    await user.clear(tagsInput)
+    await user.type(tagsInput, "prod, hk")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(updateNodeMock).toHaveBeenCalledWith("n2", { tags: ["prod", "hk"] })
+    expect(onUpdated).toHaveBeenCalledTimes(2)
+
     await user.click(screen.getAllByRole("button", { name: "Get Script" })[0])
     expect(installCommandMock).toHaveBeenCalledWith("n2")
     expect(await screen.findByText("Install Command")).toBeInTheDocument()
-    expect(onUpdated).toHaveBeenCalledTimes(1)
+    expect(onUpdated).toHaveBeenCalledTimes(2)
     await user.click(screen.getByRole("button", { name: "Copy command" }))
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("curl -fsSL -H \"Authorization: Bearer *** \"http://localhost/install.sh?name=alpha\" | bash")
     await user.click(screen.getByRole("button", { name: "Done" }))
-    expect(onUpdated).toHaveBeenCalledTimes(1)
+    expect(onUpdated).toHaveBeenCalledTimes(2)
 
     await user.click(screen.getAllByRole("button", { name: "Delete" })[0])
     const deleteDialog = await screen.findByRole("dialog", { name: "Delete Node" })
     await user.click(within(deleteDialog).getByRole("button", { name: /Delete/ }))
     expect(deleteNodeMock).toHaveBeenCalledWith("n2")
-    expect(onUpdated).toHaveBeenCalledTimes(2)
+    expect(onUpdated).toHaveBeenCalledTimes(3)
   }, 10000)
 
   it("shows an inline error when copying install command is denied", async () => {

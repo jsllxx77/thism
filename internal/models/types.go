@@ -13,6 +13,7 @@ type Node struct {
 	CreatedAt     int64                `json:"created_at"`
 	LastSeen      int64                `json:"last_seen"`
 	Online        bool                 `json:"online"`
+	Tags          []string             `json:"tags"`
 	Hardware      *NodeHardware        `json:"hardware,omitempty"`
 	LatestMetrics *NodeMetricsSnapshot `json:"latest_metrics,omitempty"`
 }
@@ -51,6 +52,47 @@ type NodeMetricsSnapshot struct {
 	NetRx         uint64  `json:"net_rx"`
 	NetTx         uint64  `json:"net_tx"`
 	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
+}
+
+type AvailabilityReportRange struct {
+	From int64 `json:"from"`
+	To   int64 `json:"to"`
+}
+
+type AvailabilityReportFilter struct {
+	Tag string `json:"tag,omitempty"`
+}
+
+type AvailabilityReportOverview struct {
+	TotalNodes                  int      `json:"total_nodes"`
+	AverageAvailabilityPercent  float64  `json:"average_availability_percent"`
+	NodesBelow99                int      `json:"nodes_below_99"`
+	TotalOfflineDurationSeconds int64    `json:"total_offline_duration_seconds"`
+	HighestLatencyP95Ms         *float64 `json:"highest_latency_p95_ms,omitempty"`
+}
+
+type NodeAvailabilityReport struct {
+	NodeID                 string   `json:"node_id"`
+	Name                   string   `json:"name"`
+	Tags                   []string `json:"tags"`
+	LastSeen               int64    `json:"last_seen"`
+	AvailabilityPercent    float64  `json:"availability_percent"`
+	ExpectedSamples        int      `json:"expected_samples"`
+	ObservedSamples        int      `json:"observed_samples"`
+	OfflineDurationSeconds int64    `json:"offline_duration_seconds"`
+	OutageCount            int      `json:"outage_count"`
+	LastOutageStart        *int64   `json:"last_outage_start,omitempty"`
+	LastOutageEnd          *int64   `json:"last_outage_end,omitempty"`
+	LatencyP50Ms           *float64 `json:"latency_p50_ms,omitempty"`
+	LatencyP95Ms           *float64 `json:"latency_p95_ms,omitempty"`
+}
+
+type AvailabilityReport struct {
+	Range         AvailabilityReportRange    `json:"range"`
+	Filter        AvailabilityReportFilter   `json:"filter"`
+	AvailableTags []string                   `json:"available_tags"`
+	Overview      AvailabilityReportOverview `json:"overview"`
+	Nodes         []NodeAvailabilityReport   `json:"nodes"`
 }
 
 // MetricsPayload is the JSON message sent by agents over WebSocket.

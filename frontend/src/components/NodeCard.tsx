@@ -4,6 +4,7 @@ import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
 import { formatBytesPerSecond } from "../lib/units"
 import { CountryFlag } from "./CountryFlag"
+import { NodeTagChips } from "./NodeTagChips"
 import { Badge } from "./ui/badge"
 import { Card, CardContent } from "./ui/card"
 
@@ -98,6 +99,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
                 <span className="truncate">{node.name}</span>
               </h3>
               <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{subtitle}</p>
+              {(node.tags ?? []).length > 0 && <NodeTagChips tags={node.tags} className="mt-2" />}
             </div>
             <Badge
               variant={node.online ? "secondary" : "outline"}

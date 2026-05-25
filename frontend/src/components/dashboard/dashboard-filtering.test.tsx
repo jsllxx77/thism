@@ -7,8 +7,8 @@ vi.mock("../../lib/api", () => ({
   api: {
     nodes: vi.fn().mockResolvedValue({
       nodes: [
-        { id: "n1", name: "alpha", online: true, ip: "1.1.1.1", os: "linux", arch: "amd64", last_seen: 0 },
-        { id: "n2", name: "beta", online: false, ip: "1.1.1.2", os: "linux", arch: "arm64", last_seen: 0 },
+        { id: "n1", name: "alpha", online: true, ip: "1.1.1.1", os: "linux", arch: "amd64", last_seen: 0, tags: ["prod", "hk"] },
+        { id: "n2", name: "beta", online: false, ip: "1.1.1.2", os: "linux", arch: "arm64", last_seen: 0, tags: ["dev"] },
       ],
     }),
   },
@@ -43,6 +43,7 @@ describe("dashboard filtering", () => {
     expect(onlineButton).toHaveClass("h-11")
     expect(offlineButton).toHaveClass("h-11")
     expect(screen.getByLabelText("Search nodes")).toHaveClass("h-11")
+    expect(screen.getByLabelText("Tag filter")).toHaveClass("h-11")
     expect(screen.getByRole("button", { name: "Reset filters" })).toHaveClass("h-11")
 
     const filterShell = container.querySelector("section.panel-card") as HTMLElement | null
@@ -68,6 +69,12 @@ describe("dashboard filtering", () => {
     await user.type(screen.getByLabelText("Search nodes"), "alp")
     expect(screen.getByText("alpha")).toBeInTheDocument()
 
+    await user.clear(screen.getByLabelText("Search nodes"))
+    await user.click(allButton)
+    await user.selectOptions(screen.getByLabelText("Tag filter"), "dev")
+    expect(screen.queryByText("alpha")).not.toBeInTheDocument()
+    expect(screen.getByText("beta")).toBeInTheDocument()
+
     await user.click(screen.getByRole("button", { name: "Table View" }))
     expect(screen.getByRole("button", { name: "Table View" }).className).toContain("bg-slate-50/90")
     expect(screen.getByRole("button", { name: "Table View" }).className).toContain("dark:border-white/10")
@@ -77,6 +84,7 @@ describe("dashboard filtering", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument()
     expect(screen.getByText("beta")).toBeInTheDocument()
     expect(allButton.getAttribute("aria-pressed")).toBe("true")
+    expect(screen.getByLabelText("Tag filter")).toHaveValue("all")
   })
 
   it("shows an empty state when no node matches active filters", async () => {

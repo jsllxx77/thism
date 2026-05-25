@@ -103,4 +103,12 @@ describe("node table", () => {
     expect(screen.getByText("HK")).toHaveClass("country-flag__code")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
+
+  it("shows node tags in table rows", () => {
+    render(<NodeTable nodes={[node({ id: "n1", name: "alpha", tags: ["prod", "hk"] })]} onSelectNode={vi.fn()} />)
+
+    expect(screen.getByRole("columnheader", { name: "Tags" })).toBeInTheDocument()
+    expect(screen.getByText("prod")).toBeInTheDocument()
+    expect(screen.getByText("hk")).toBeInTheDocument()
+  })
 })

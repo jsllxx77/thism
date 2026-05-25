@@ -7,12 +7,15 @@ type StatusFilter = "all" | "online" | "offline"
 type Props = {
   status: StatusFilter
   search: string
+  tag?: string
+  availableTags?: string[]
   onStatusChange: (value: StatusFilter) => void
   onSearchChange: (value: string) => void
+  onTagChange?: (value: string) => void
   onReset: () => void
 }
 
-export function NodeFilters({ status, search, onStatusChange, onSearchChange, onReset }: Props) {
+export function NodeFilters({ status, search, tag = "all", availableTags = [], onStatusChange, onSearchChange, onTagChange = () => {}, onReset }: Props) {
   const { t } = useLanguage()
   const statusOptions: Array<{ value: StatusFilter; label: string }> = [
     { value: "all", label: t("dashboard.filters.all") },
@@ -63,6 +66,23 @@ export function NodeFilters({ status, search, onStatusChange, onSearchChange, on
               className="enterprise-outline-control h-11 rounded-xl border pl-9 text-slate-800 placeholder:text-slate-400 shadow-none dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 md:h-10"
             />
           </div>
+        </label>
+
+        <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 md:min-w-40">
+          {t("dashboard.filters.tag")}
+          <select
+            aria-label={t("dashboard.filters.tag")}
+            value={tag}
+            onChange={(event) => onTagChange(event.target.value)}
+            className="enterprise-outline-control h-11 rounded-xl border bg-white px-3 text-sm text-slate-800 shadow-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-950 dark:text-slate-100 md:h-10"
+          >
+            <option value="all">{t("dashboard.filters.allTags")}</option>
+            {availableTags.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
         </label>
 
         <button

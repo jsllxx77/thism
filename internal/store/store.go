@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
 const adminSessionTTL = 30 * 24 * time.Hour
 const sqliteBusyTimeout = 5000
+const availabilityExpectedSampleIntervalSeconds int64 = 5
+const availabilityOutageThresholdSeconds int64 = 20
 
 var metricsRetentionOptions = []int{7, 30}
 
@@ -149,6 +152,14 @@ CREATE TABLE IF NOT EXISTS nodes (
     created_at    INTEGER NOT NULL DEFAULT 0,
     last_seen     INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS node_tags (
+    node_id TEXT NOT NULL,
+    tag     TEXT NOT NULL,
+    PRIMARY KEY (node_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag, node_id);
 
 CREATE TABLE IF NOT EXISTS metrics (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1610,6 +1621,378 @@ JOIN metrics m ON m.id = (
 WHERE n.id IN (` + placeholders + `)`
 }
 
+func normalizeNodeTags(tags []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" {
+			continue
+		}
+		if len(tag) > 48 {
+			return nil, fmt.Errorf("node tag %q is too long", tag)
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+// ReplaceNodeTags replaces the operator-owned free-form tags for a node.
+func (s *Store) ReplaceNodeTags(nodeID string, tags []string) error {
+	normalized, err := normalizeNodeTags(tags)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRow(`SELECT 1 FROM nodes WHERE id = ?`, nodeID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("node not found")
+		}
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM node_tags WHERE node_id = ?`, nodeID); err != nil {
+		return err
+	}
+	for _, tag := range normalized {
+		if _, err := tx.Exec(`INSERT INTO node_tags (node_id, tag) VALUES (?, ?)`, nodeID, tag); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) tagsByNodeIDs(nodeIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(nodeIDs))
+	if len(nodeIDs) == 0 {
+		return result, nil
+	}
+
+	args := make([]any, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		args = append(args, nodeID)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(nodeIDs)), ",")
+	rows, err := s.db.Query(`
+SELECT node_id, tag
+FROM node_tags
+WHERE node_id IN (`+placeholders+`)
+ORDER BY tag`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var nodeID string
+		var tag string
+		if err := rows.Scan(&nodeID, &tag); err != nil {
+			return nil, err
+		}
+		result[nodeID] = append(result[nodeID], tag)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) hydrateNodeTags(nodes []*models.Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	nodeIDs := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.ID)
+	}
+	tagsByNodeID, err := s.tagsByNodeIDs(nodeIDs)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		node.Tags = tagsByNodeID[node.ID]
+		if node.Tags == nil {
+			node.Tags = []string{}
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListNodeTags() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT tag FROM node_tags ORDER BY tag`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		tags = append(tags, tag)
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	return tags, rows.Err()
+}
+
+func nodeHasTag(node *models.Node, tag string) bool {
+	if tag == "" {
+		return true
+	}
+	for _, current := range node.Tags {
+		if current == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func percentile(values []float64, percentile float64) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	index := int(percentile*float64(len(sorted))+0.999999999) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	value := sorted[index]
+	return &value
+}
+
+func (s *Store) latencyPercentilesByNodeID(from, to int64) (map[string]struct {
+	p50 *float64
+	p95 *float64
+}, error) {
+	rows, err := s.db.Query(`
+SELECT node_id, latency_ms
+FROM monitor_results
+WHERE ts BETWEEN ? AND ? AND success = 1 AND latency_ms IS NOT NULL
+ORDER BY node_id, ts`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	valuesByNodeID := make(map[string][]float64)
+	for rows.Next() {
+		var nodeID string
+		var latency float64
+		if err := rows.Scan(&nodeID, &latency); err != nil {
+			return nil, err
+		}
+		valuesByNodeID[nodeID] = append(valuesByNodeID[nodeID], latency)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(valuesByNodeID) == 0 {
+		rollupRows, err := s.db.Query(`
+SELECT node_id, latency_ms_avg
+FROM latency_1m
+WHERE ts BETWEEN ? AND ? AND success_samples > 0 AND latency_ms_avg IS NOT NULL
+ORDER BY node_id, ts`, from, to)
+		if err != nil {
+			return nil, err
+		}
+		defer rollupRows.Close()
+		for rollupRows.Next() {
+			var nodeID string
+			var latency float64
+			if err := rollupRows.Scan(&nodeID, &latency); err != nil {
+				return nil, err
+			}
+			valuesByNodeID[nodeID] = append(valuesByNodeID[nodeID], latency)
+		}
+		if err := rollupRows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	result := make(map[string]struct {
+		p50 *float64
+		p95 *float64
+	}, len(valuesByNodeID))
+	for nodeID, values := range valuesByNodeID {
+		result[nodeID] = struct {
+			p50 *float64
+			p95 *float64
+		}{
+			p50: percentile(values, 0.50),
+			p95: percentile(values, 0.95),
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) metricSampleTimes(nodeID string, from, to int64) ([]int64, error) {
+	rows, err := s.db.Query(`
+SELECT ts
+FROM metrics
+WHERE node_id = ? AND ts BETWEEN ? AND ?
+ORDER BY ts`, nodeID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var times []int64
+	for rows.Next() {
+		var ts int64
+		if err := rows.Scan(&ts); err != nil {
+			return nil, err
+		}
+		times = append(times, ts)
+	}
+	return times, rows.Err()
+}
+
+func buildNodeAvailabilitySummary(node *models.Node, from, to int64, sampleTimes []int64, latency struct {
+	p50 *float64
+	p95 *float64
+}) models.NodeAvailabilityReport {
+	span := to - from
+	expectedSamples := 0
+	if span >= 0 {
+		expectedSamples = int(span/availabilityExpectedSampleIntervalSeconds) + 1
+	}
+
+	row := models.NodeAvailabilityReport{
+		NodeID:          node.ID,
+		Name:            node.Name,
+		Tags:            append([]string(nil), node.Tags...),
+		LastSeen:        node.LastSeen,
+		ExpectedSamples: expectedSamples,
+		ObservedSamples: len(sampleTimes),
+		LatencyP50Ms:    latency.p50,
+		LatencyP95Ms:    latency.p95,
+	}
+
+	previous := from
+	for _, ts := range sampleTimes {
+		if ts < from || ts > to {
+			continue
+		}
+		gap := ts - previous
+		if gap > availabilityOutageThresholdSeconds {
+			outageStart := previous + availabilityExpectedSampleIntervalSeconds
+			outageEnd := ts
+			row.OutageCount++
+			row.OfflineDurationSeconds += outageEnd - outageStart
+			row.LastOutageStart = &outageStart
+			row.LastOutageEnd = &outageEnd
+		}
+		previous = ts
+	}
+	if len(sampleTimes) == 0 {
+		row.OutageCount = 1
+		row.OfflineDurationSeconds = span
+		start := from
+		end := to
+		row.LastOutageStart = &start
+		row.LastOutageEnd = &end
+	} else if tailGap := to - previous; tailGap > availabilityOutageThresholdSeconds {
+		outageStart := previous + availabilityExpectedSampleIntervalSeconds
+		outageEnd := to
+		row.OutageCount++
+		row.OfflineDurationSeconds += outageEnd - outageStart
+		row.LastOutageStart = &outageStart
+		row.LastOutageEnd = &outageEnd
+	}
+
+	if span <= 0 {
+		row.AvailabilityPercent = 100
+	} else {
+		onlineDuration := float64(span - row.OfflineDurationSeconds)
+		if onlineDuration < 0 {
+			onlineDuration = 0
+		}
+		row.AvailabilityPercent = (onlineDuration / float64(span)) * 100
+	}
+	return row
+}
+
+func (s *Store) BuildAvailabilityReport(from, to int64, tag string) (models.AvailabilityReport, error) {
+	if to <= from {
+		return models.AvailabilityReport{}, fmt.Errorf("invalid availability report range")
+	}
+	normalizedTag := ""
+	if strings.TrimSpace(tag) != "" {
+		normalizedTags, err := normalizeNodeTags([]string{tag})
+		if err != nil {
+			return models.AvailabilityReport{}, err
+		}
+		if len(normalizedTags) > 0 {
+			normalizedTag = normalizedTags[0]
+		}
+	}
+
+	nodes, err := s.ListNodes()
+	if err != nil {
+		return models.AvailabilityReport{}, err
+	}
+	availableTags, err := s.ListNodeTags()
+	if err != nil {
+		return models.AvailabilityReport{}, err
+	}
+	latencyByNodeID, err := s.latencyPercentilesByNodeID(from, to)
+	if err != nil {
+		return models.AvailabilityReport{}, err
+	}
+
+	report := models.AvailabilityReport{
+		Range:         models.AvailabilityReportRange{From: from, To: to},
+		Filter:        models.AvailabilityReportFilter{Tag: normalizedTag},
+		AvailableTags: availableTags,
+		Nodes:         []models.NodeAvailabilityReport{},
+	}
+
+	var availabilityTotal float64
+	for _, node := range nodes {
+		if !nodeHasTag(node, normalizedTag) {
+			continue
+		}
+		sampleTimes, err := s.metricSampleTimes(node.ID, from, to)
+		if err != nil {
+			return models.AvailabilityReport{}, err
+		}
+		row := buildNodeAvailabilitySummary(node, from, to, sampleTimes, latencyByNodeID[node.ID])
+		report.Nodes = append(report.Nodes, row)
+		availabilityTotal += row.AvailabilityPercent
+		report.Overview.TotalOfflineDurationSeconds += row.OfflineDurationSeconds
+		if row.AvailabilityPercent < 99 {
+			report.Overview.NodesBelow99++
+		}
+		if row.LatencyP95Ms != nil && (report.Overview.HighestLatencyP95Ms == nil || *row.LatencyP95Ms > *report.Overview.HighestLatencyP95Ms) {
+			value := *row.LatencyP95Ms
+			report.Overview.HighestLatencyP95Ms = &value
+		}
+	}
+	report.Overview.TotalNodes = len(report.Nodes)
+	if report.Overview.TotalNodes > 0 {
+		report.Overview.AverageAvailabilityPercent = availabilityTotal / float64(report.Overview.TotalNodes)
+	}
+
+	return report, nil
+}
+
 // UpsertNode inserts or updates a node record.
 func (s *Store) UpsertNode(node *models.Node) error {
 	hardwareJSON, err := encodeHardware(node.Hardware)
@@ -1706,6 +2089,9 @@ FROM nodes WHERE token = ?`, token)
 		return nil, err
 	}
 	n.Hardware = decodeHardware(hardwareJSON)
+	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
+		return nil, err
+	}
 	return &n, nil
 }
 
@@ -1726,6 +2112,9 @@ FROM nodes WHERE id = ?`, id)
 		return nil, err
 	}
 	n.Hardware = decodeHardware(hardwareJSON)
+	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
+		return nil, err
+	}
 	return &n, nil
 }
 
@@ -1750,7 +2139,13 @@ FROM nodes ORDER BY name`)
 		n.Hardware = decodeHardware(hardwareJSON)
 		nodes = append(nodes, &n)
 	}
-	return nodes, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateNodeTags(nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }
 
 // RenameNode updates only a node's display name.
@@ -1773,6 +2168,7 @@ func (s *Store) DeleteNode(nodeID string) error {
 		`DELETE FROM monitor_results WHERE node_id = ?`,
 		`DELETE FROM latency_1m WHERE node_id = ?`,
 		`DELETE FROM monitor_item_nodes WHERE node_id = ?`,
+		`DELETE FROM node_tags WHERE node_id = ?`,
 		`DELETE FROM processes WHERE node_id = ?`,
 		`DELETE FROM docker_containers WHERE node_id = ?`,
 		`DELETE FROM service_checks WHERE node_id = ?`,

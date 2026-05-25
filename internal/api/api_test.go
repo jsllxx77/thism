@@ -100,6 +100,9 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	if err := s.UpsertNode(node); err != nil {
 		t.Fatalf("UpsertNode: %v", err)
 	}
+	if err := s.ReplaceNodeTags("node-1", []string{"prod", "hk"}); err != nil {
+		t.Fatalf("ReplaceNodeTags: %v", err)
+	}
 
 	if err := s.InsertMetrics("node-1", &models.MetricsPayload{
 		TS:            1733011200,
@@ -123,6 +126,7 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	var body struct {
 		Nodes []struct {
 			ID            string            `json:"id"`
+			Tags          []string          `json:"tags"`
 			LatestMetrics *store.MetricsRow `json:"latest_metrics"`
 		} `json:"nodes"`
 	}
@@ -134,6 +138,9 @@ func TestGetNodesIncludesLatestMetricsSnapshot(t *testing.T) {
 	}
 	if body.Nodes[0].ID != "node-1" {
 		t.Fatalf("expected node id node-1, got %q", body.Nodes[0].ID)
+	}
+	if strings.Join(body.Nodes[0].Tags, ",") != "hk,prod" {
+		t.Fatalf("expected node tags to be included, got %#v", body.Nodes[0].Tags)
 	}
 	if body.Nodes[0].LatestMetrics == nil {
 		t.Fatal("expected latest_metrics to be included")
@@ -1775,6 +1782,26 @@ func TestNodeManagementActions(t *testing.T) {
 		t.Fatalf("expected renamed name to be new-name, got %s", renamed.Name)
 	}
 
+	tagsBody := bytes.NewBufferString(`{"tags":[" Prod ","HK","prod"]}`)
+	tagsReq := httptest.NewRequest(http.MethodPatch, "/api/nodes/node-1", tagsBody)
+	tagsReq.Header.Set("Authorization", "Bearer admin-token")
+	tagsReq.Header.Set("Content-Type", "application/json")
+	tagsResp := httptest.NewRecorder()
+	router.ServeHTTP(tagsResp, tagsReq)
+	if tagsResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for tag update, got %d: %s", tagsResp.Code, tagsResp.Body.String())
+	}
+	var tagged models.Node
+	if err := json.Unmarshal(tagsResp.Body.Bytes(), &tagged); err != nil {
+		t.Fatalf("decode tagged node: %v", err)
+	}
+	if tagged.Name != "new-name" {
+		t.Fatalf("expected tag update to preserve node name, got %s", tagged.Name)
+	}
+	if strings.Join(tagged.Tags, ",") != "hk,prod" {
+		t.Fatalf("expected normalized tags, got %#v", tagged.Tags)
+	}
+
 	commandReq := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/install-command", nil)
 	commandReq.Host = "example.com:12026"
 	commandReq.Header.Set("Authorization", "Bearer admin-token")
@@ -1815,6 +1842,62 @@ func TestNodeManagementActions(t *testing.T) {
 	}
 	if len(body["nodes"]) != 0 {
 		t.Fatalf("expected empty node list after delete, got %d", len(body["nodes"]))
+	}
+}
+
+func TestAvailabilityReportAPI(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-a", Name: "alpha", Token: "token-a", LastSeen: 160}); err != nil {
+		t.Fatalf("UpsertNode alpha: %v", err)
+	}
+	if err := s.UpsertNode(&models.Node{ID: "node-b", Name: "beta", Token: "token-b", LastSeen: 160}); err != nil {
+		t.Fatalf("UpsertNode beta: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-a", []string{"prod", "hk"}); err != nil {
+		t.Fatalf("ReplaceNodeTags alpha: %v", err)
+	}
+	if err := s.ReplaceNodeTags("node-b", []string{"dev"}); err != nil {
+		t.Fatalf("ReplaceNodeTags beta: %v", err)
+	}
+	for _, ts := range []int64{100, 105, 110, 140, 145, 150, 155, 160} {
+		if err := s.InsertMetrics("node-a", &models.MetricsPayload{TS: ts, CPU: 10, Mem: models.MemStats{Used: 1, Total: 2}}); err != nil {
+			t.Fatalf("InsertMetrics alpha %d: %v", ts, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/reports/availability?from=100&to=160&tag=prod", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for availability report, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var report models.AvailabilityReport
+	if err := json.Unmarshal(resp.Body.Bytes(), &report); err != nil {
+		t.Fatalf("decode availability report: %v", err)
+	}
+	if report.Filter.Tag != "prod" || strings.Join(report.AvailableTags, ",") != "dev,hk,prod" {
+		t.Fatalf("unexpected filter/tags: %#v", report)
+	}
+	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node-a" {
+		t.Fatalf("expected only prod node, got %#v", report.Nodes)
+	}
+	if report.Nodes[0].OutageCount != 1 || report.Nodes[0].OfflineDurationSeconds != 25 {
+		t.Fatalf("unexpected outage summary: %#v", report.Nodes[0])
+	}
+
+	badReq := httptest.NewRequest(http.MethodGet, "/api/reports/availability?from=200&to=100", nil)
+	badReq.Header.Set("Authorization", "Bearer admin-token")
+	badResp := httptest.NewRecorder()
+	router.ServeHTTP(badResp, badReq)
+	if badResp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid range, got %d: %s", badResp.Code, badResp.Body.String())
 	}
 }
 
