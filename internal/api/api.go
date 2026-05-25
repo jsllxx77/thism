@@ -45,9 +45,12 @@ const loginFailureDelay = 250 * time.Millisecond
 const loginFailureWindow = 5 * time.Minute
 const loginFailureLockout = 5
 const websocketReadLimit = 1 << 20
-const websocketPongWait = 60 * time.Second
-const websocketPingPeriod = 45 * time.Second
 const websocketWriteWait = 10 * time.Second
+
+var (
+	websocketPongWait   = 60 * time.Second
+	websocketPingPeriod = 45 * time.Second
+)
 
 type accessRole string
 
@@ -2888,8 +2891,10 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 
 	writeLatencyMonitorConfigToConn(conn, s, node.ID)
 	h.Register(node.ID, conn)
+	stopKeepalive := startAgentWebsocketKeepalive(h, node.ID)
 	alertDispatcher.EnqueueHeartbeat(node, true, time.Now().Unix())
 	defer func() {
+		stopKeepalive()
 		alertDispatcher.EnqueueHeartbeat(node, false, time.Now().Unix())
 		alertDispatcher.Close()
 		conn.Close()
@@ -2900,6 +2905,9 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			break
+		}
+		if err := refreshWebsocketReadDeadline(conn); err != nil {
 			break
 		}
 
@@ -3037,10 +3045,44 @@ func configureWebsocketRead(conn *websocket.Conn) {
 		return
 	}
 	conn.SetReadLimit(websocketReadLimit)
-	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	_ = refreshWebsocketReadDeadline(conn)
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+		return refreshWebsocketReadDeadline(conn)
 	})
+}
+
+func refreshWebsocketReadDeadline(conn *websocket.Conn) error {
+	if conn == nil {
+		return nil
+	}
+	return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+}
+
+func startAgentWebsocketKeepalive(h *hub.Hub, nodeID string) func() {
+	if h == nil || strings.TrimSpace(nodeID) == "" {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	ticker := time.NewTicker(websocketPingPeriod)
+	var stopOnce sync.Once
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_ = h.SendToAgent(nodeID, models.WSMessage{Type: "server_ping"})
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(done)
+		})
+	}
 }
 
 func writeWebsocketMessage(conn *websocket.Conn, messageType int, data []byte) error {
@@ -3227,6 +3269,9 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h
 		defer close(done)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+			if err := refreshWebsocketReadDeadline(conn); err != nil {
 				return
 			}
 		}
