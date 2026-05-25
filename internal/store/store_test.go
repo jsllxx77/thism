@@ -222,6 +222,37 @@ func TestStoreAvailabilityReportComputesOutagesAndLatency(t *testing.T) {
 	}
 }
 
+func TestStoreAvailabilityReportUsesEmptyTagSlices(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-a", Name: "alpha", Token: "token-a", LastSeen: 160}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	report, err := s.BuildAvailabilityReport(100, 160, "")
+	if err != nil {
+		t.Fatalf("BuildAvailabilityReport: %v", err)
+	}
+	if len(report.Nodes) != 1 {
+		t.Fatalf("expected one report node, got %#v", report.Nodes)
+	}
+	if report.Nodes[0].Tags == nil {
+		t.Fatal("expected untagged report nodes to use an empty tag slice, got nil")
+	}
+
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("Marshal report: %v", err)
+	}
+	if strings.Contains(string(encoded), `"tags":null`) {
+		t.Fatalf("expected report JSON to encode empty tags as [], got %s", encoded)
+	}
+}
+
 func TestStoreMetrics(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {

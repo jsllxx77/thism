@@ -1877,7 +1877,7 @@ func buildNodeAvailabilitySummary(node *models.Node, from, to int64, sampleTimes
 	row := models.NodeAvailabilityReport{
 		NodeID:          node.ID,
 		Name:            node.Name,
-		Tags:            append([]string(nil), node.Tags...),
+		Tags:            append([]string{}, node.Tags...),
 		LastSeen:        node.LastSeen,
 		ExpectedSamples: expectedSamples,
 		ObservedSamples: len(sampleTimes),

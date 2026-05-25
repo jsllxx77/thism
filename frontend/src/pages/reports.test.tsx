@@ -68,4 +68,29 @@ describe("reports page", () => {
 
     expect(await screen.findByText("No nodes match this report filter.")).toBeInTheDocument()
   })
+
+  it("renders nodes when an older report payload has null tags", async () => {
+    vi.mocked(api.availabilityReport).mockResolvedValue(report({
+      available_tags: [],
+      nodes: [
+        {
+          node_id: "node-a",
+          name: "alpha",
+          tags: null,
+          last_seen: Math.floor(Date.now() / 1000),
+          availability_percent: 99.5,
+          expected_samples: 20,
+          observed_samples: 19,
+          offline_duration_seconds: 60,
+          outage_count: 1,
+          latency_p95_ms: 42.5,
+        },
+      ],
+    }))
+
+    render(<Reports />)
+
+    expect(await screen.findByText("alpha")).toBeInTheDocument()
+    expect(screen.getByText("—")).toBeInTheDocument()
+  })
 })

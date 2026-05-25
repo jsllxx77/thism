@@ -6,8 +6,9 @@ type Props = {
 }
 
 export function NodeTagChips({ tags = [], limit = 3, emptyLabel, className = "" }: Props) {
-  const visibleTags = tags.slice(0, limit)
-  const overflow = Math.max(0, tags.length - visibleTags.length)
+  const normalizedTags = Array.isArray(tags) ? tags : []
+  const visibleTags = normalizedTags.slice(0, limit)
+  const overflow = Math.max(0, normalizedTags.length - visibleTags.length)
 
   if (visibleTags.length === 0) {
     if (!emptyLabel) return null
@@ -15,7 +16,7 @@ export function NodeTagChips({ tags = [], limit = 3, emptyLabel, className = "" 
   }
 
   return (
-    <span className={`flex min-w-0 flex-wrap gap-1 ${className}`} aria-label={`Tags: ${tags.join(", ")}`}>
+    <span className={`flex min-w-0 flex-wrap gap-1 ${className}`} aria-label={`Tags: ${normalizedTags.join(", ")}`}>
       {visibleTags.map((tag) => (
         <span
           key={tag}
