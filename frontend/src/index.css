@@ -243,11 +243,8 @@ table td {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
   vertical-align: middle;
-  border-radius: 0.16rem;
-  background: rgba(248, 250, 252, 0.92);
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 }
 
 .country-flag__emoji {
@@ -255,10 +252,6 @@ table td {
   align-items: center;
   justify-content: center;
   line-height: 1;
-}
-
-.dark .country-flag {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 @media (prefers-reduced-motion: reduce) {

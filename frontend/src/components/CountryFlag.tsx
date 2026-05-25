@@ -8,9 +8,9 @@ type CountryFlagProps = {
 }
 
 const sizeClasses: Record<NonNullable<CountryFlagProps["size"]>, string> = {
-  sm: "h-[0.82rem] w-[1.1rem] text-[10px]",
-  md: "h-[0.92rem] w-[1.23rem] text-[11px]",
-  lg: "h-[1.35rem] w-[1.8rem] text-sm",
+  sm: "w-[1.05rem] text-[13px]",
+  md: "w-[1.25rem] text-[16px]",
+  lg: "w-[1.5rem] text-[20px]",
 }
 
 export const CountryFlag = memo(function CountryFlag({ countryCode, className = "", size = "md" }: CountryFlagProps) {
