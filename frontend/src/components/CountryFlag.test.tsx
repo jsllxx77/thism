@@ -15,6 +15,15 @@ describe("CountryFlag", () => {
     expect(screen.queryByText("HK")).not.toBeInTheDocument()
   })
 
+  it.each(["HK", "SG", "AU"])("includes a graphical fallback for %s when flag emoji fonts collapse", (countryCode) => {
+    render(<CountryFlag countryCode={countryCode} />)
+
+    const flag = screen.getByRole("img", { name: countryCode })
+    const fallback = flag.querySelector(".country-flag__fallback")
+    expect(fallback).toBeInstanceOf(SVGElement)
+    expect(flag).toHaveAttribute("data-country-flag-fallback", "svg")
+  })
+
   it("does not render for invalid country codes", () => {
     const { container } = render(<CountryFlag countryCode="HKG" />)
 
