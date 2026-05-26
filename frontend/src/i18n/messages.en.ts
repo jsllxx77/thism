@@ -147,6 +147,13 @@ export const messagesEn = {
       p95Latency: "P95 latency",
       lastSeen: "Last seen",
       samples: "{observed} / {expected} samples",
+      chartAvailabilityRanking: "Availability ranking",
+      chartOfflineImpact: "Offline impact",
+      chartSlaDistribution: "SLA distribution",
+      slaExcellent: ">=99.9%",
+      slaStandard: "99%-99.9%",
+      slaAttention: "<99%",
+      nodeCount: "{count} nodes",
     },
     settingsPage: {
       eyebrow: "Workspace",

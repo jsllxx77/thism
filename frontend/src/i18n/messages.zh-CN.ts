@@ -147,6 +147,13 @@ export const messagesZhCN = {
       p95Latency: "P95 延迟",
       lastSeen: "最后在线",
       samples: "{observed} / {expected} 个样本",
+      chartAvailabilityRanking: "可用性排行",
+      chartOfflineImpact: "离线影响",
+      chartSlaDistribution: "SLA 分布",
+      slaExcellent: ">=99.9%",
+      slaStandard: "99%-99.9%",
+      slaAttention: "<99%",
+      nodeCount: "{count} 个节点",
     },
     settingsPage: {
       eyebrow: "工作区",

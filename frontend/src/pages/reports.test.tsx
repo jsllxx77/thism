@@ -4,10 +4,25 @@ import userEvent from "@testing-library/user-event"
 import { api } from "../lib/api"
 import { Reports } from "./Reports"
 
+type RechartsProps = {
+  children?: React.ReactNode
+}
+
 vi.mock("../lib/api", () => ({
   api: {
     availabilityReport: vi.fn(),
   },
+}))
+
+vi.mock("recharts", () => ({
+  ResponsiveContainer: ({ children }: RechartsProps) => <div data-testid="responsive-container">{children}</div>,
+  BarChart: ({ children }: RechartsProps) => <svg data-testid="bar-chart">{children}</svg>,
+  CartesianGrid: () => <div data-testid="cartesian-grid" />,
+  XAxis: () => <div data-testid="x-axis" />,
+  YAxis: () => <div data-testid="y-axis" />,
+  Tooltip: () => <div data-testid="tooltip-proxy" />,
+  Bar: ({ children }: RechartsProps) => <div data-testid="bar-series">{children}</div>,
+  Cell: () => <div data-testid="bar-cell" />,
 }))
 
 function report(overrides = {}) {
@@ -50,9 +65,12 @@ describe("reports page", () => {
 
     expect(await screen.findByRole("heading", { name: "Reports" })).toBeInTheDocument()
     expect((await screen.findAllByText("99.50%")).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText("alpha")).toBeInTheDocument()
+    expect(screen.getAllByText("alpha").length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText("prod").length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText("42.5 ms").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText("Availability ranking")).toBeInTheDocument()
+    expect(screen.getByText("Offline impact")).toBeInTheDocument()
+    expect(screen.getByText("SLA distribution")).toBeInTheDocument()
 
     await user.selectOptions(screen.getByLabelText("Tag filter"), "prod")
 
@@ -90,7 +108,7 @@ describe("reports page", () => {
 
     render(<Reports />)
 
-    expect(await screen.findByText("alpha")).toBeInTheDocument()
+    expect((await screen.findAllByText("alpha")).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText("—")).toBeInTheDocument()
   })
 })
