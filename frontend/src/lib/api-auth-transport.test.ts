@@ -45,4 +45,37 @@ describe("api transport", () => {
     expect(headers.get("X-CSRF-Token")).toBe("csrf-token-123")
     expect(headers.get("Authorization")).toBeNull()
   })
+
+  it("refreshes the csrf cookie and retries one state-changing request when the session is stale", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+        json: async () => ({ error: "csrf token required" }),
+      })
+      .mockImplementationOnce(async () => {
+        document.cookie = "thism_csrf=fresh-csrf-token; path=/"
+        return {
+          ok: true,
+          json: async () => ({ role: "admin" }),
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
+      })
+
+    const { api } = await import("./api")
+    await api.renameNode("node-1", "edge")
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const [refreshPath] = fetchMock.mock.calls[1] as [string, RequestInit]
+    const [retryPath, retryOptions] = fetchMock.mock.calls[2] as [string, RequestInit]
+    const retryHeaders = retryOptions.headers as Headers
+
+    expect(refreshPath).toBe("/api/auth/session")
+    expect(retryPath).toBe("/api/nodes/node-1")
+    expect(retryHeaders.get("X-CSRF-Token")).toBe("fresh-csrf-token")
+  })
 })

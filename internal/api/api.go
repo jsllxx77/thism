@@ -328,7 +328,11 @@ func (m *authManager) HasBootstrapQueryToken(r *http.Request) bool {
 }
 
 func (m *authManager) BootstrapSessionCookie(w http.ResponseWriter, r *http.Request) {
-	if m == nil || m.sessions.Has(adminSessionID(r)) {
+	if m == nil {
+		return
+	}
+	if m.sessions.Has(adminSessionID(r)) {
+		ensureCSRFCookie(w, r)
 		return
 	}
 
@@ -699,6 +703,14 @@ func writeCSRFCookie(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsSecure(r),
 	})
+}
+
+func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(csrfCookieName)
+	if err == nil && cookie.Value != "" {
+		return
+	}
+	writeCSRFCookie(w, r)
 }
 
 func clearCSRFCookie(w http.ResponseWriter, r *http.Request) {

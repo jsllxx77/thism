@@ -1109,6 +1109,65 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 	}
 }
 
+func TestAdminSessionRefreshesMissingCSRFCookie(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{
+			AdminToken: "admin-token",
+			Username:   "admin",
+			Password:   "secret-pass",
+		},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend"))
+		}),
+	)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"secret-pass"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginResp := httptest.NewRecorder()
+	router.ServeHTTP(loginResp, loginReq)
+	if loginResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for login, got %d: %s", loginResp.Code, loginResp.Body.String())
+	}
+
+	var sessionCookie *http.Cookie
+	for _, cookie := range loginResp.Result().Cookies() {
+		if cookie.Name == "thism_admin" {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected thism_admin cookie to be set on login")
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	sessionReq.AddCookie(sessionCookie)
+	sessionResp := httptest.NewRecorder()
+	router.ServeHTTP(sessionResp, sessionReq)
+	if sessionResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for recovered admin session, got %d: %s", sessionResp.Code, sessionResp.Body.String())
+	}
+
+	var refreshedCSRF *http.Cookie
+	for _, cookie := range sessionResp.Result().Cookies() {
+		if cookie.Name == "thism_csrf" {
+			refreshedCSRF = cookie
+			break
+		}
+	}
+	if refreshedCSRF == nil || refreshedCSRF.Value == "" {
+		t.Fatalf("expected missing csrf cookie to be refreshed, got %#v", refreshedCSRF)
+	}
+}
+
 func TestGuestSessionCannotAccessProcesses(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

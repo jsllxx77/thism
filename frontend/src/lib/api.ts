@@ -1,12 +1,15 @@
 import { getPreferredLanguage } from "../i18n/language"
 
-async function req<T>(path: string, options?: RequestInit): Promise<T> {
+const CSRF_REQUIRED_ERROR = "csrf token required"
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"])
+
+async function req<T>(path: string, options?: RequestInit, allowCSRFRefresh = true): Promise<T> {
   const csrfToken = csrfTokenFromCookie()
   const method = options?.method?.toUpperCase() ?? "GET"
   const headers = new Headers(options?.headers)
   headers.set("Content-Type", "application/json")
   headers.set("Accept-Language", getPreferredLanguage())
-  if (csrfToken && !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
+  if (csrfToken && !SAFE_METHODS.has(method)) {
     headers.set("X-CSRF-Token", csrfToken)
   }
   const res = await fetch(path, {
@@ -22,6 +25,10 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
       }
     } catch {
       // Ignore non-JSON error responses and keep status-based message.
+    }
+    if (allowCSRFRefresh && message === CSRF_REQUIRED_ERROR && !SAFE_METHODS.has(method)) {
+      await req<SessionInfo>("/api/auth/session", undefined, false)
+      return req<T>(path, options, false)
     }
     throw new Error(message)
   }
