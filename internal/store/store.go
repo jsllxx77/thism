@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -474,6 +475,60 @@ func normalizeLatencyMonitorNodeIDs(nodeIDs []string) []string {
 	return clean
 }
 
+type ipFamily string
+
+const (
+	ipFamilyUnknown ipFamily = ""
+	ipFamilyIPv4    ipFamily = "ipv4"
+	ipFamilyIPv6    ipFamily = "ipv6"
+)
+
+func resolveIPFamily(value string) ipFamily {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ipFamilyUnknown
+	}
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		trimmed = strings.Trim(host, "[]")
+	} else {
+		trimmed = strings.Trim(trimmed, "[]")
+	}
+	ip := net.ParseIP(trimmed)
+	if ip == nil {
+		return ipFamilyUnknown
+	}
+	if ip.To4() != nil {
+		return ipFamilyIPv4
+	}
+	return ipFamilyIPv6
+}
+
+func latencyMonitorFamily(monitor *models.LatencyMonitor) ipFamily {
+	if monitor == nil {
+		return ipFamilyUnknown
+	}
+	if family := resolveIPFamily(monitor.Target); family != ipFamilyUnknown {
+		return family
+	}
+	value := strings.ToLower(strings.TrimSpace(monitor.Name + " " + monitor.Target))
+	tokens := strings.NewReplacer("-", " ", "_", " ", ".", " ", ":", " ", "/", " ", "[", " ", "]", " ").Replace(value)
+	for _, token := range strings.Fields(tokens) {
+		switch token {
+		case "ipv4", "v4":
+			return ipFamilyIPv4
+		case "ipv6", "v6":
+			return ipFamilyIPv6
+		}
+	}
+	return ipFamilyUnknown
+}
+
+func latencyMonitorAppliesToNodeIP(monitor *models.LatencyMonitor, nodeIP string) bool {
+	monitorFamily := latencyMonitorFamily(monitor)
+	nodeFamily := resolveIPFamily(nodeIP)
+	return monitorFamily == ipFamilyUnknown || nodeFamily == ipFamilyUnknown || monitorFamily == nodeFamily
+}
+
 func normalizeLatencyMonitor(monitor *models.LatencyMonitor) (*models.LatencyMonitor, error) {
 	if monitor == nil {
 		return nil, fmt.Errorf("latency monitor is nil")
@@ -508,6 +563,29 @@ func normalizeLatencyMonitor(monitor *models.LatencyMonitor) (*models.LatencyMon
 	}
 	normalized.AssignedNodeIDs = normalizeLatencyMonitorNodeIDs(normalized.AssignedNodeIDs)
 	return &normalized, nil
+}
+
+func filterLatencyMonitorNodeIDsByFamily(db queryRower, monitor *models.LatencyMonitor, nodeIDs []string) ([]string, error) {
+	normalized := normalizeLatencyMonitorNodeIDs(nodeIDs)
+	if len(normalized) == 0 || latencyMonitorFamily(monitor) == ipFamilyUnknown {
+		return normalized, nil
+	}
+
+	filtered := make([]string, 0, len(normalized))
+	for _, nodeID := range normalized {
+		var nodeIP string
+		err := db.QueryRow(`SELECT ip FROM nodes WHERE id = ?`, nodeID).Scan(&nodeIP)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if latencyMonitorAppliesToNodeIP(monitor, nodeIP) {
+			filtered = append(filtered, nodeID)
+		}
+	}
+	return filtered, nil
 }
 
 func replaceLatencyMonitorNodes(tx *sql.Tx, monitorID string, nodeIDs []string) error {
@@ -547,6 +625,7 @@ ORDER BY node_id
 
 type queryRower interface {
 	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 func (s *Store) populateLatencyMonitorAssignments(monitors []*models.LatencyMonitor) error {
@@ -582,7 +661,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	if err != nil {
 		return err
 	}
-	if err := replaceLatencyMonitorNodes(tx, normalized.ID, nodeIDs); err != nil {
+	filteredNodeIDs, err := filterLatencyMonitorNodeIDsByFamily(tx, normalized, nodeIDs)
+	if err != nil {
+		return err
+	}
+	if err := replaceLatencyMonitorNodes(tx, normalized.ID, filteredNodeIDs); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -608,7 +691,11 @@ WHERE id = ?
 	if err != nil {
 		return err
 	}
-	if err := replaceLatencyMonitorNodes(tx, normalized.ID, nodeIDs); err != nil {
+	filteredNodeIDs, err := filterLatencyMonitorNodeIDsByFamily(tx, normalized, nodeIDs)
+	if err != nil {
+		return err
+	}
+	if err := replaceLatencyMonitorNodes(tx, normalized.ID, filteredNodeIDs); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -713,13 +800,69 @@ func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
 	if strings.TrimSpace(nodeID) == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`
-INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id)
-SELECT id, ?
-FROM monitor_items
-WHERE auto_assign_new_nodes = 1
-`, nodeID)
-	return err
+	node, err := s.GetNodeByID(nodeID)
+	if err != nil || node == nil {
+		return err
+	}
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, monitor := range monitors {
+		if monitor == nil || !monitor.AutoAssignNewNodes || !latencyMonitorAppliesToNodeIP(monitor, node.IP) {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id) VALUES (?, ?)`, monitor.ID, nodeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID, nodeIP string) (bool, error) {
+	if strings.TrimSpace(nodeID) == "" || resolveIPFamily(nodeIP) == ipFamilyUnknown {
+		return false, nil
+	}
+	rows, err := tx.Query(`
+SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.auto_assign_new_nodes, m.created_at, m.updated_at
+FROM monitor_items m
+JOIN monitor_item_nodes n ON n.monitor_id = m.id
+WHERE n.node_id = ?
+	`, nodeID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	var pruneIDs []string
+	for rows.Next() {
+		var monitor models.LatencyMonitor
+		var autoAssign int
+		if err := rows.Scan(&monitor.ID, &monitor.Name, &monitor.Type, &monitor.Target, &monitor.IntervalSeconds, &autoAssign, &monitor.CreatedAt, &monitor.UpdatedAt); err != nil {
+			return false, err
+		}
+		monitor.AutoAssignNewNodes = autoAssign == 1
+		if !latencyMonitorAppliesToNodeIP(&monitor, nodeIP) {
+			pruneIDs = append(pruneIDs, monitor.ID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	for _, monitorID := range pruneIDs {
+		if _, err := tx.Exec(`DELETE FROM monitor_item_nodes WHERE monitor_id = ? AND node_id = ?`, monitorID, nodeID); err != nil {
+			return false, err
+		}
+	}
+	return len(pruneIDs) > 0, nil
 }
 
 func (s *Store) DeleteLatencyMonitor(monitorID string) error {
@@ -2580,35 +2723,39 @@ func upsertServiceCheckWith(db sqlExecer, nodeID, name, status string, checkedAt
 	return err
 }
 
-func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload, resolvedIP string, lastSeen int64) error {
+func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload, resolvedIP string, lastSeen int64) (bool, error) {
 	if payload == nil {
-		return fmt.Errorf("metrics payload is nil")
+		return false, fmt.Errorf("metrics payload is nil")
 	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 
 	if err := insertMetricsWith(tx, nodeID, payload); err != nil {
-		return err
+		return false, err
 	}
 	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
-		return err
+		return false, err
+	}
+	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, resolvedIP)
+	if err != nil {
+		return false, err
 	}
 	if len(payload.Processes) > 0 {
 		processesJSON, err := json.Marshal(payload.Processes)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := upsertProcessesWith(tx, nodeID, payload.TS, string(processesJSON)); err != nil {
-			return err
+			return false, err
 		}
 	}
 	for _, service := range payload.Services {
 		if err := upsertServiceCheckWith(tx, nodeID, service.Name, service.Status, payload.TS); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if payload.DockerAvailable != nil {
@@ -2619,14 +2766,14 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 		}
 		containersJSON, err := json.Marshal(containers)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := upsertDockerContainersWith(tx, nodeID, payload.TS, dockerAvailable, string(containersJSON)); err != nil {
-			return err
+			return false, err
 		}
 	}
 
-	return tx.Commit()
+	return latencyAssignmentsChanged, tx.Commit()
 }
 
 // GetServiceChecks returns all service checks for a node as a slice of maps.

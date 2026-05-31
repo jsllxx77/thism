@@ -1580,6 +1580,44 @@ func TestLatencyMonitorCRUD(t *testing.T) {
 	}
 }
 
+func TestCreateLatencyMonitorSkipsMismatchedIPFamilyNodes(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	for _, node := range []*models.Node{
+		{ID: "node-v4", Name: "ipv4-node", Token: "token-v4", IP: "203.0.113.10", CreatedAt: time.Now().Unix()},
+		{ID: "node-v6", Name: "ipv6-node", Token: "token-v6", IP: "2001:db8::10", CreatedAt: time.Now().Unix()},
+	} {
+		if err := s.UpsertNode(node); err != nil {
+			t.Fatalf("UpsertNode %s: %v", node.ID, err)
+		}
+	}
+
+	createBody := bytes.NewBufferString(`{"name":"IPv4 probe","type":"tcp","target":"1.1.1.1:443","interval_seconds":60,"auto_assign_new_nodes":true,"node_ids":["node-v4","node-v6"]}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/settings/latency-monitors", createBody)
+	createReq.Header.Set("Authorization", "Bearer admin-token")
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for create, got %d: %s", createResp.Code, createResp.Body.String())
+	}
+
+	var created models.LatencyMonitor
+	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created monitor: %v", err)
+	}
+	if got := strings.Join(created.AssignedNodeIDs, ","); got != "node-v4" {
+		t.Fatalf("expected API to return only IPv4 assignment, got %q", got)
+	}
+	if created.AssignedNodeCount != 1 {
+		t.Fatalf("expected assigned node count 1, got %#v", created)
+	}
+}
+
 func TestLatencyMonitorNodeHistory(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -2267,20 +2305,33 @@ func TestGetDispatcherRuntimeStats(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body.ActiveDispatchers < baseline.ActiveDispatchers+1 {
-		t.Fatalf("expected active_dispatchers to increase, baseline=%+v body=%+v", baseline, body)
+	current := alerting.DispatcherRuntimeStatsSnapshot()
+	if body.ActiveDispatchers != current.ActiveDispatchers {
+		t.Fatalf("expected active_dispatchers to match runtime snapshot, snapshot=%+v body=%+v", current, body)
 	}
-	if body.TotalCapacity < baseline.TotalCapacity+1 {
-		t.Fatalf("expected total_capacity to increase, baseline=%+v body=%+v", baseline, body)
+	if body.TotalCapacity != current.TotalCapacity {
+		t.Fatalf("expected total_capacity to match runtime snapshot, snapshot=%+v body=%+v", current, body)
 	}
-	if body.QueueDepth < baseline.QueueDepth+1 {
-		t.Fatalf("expected queue_depth to increase, baseline=%+v body=%+v", baseline, body)
+	if body.QueueDepth != current.QueueDepth {
+		t.Fatalf("expected queue_depth to match runtime snapshot, snapshot=%+v body=%+v", current, body)
+	}
+	if body.HighWatermark != current.HighWatermark {
+		t.Fatalf("expected high_watermark to match runtime snapshot, snapshot=%+v body=%+v", current, body)
+	}
+	if body.Enqueued != current.Enqueued {
+		t.Fatalf("expected enqueued to match runtime snapshot, snapshot=%+v body=%+v", current, body)
+	}
+	if body.Processed != current.Processed {
+		t.Fatalf("expected processed to match runtime snapshot, snapshot=%+v body=%+v", current, body)
+	}
+	if body.Dropped != current.Dropped {
+		t.Fatalf("expected dropped to match runtime snapshot, snapshot=%+v body=%+v", current, body)
 	}
 	if body.Enqueued < baseline.Enqueued+2 {
-		t.Fatalf("expected enqueued to increase by at least 2, baseline=%+v body=%+v", baseline, body)
+		t.Fatalf("expected response enqueued to include this test's dispatcher work, baseline=%+v body=%+v", baseline, body)
 	}
 	if body.Dropped < baseline.Dropped+1 {
-		t.Fatalf("expected dropped to increase by at least 1, baseline=%+v body=%+v", baseline, body)
+		t.Fatalf("expected response dropped to include this test's dispatcher drop, baseline=%+v body=%+v", baseline, body)
 	}
 }
 

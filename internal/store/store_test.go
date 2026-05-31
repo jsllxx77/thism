@@ -974,8 +974,12 @@ func TestStoreApplyAgentSnapshot(t *testing.T) {
 		},
 	}
 
-	if err := s.ApplyAgentSnapshot("node-1", payload, "198.51.100.10", 1700000101); err != nil {
+	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", payload, "198.51.100.10", 1700000101)
+	if err != nil {
 		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+	if assignmentsChanged {
+		t.Fatal("expected unchanged latency monitor assignments for a plain snapshot")
 	}
 
 	rows, err := s.QueryMetrics("node-1", 1700000000, 1700000200)
@@ -1127,6 +1131,139 @@ func TestNewNodeAutoAssignedLatencyMonitors(t *testing.T) {
 	}
 	if len(nodeMonitors) != 1 || nodeMonitors[0].ID != "monitor-1" {
 		t.Fatalf("expected node-2 to be auto-assigned, got %#v", nodeMonitors)
+	}
+}
+
+func TestLatencyMonitorAssignmentsSkipMismatchedIPFamily(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	for _, node := range []*models.Node{
+		{ID: "node-v4", Token: "token-v4", Name: "ipv4-node", IP: "203.0.113.10"},
+		{ID: "node-v6", Token: "token-v6", Name: "ipv6-node", IP: "2001:db8::10"},
+	} {
+		if err := s.UpsertNode(node); err != nil {
+			t.Fatalf("UpsertNode %s: %v", node.ID, err)
+		}
+	}
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v4",
+		Name:               "IPv4 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "1.1.1.1:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-v4", "node-v6"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		t.Fatalf("ListLatencyMonitors: %v", err)
+	}
+	if len(monitors) != 1 {
+		t.Fatalf("expected 1 monitor, got %d", len(monitors))
+	}
+	if got := strings.Join(monitors[0].AssignedNodeIDs, ","); got != "node-v4" {
+		t.Fatalf("expected only IPv4 node assignment, got %q", got)
+	}
+}
+
+func TestAutoLatencyMonitorAssignmentSkipsMismatchedIPFamily(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v4",
+		Name:               "IPv4 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "1.1.1.1:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, nil); err != nil {
+		t.Fatalf("CreateLatencyMonitor IPv4: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v6",
+		Name:               "IPv6 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "[2606:4700:4700::1111]:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, nil); err != nil {
+		t.Fatalf("CreateLatencyMonitor IPv6: %v", err)
+	}
+	if err := s.UpsertNode(&models.Node{ID: "node-v4", Token: "token-v4", Name: "ipv4-node", IP: "203.0.113.10"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	if err := s.AssignAutoLatencyMonitorsToNode("node-v4"); err != nil {
+		t.Fatalf("AssignAutoLatencyMonitorsToNode: %v", err)
+	}
+
+	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-v4")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(nodeMonitors) != 1 || nodeMonitors[0].ID != "monitor-v4" {
+		t.Fatalf("expected only IPv4 monitor to be auto-assigned, got %#v", nodeMonitors)
+	}
+}
+
+func TestAgentSnapshotPrunesMismatchedLatencyMonitorAssignments(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v6",
+		Name:               "IPv6 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "[2606:4700:4700::1111]:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", &models.MetricsPayload{
+		TS:  1700000100,
+		Mem: models.MemStats{Used: 1, Total: 2},
+		Net: models.NetStats{RxBytes: 1, TxBytes: 2},
+	}, "203.0.113.10", 1700000100)
+	if err != nil {
+		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+	if !assignmentsChanged {
+		t.Fatal("expected ApplyAgentSnapshot to report pruned latency monitor assignments")
+	}
+
+	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
+	}
+	if len(nodeMonitors) != 0 {
+		t.Fatalf("expected IPv6 monitor to be pruned after IPv4-only signal, got %#v", nodeMonitors)
 	}
 }
 

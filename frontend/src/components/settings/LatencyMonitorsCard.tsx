@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Pencil, Plus, Trash2 } from "lucide-react"
 import { api, type LatencyMonitor, type LatencyMonitorType, type Node } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
@@ -20,8 +20,35 @@ type FormState = {
   nodeIDs: string[]
 }
 
+type IPFamily = "ipv4" | "ipv6" | "unknown"
+
 function typeLabel(type: LatencyMonitorType) {
   return type.toUpperCase()
+}
+
+function ipFamily(value: string): IPFamily {
+  const trimmed = value.trim()
+  if (!trimmed) return "unknown"
+  const bracketMatch = trimmed.match(/^\[([^\]]+)\](?::\d+)?$/)
+  const candidate = bracketMatch ? bracketMatch[1] : trimmed
+  if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/.test(candidate)) return "ipv4"
+  if (/^[a-f0-9:]+$/i.test(candidate) && candidate.includes(":")) return "ipv6"
+  return "unknown"
+}
+
+function monitorFamily(name: string, target: string): IPFamily {
+  const targetFamily = ipFamily(target)
+  if (targetFamily !== "unknown") return targetFamily
+  const tokens = `${name} ${target}`.toLowerCase().replace(/[-_.:/[\]]/g, " ").split(/\s+/)
+  if (tokens.includes("ipv4") || tokens.includes("v4")) return "ipv4"
+  if (tokens.includes("ipv6") || tokens.includes("v6")) return "ipv6"
+  return "unknown"
+}
+
+function monitorAppliesToNode(name: string, target: string, node: Node) {
+  const requiredFamily = monitorFamily(name, target)
+  const nodeFamily = ipFamily(node.ip ?? "")
+  return requiredFamily === "unknown" || nodeFamily === "unknown" || requiredFamily === nodeFamily
 }
 
 function defaultForm(nodes: Node[]): FormState {
@@ -45,6 +72,17 @@ export function LatencyMonitorsCard({ nodes }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(() => defaultForm(nodes))
+  const applicableNodeIDs = useMemo(() => new Set(nodes.filter((node) => monitorAppliesToNode(form.name, form.target, node)).map((node) => node.id)), [form.name, form.target, nodes])
+
+  useEffect(() => {
+    setForm((current) => {
+      const filtered = current.nodeIDs.filter((nodeID) => applicableNodeIDs.has(nodeID))
+      if (filtered.length === current.nodeIDs.length) {
+        return current
+      }
+      return { ...current, nodeIDs: filtered }
+    })
+  }, [applicableNodeIDs])
 
   const loadMonitors = useCallback(async () => {
     setLoading(true)
@@ -94,6 +132,9 @@ export function LatencyMonitorsCard({ nodes }: Props) {
   }
 
   const toggleNode = (nodeID: string) => {
+    if (!applicableNodeIDs.has(nodeID)) {
+      return
+    }
     setForm((current) => ({
       ...current,
       nodeIDs: current.nodeIDs.includes(nodeID)
@@ -120,7 +161,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
         target: form.target.trim(),
         interval_seconds: intervalSeconds,
         auto_assign_new_nodes: true,
-        node_ids: form.nodeIDs,
+        node_ids: form.nodeIDs.filter((nodeID) => applicableNodeIDs.has(nodeID)),
       }
       if (form.id) {
         const request = (api as { updateLatencyMonitor?: typeof api.updateLatencyMonitor }).updateLatencyMonitor
@@ -296,20 +337,30 @@ export function LatencyMonitorsCard({ nodes }: Props) {
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {nodes.map((node) => {
                 const checked = form.nodeIDs.includes(node.id)
+                const applicable = applicableNodeIDs.has(node.id)
                 return (
                   <label
                     key={node.id}
-                    className={`enterprise-inner-surface flex cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 text-sm ${
-                      checked
+                    className={`enterprise-inner-surface flex items-center justify-between rounded-2xl border px-4 py-3 text-sm ${
+                      !applicable
+                        ? "cursor-not-allowed border-slate-200 bg-slate-100/70 text-slate-400 opacity-70 dark:border-white/8 dark:bg-slate-900/60 dark:text-slate-500"
+                        : checked
                         ? "border-slate-300 bg-slate-50 text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-50"
-                        : "border-slate-200 bg-white/80 text-slate-600 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200"
+                        : "cursor-pointer border-slate-200 bg-white/80 text-slate-600 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200"
                     }`}
                   >
-                    <span className="inline-flex min-w-0 items-center"><CountryFlag countryCode={node.country_code} className="mr-1" /><span className="truncate">{node.name}</span></span>
+                    <span className="inline-flex min-w-0 items-center">
+                      <CountryFlag countryCode={node.country_code} className="mr-1" />
+                      <span className="min-w-0">
+                        <span className="block truncate">{node.name}</span>
+                        {!applicable && <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">{t("settingsPage.latencyMonitorsNodeNotApplicable")}</span>}
+                      </span>
+                    </span>
                     <input
                       type="checkbox"
                       aria-label={t("settingsPage.latencyMonitorsAssignNode", { name: node.name })}
                       checked={checked}
+                      disabled={!applicable}
                       onChange={() => toggleNode(node.id)}
                     />
                   </label>

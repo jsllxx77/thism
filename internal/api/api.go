@@ -2966,9 +2966,13 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 
 		// Persist metrics before broadcasting them so the dashboard does not
 		// show data that failed to land in storage.
-		if err := s.ApplyAgentSnapshot(node.ID, &payload, resolveNodeIP(r, payload.IP), lastSeen); err != nil {
+		latencyAssignmentsChanged, err := s.ApplyAgentSnapshot(node.ID, &payload, resolveNodeIP(r, payload.IP), lastSeen)
+		if err != nil {
 			log.Printf("agent metrics: persist snapshot for node %s failed: %v", node.ID, err)
 			continue
+		}
+		if latencyAssignmentsChanged {
+			syncLatencyMonitorsForNode(s, h, node.ID)
 		}
 		if strings.TrimSpace(payload.AgentVersion) != "" {
 			if err := s.FinalizeUpdateJobsForNodeVersion(node.ID, payload.AgentVersion); err != nil {

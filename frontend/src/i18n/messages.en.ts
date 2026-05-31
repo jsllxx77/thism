@@ -242,6 +242,7 @@ export const messagesEn = {
       latencyMonitorsAssignedNodes: "Assigned nodes",
       latencyMonitorsNodeScope: "Probe from nodes",
       latencyMonitorsAssignNode: "Assign {name}",
+      latencyMonitorsNodeNotApplicable: "Not applicable for this target family",
       latencyMonitorsSave: "Save monitor",
       dashboardVisibilityTitle: "Dashboard Card Visibility",
       dashboardVisibilityDescription: "Control whether homepage node cards show IP addresses for administrators.",

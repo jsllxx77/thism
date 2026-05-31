@@ -113,6 +113,44 @@ describe("latency monitors card", () => {
     expect(await screen.findByText("Latency monitor saved.")).toBeInTheDocument()
   })
 
+  it("does not select nodes with a mismatched IP family for explicit IPv4 targets", async () => {
+    const user = userEvent.setup()
+    render(
+      <LatencyMonitorsCard
+        nodes={[
+          { id: "node-v4", name: "IPv4 Node", ip: "203.0.113.10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+          { id: "node-v6", name: "IPv6 Node", ip: "2001:db8::10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "New monitor" }))
+
+    const dialog = await screen.findByRole("dialog")
+    await user.clear(within(dialog).getByLabelText("Monitor name"))
+    await user.type(within(dialog).getByLabelText("Monitor name"), "IPv4 probe")
+    await user.clear(within(dialog).getByLabelText("Target"))
+    await user.type(within(dialog).getByLabelText("Target"), "1.1.1.1:443")
+
+    expect(within(dialog).getByLabelText("Assign IPv4 Node")).toBeChecked()
+    expect(within(dialog).getByLabelText("Assign IPv6 Node")).not.toBeChecked()
+    expect(within(dialog).getByLabelText("Assign IPv6 Node")).toBeDisabled()
+    expect(within(dialog).getByText("Not applicable for this target family")).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "Save monitor" }))
+
+    await waitFor(() => expect(createLatencyMonitorMock).toHaveBeenCalled())
+    expect(createLatencyMonitorMock).toHaveBeenCalledWith({
+      name: "IPv4 probe",
+      type: "tcp",
+      target: "1.1.1.1:443",
+      interval_seconds: 60,
+      auto_assign_new_nodes: true,
+      node_ids: ["node-v4"],
+    })
+  })
+
   it("requires confirmation before deleting a monitor", async () => {
     const user = userEvent.setup()
     deleteLatencyMonitorMock.mockResolvedValue({ ok: true })

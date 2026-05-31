@@ -242,6 +242,7 @@ export const messagesZhCN = {
       latencyMonitorsAssignedNodes: "已分配节点",
       latencyMonitorsNodeScope: "执行探测的节点",
       latencyMonitorsAssignNode: "分配 {name}",
+      latencyMonitorsNodeNotApplicable: "不适用于当前目标协议族",
       latencyMonitorsSave: "保存监测",
       dashboardVisibilityTitle: "首页卡片显示",
       dashboardVisibilityDescription: "控制管理员在首页节点卡片中是否看到 IP 地址。",
