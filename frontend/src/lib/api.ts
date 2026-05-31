@@ -56,6 +56,7 @@ export type Node = {
   id: string
   name: string
   ip: string
+  ip_families?: string[]
   os: string
   arch: string
   country_code?: string

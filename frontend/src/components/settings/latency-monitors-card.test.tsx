@@ -118,8 +118,8 @@ describe("latency monitors card", () => {
     render(
       <LatencyMonitorsCard
         nodes={[
-          { id: "node-v4", name: "IPv4 Node", ip: "203.0.113.10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
-          { id: "node-v6", name: "IPv6 Node", ip: "2001:db8::10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+          { id: "node-v4", name: "IPv4 Node", ip: "203.0.113.10", ip_families: ["ipv4"], os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+          { id: "node-v6", name: "IPv6 Node", ip: "2001:db8::10", ip_families: ["ipv6"], os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
         ]}
       />
     )
@@ -149,6 +149,31 @@ describe("latency monitors card", () => {
       auto_assign_new_nodes: true,
       node_ids: ["node-v4"],
     })
+  })
+
+  it("keeps nodes selectable when their IP family capability is unknown", async () => {
+    const user = userEvent.setup()
+    render(
+      <LatencyMonitorsCard
+        nodes={[
+          { id: "node-1", name: "Dual Stack Node", ip: "203.0.113.10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "New monitor" }))
+
+    const dialog = await screen.findByRole("dialog")
+    await user.clear(within(dialog).getByLabelText("Monitor name"))
+    await user.type(within(dialog).getByLabelText("Monitor name"), "IPv6 probe")
+    await user.clear(within(dialog).getByLabelText("Target"))
+    await user.click(within(dialog).getByLabelText("Target"))
+    await user.paste("[2606:4700:4700::1111]:443")
+
+    expect(within(dialog).getByLabelText("Assign Dual Stack Node")).toBeChecked()
+    expect(within(dialog).getByLabelText("Assign Dual Stack Node")).not.toBeDisabled()
+    expect(within(dialog).queryByText("Not applicable for this target family")).not.toBeInTheDocument()
   })
 
   it("requires confirmation before deleting a monitor", async () => {

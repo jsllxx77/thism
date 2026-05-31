@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     name          TEXT NOT NULL,
     token         TEXT NOT NULL UNIQUE,
     ip            TEXT DEFAULT '',
+    ip_families   TEXT DEFAULT '',
     os            TEXT DEFAULT '',
     arch          TEXT DEFAULT '',
     agent_version TEXT DEFAULT '',
@@ -347,6 +348,9 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 	if err := s.ensureColumn("nodes", "hardware_json", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("nodes", "ip_families", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("nodes", "agent_version", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
@@ -529,6 +533,66 @@ func latencyMonitorAppliesToNodeIP(monitor *models.LatencyMonitor, nodeIP string
 	return monitorFamily == ipFamilyUnknown || nodeFamily == ipFamilyUnknown || monitorFamily == nodeFamily
 }
 
+func normalizeIPFamilies(families []string) []string {
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(families))
+	for _, family := range families {
+		switch strings.ToLower(strings.TrimSpace(family)) {
+		case string(ipFamilyIPv4):
+			if _, ok := seen[string(ipFamilyIPv4)]; !ok {
+				seen[string(ipFamilyIPv4)] = struct{}{}
+				normalized = append(normalized, string(ipFamilyIPv4))
+			}
+		case string(ipFamilyIPv6):
+			if _, ok := seen[string(ipFamilyIPv6)]; !ok {
+				seen[string(ipFamilyIPv6)] = struct{}{}
+				normalized = append(normalized, string(ipFamilyIPv6))
+			}
+		}
+	}
+	return normalized
+}
+
+func encodeIPFamilies(families []string) string {
+	normalized := normalizeIPFamilies(families)
+	if len(normalized) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func decodeIPFamilies(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var families []string
+	if err := json.Unmarshal([]byte(raw), &families); err != nil {
+		return nil
+	}
+	return normalizeIPFamilies(families)
+}
+
+func latencyMonitorAppliesToNodeFamilies(monitor *models.LatencyMonitor, families []string) bool {
+	monitorFamily := latencyMonitorFamily(monitor)
+	if monitorFamily == ipFamilyUnknown {
+		return true
+	}
+	normalized := normalizeIPFamilies(families)
+	if len(normalized) == 0 {
+		return true
+	}
+	for _, family := range normalized {
+		if ipFamily(family) == monitorFamily {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeLatencyMonitor(monitor *models.LatencyMonitor) (*models.LatencyMonitor, error) {
 	if monitor == nil {
 		return nil, fmt.Errorf("latency monitor is nil")
@@ -573,15 +637,15 @@ func filterLatencyMonitorNodeIDsByFamily(db queryRower, monitor *models.LatencyM
 
 	filtered := make([]string, 0, len(normalized))
 	for _, nodeID := range normalized {
-		var nodeIP string
-		err := db.QueryRow(`SELECT ip FROM nodes WHERE id = ?`, nodeID).Scan(&nodeIP)
+		var rawFamilies string
+		err := db.QueryRow(`SELECT ip_families FROM nodes WHERE id = ?`, nodeID).Scan(&rawFamilies)
 		if err == sql.ErrNoRows {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if latencyMonitorAppliesToNodeIP(monitor, nodeIP) {
+		if latencyMonitorAppliesToNodeFamilies(monitor, decodeIPFamilies(rawFamilies)) {
 			filtered = append(filtered, nodeID)
 		}
 	}
@@ -814,7 +878,7 @@ func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
 	}
 	defer tx.Rollback()
 	for _, monitor := range monitors {
-		if monitor == nil || !monitor.AutoAssignNewNodes || !latencyMonitorAppliesToNodeIP(monitor, node.IP) {
+		if monitor == nil || !monitor.AutoAssignNewNodes || !latencyMonitorAppliesToNodeFamilies(monitor, node.IPFamilies) {
 			continue
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id) VALUES (?, ?)`, monitor.ID, nodeID); err != nil {
@@ -824,8 +888,8 @@ func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
 	return tx.Commit()
 }
 
-func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID, nodeIP string) (bool, error) {
-	if strings.TrimSpace(nodeID) == "" || resolveIPFamily(nodeIP) == ipFamilyUnknown {
+func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID string, nodeFamilies []string) (bool, error) {
+	if strings.TrimSpace(nodeID) == "" || len(normalizeIPFamilies(nodeFamilies)) == 0 {
 		return false, nil
 	}
 	rows, err := tx.Query(`
@@ -847,7 +911,7 @@ WHERE n.node_id = ?
 			return false, err
 		}
 		monitor.AutoAssignNewNodes = autoAssign == 1
-		if !latencyMonitorAppliesToNodeIP(&monitor, nodeIP) {
+		if !latencyMonitorAppliesToNodeFamilies(&monitor, nodeFamilies) {
 			pruneIDs = append(pruneIDs, monitor.ID)
 		}
 	}
@@ -2142,21 +2206,23 @@ func (s *Store) UpsertNode(node *models.Node) error {
 	if err != nil {
 		return err
 	}
+	ipFamiliesJSON := encodeIPFamilies(node.IPFamilies)
 
 	_, err = s.db.Exec(`
-INSERT INTO nodes (id, name, token, ip, os, arch, agent_version, hardware_json, created_at, last_seen)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO nodes (id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name          = excluded.name,
     token         = excluded.token,
     ip            = excluded.ip,
+    ip_families   = CASE WHEN excluded.ip_families != '' THEN excluded.ip_families ELSE nodes.ip_families END,
     os            = excluded.os,
     arch          = excluded.arch,
     agent_version = CASE WHEN excluded.agent_version != '' THEN excluded.agent_version ELSE nodes.agent_version END,
     hardware_json = CASE WHEN excluded.hardware_json != '' THEN excluded.hardware_json ELSE nodes.hardware_json END,
     last_seen     = excluded.last_seen
 `,
-		node.ID, node.Name, node.Token, node.IP, node.OS, node.Arch, node.AgentVersion, hardwareJSON,
+		node.ID, node.Name, node.Token, node.IP, ipFamiliesJSON, node.OS, node.Arch, node.AgentVersion, hardwareJSON,
 		node.CreatedAt, node.LastSeen,
 	)
 	return err
@@ -2170,11 +2236,11 @@ func (s *Store) UpdateLastSeen(nodeID string) error {
 
 // UpdateNodeMetadata updates node network/system metadata from live agent signals.
 // Empty values are ignored so we never overwrite existing data with blanks.
-func (s *Store) UpdateNodeMetadata(nodeID, ip, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
-	return updateNodeMetadataWith(s.db, nodeID, ip, osName, arch, agentVersion, hardware, lastSeen)
+func (s *Store) UpdateNodeMetadata(nodeID, ip string, ipFamilies []string, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
+	return updateNodeMetadataWith(s.db, nodeID, ip, ipFamilies, osName, arch, agentVersion, hardware, lastSeen)
 }
 
-func updateNodeMetadataWith(db sqlExecer, nodeID, ip, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
+func updateNodeMetadataWith(db sqlExecer, nodeID, ip string, ipFamilies []string, osName, arch, agentVersion string, hardware *models.NodeHardware, lastSeen int64) error {
 	updates := make([]string, 0, 4)
 	args := make([]any, 0, 6)
 	hardwareJSON, err := encodeHardware(hardware)
@@ -2185,6 +2251,10 @@ func updateNodeMetadataWith(db sqlExecer, nodeID, ip, osName, arch, agentVersion
 	if strings.TrimSpace(ip) != "" {
 		updates = append(updates, "ip = ?")
 		args = append(args, ip)
+	}
+	if ipFamiliesJSON := encodeIPFamilies(ipFamilies); ipFamiliesJSON != "" {
+		updates = append(updates, "ip_families = ?")
+		args = append(args, ipFamiliesJSON)
 	}
 	if strings.TrimSpace(osName) != "" {
 		updates = append(updates, "os = ?")
@@ -2218,12 +2288,13 @@ func updateNodeMetadataWith(db sqlExecer, nodeID, ip, osName, arch, agentVersion
 // GetNodeByToken returns the node with the given token, or (nil, nil) if not found.
 func (s *Store) GetNodeByToken(token string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
 FROM nodes WHERE token = ?`, token)
 
+	var ipFamiliesJSON string
 	var hardwareJSON string
 	var n models.Node
-	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch, &n.AgentVersion,
+	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
 		&hardwareJSON, &n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -2231,6 +2302,7 @@ FROM nodes WHERE token = ?`, token)
 	if err != nil {
 		return nil, err
 	}
+	n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 	n.Hardware = decodeHardware(hardwareJSON)
 	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
 		return nil, err
@@ -2241,12 +2313,13 @@ FROM nodes WHERE token = ?`, token)
 // GetNodeByID returns the node with the given ID, or (nil, nil) if not found.
 func (s *Store) GetNodeByID(id string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
 FROM nodes WHERE id = ?`, id)
 
+	var ipFamiliesJSON string
 	var hardwareJSON string
 	var n models.Node
-	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch, &n.AgentVersion,
+	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
 		&hardwareJSON, &n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -2254,6 +2327,7 @@ FROM nodes WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
 	}
+	n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 	n.Hardware = decodeHardware(hardwareJSON)
 	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
 		return nil, err
@@ -2264,7 +2338,7 @@ FROM nodes WHERE id = ?`, id)
 // ListNodes returns all registered nodes.
 func (s *Store) ListNodes() ([]*models.Node, error) {
 	rows, err := s.db.Query(`
-SELECT id, name, token, ip, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
 FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -2274,11 +2348,13 @@ FROM nodes ORDER BY name`)
 	var nodes []*models.Node
 	for rows.Next() {
 		var n models.Node
+		var ipFamiliesJSON string
 		var hardwareJSON string
-		if err := rows.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &n.OS, &n.Arch, &n.AgentVersion,
+		if err := rows.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
 			&hardwareJSON, &n.CreatedAt, &n.LastSeen); err != nil {
 			return nil, err
 		}
+		n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 		n.Hardware = decodeHardware(hardwareJSON)
 		nodes = append(nodes, &n)
 	}
@@ -2737,10 +2813,10 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 	if err := insertMetricsWith(tx, nodeID, payload); err != nil {
 		return false, err
 	}
-	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
+	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.IPFamilies, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
 		return false, err
 	}
-	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, resolvedIP)
+	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies)
 	if err != nil {
 		return false, err
 	}

@@ -10,6 +10,7 @@ type Node struct {
 	Arch          string               `json:"arch"`
 	CountryCode   string               `json:"country_code,omitempty"`
 	AgentVersion  string               `json:"agent_version,omitempty"`
+	IPFamilies    []string             `json:"ip_families,omitempty"`
 	CreatedAt     int64                `json:"created_at"`
 	LastSeen      int64                `json:"last_seen"`
 	Online        bool                 `json:"online"`
@@ -101,6 +102,7 @@ type MetricsPayload struct {
 	TS              int64             `json:"ts"`
 	CPU             float64           `json:"cpu"`
 	IP              string            `json:"ip,omitempty"`
+	IPFamilies      []string          `json:"ip_families,omitempty"`
 	OS              string            `json:"os,omitempty"`
 	Arch            string            `json:"arch,omitempty"`
 	AgentVersion    string            `json:"agent_version,omitempty"`

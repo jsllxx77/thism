@@ -198,6 +198,7 @@ type Collector struct {
 	lastCPUIdle           float64
 	networkCacheMu        sync.Mutex
 	cachedLocalIP         string
+	cachedIPFamilies      []string
 	cachedLocalIPAt       time.Time
 	cachedInterfaces      map[string]struct{}
 	cachedInterfacesAt    time.Time
@@ -614,25 +615,71 @@ func (c *Collector) cachedNonLoopbackInterfaceNames(currentTime time.Time) map[s
 	return cloneInterfaceNames(cloned)
 }
 
-func (c *Collector) cachedDetectedLocalIP(currentTime time.Time) string {
+func (c *Collector) cachedDetectedNetworkMetadata(currentTime time.Time) (string, []string) {
 	c.networkCacheMu.Lock()
-	if !c.cachedLocalIPAt.IsZero() && currentTime.Sub(c.cachedLocalIPAt) < networkTopologyCacheTTL && c.cachedLocalIP != "" {
-		cached := c.cachedLocalIP
+	if !c.cachedLocalIPAt.IsZero() && currentTime.Sub(c.cachedLocalIPAt) < networkTopologyCacheTTL && (c.cachedLocalIP != "" || len(c.cachedIPFamilies) > 0) {
+		cachedIP := c.cachedLocalIP
+		cachedFamilies := cloneStrings(c.cachedIPFamilies)
 		c.networkCacheMu.Unlock()
-		return cached
+		return cachedIP, cachedFamilies
 	}
 	c.networkCacheMu.Unlock()
 
-	ip := detectLocalIP()
-	if ip == "" {
-		return ""
+	ip, families := detectLocalNetworkMetadata()
+	if ip == "" && len(families) == 0 {
+		return "", nil
 	}
 
 	c.networkCacheMu.Lock()
 	c.cachedLocalIP = ip
+	c.cachedIPFamilies = cloneStrings(families)
 	c.cachedLocalIPAt = currentTime
 	c.networkCacheMu.Unlock()
-	return ip
+	return ip, cloneStrings(families)
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
+}
+
+func detectedIPFamilies() []string {
+	_, families := detectLocalNetworkMetadata()
+	return families
+}
+
+func detectLocalNetworkMetadata() (string, []string) {
+	addrs, err := interfaceAddrsFunc()
+	if err != nil {
+		return "", nil
+	}
+	return detectLocalIPFromAddrs(addrs), detectedIPFamiliesFromAddrs(addrs)
+}
+
+func detectedIPFamiliesFromAddrs(addrs []net.Addr) []string {
+	hasIPv4 := false
+	hasIPv6 := false
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP == nil || ipNet.IP.IsLoopback() || ipNet.IP.IsLinkLocalUnicast() || ipNet.IP.IsLinkLocalMulticast() {
+			continue
+		}
+		if ipNet.IP.To4() != nil {
+			hasIPv4 = true
+			continue
+		}
+		hasIPv6 = true
+	}
+	families := make([]string, 0, 2)
+	if hasIPv4 {
+		families = append(families, "ipv4")
+	}
+	if hasIPv6 {
+		families = append(families, "ipv6")
+	}
+	return families
 }
 
 func (c *Collector) collectNetworkStats(currentTime time.Time) models.NetStats {
@@ -642,15 +689,17 @@ func (c *Collector) collectNetworkStats(currentTime time.Time) models.NetStats {
 // Collect gathers a single snapshot of system metrics.
 func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	currentTime := c.currentTime()
+	detectedIP, ipFamilies := c.cachedDetectedNetworkMetadata(currentTime)
 	ip := c.nodeIP
 	if net.ParseIP(ip) == nil {
-		ip = c.cachedDetectedLocalIP(currentTime)
+		ip = detectedIP
 	}
 
 	payload := &models.MetricsPayload{
 		Type:         "metrics",
 		TS:           currentTime.Unix(),
 		IP:           ip,
+		IPFamilies:   ipFamilies,
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		AgentVersion: c.agentVersion,
@@ -1303,11 +1352,11 @@ func selectTopProcesses(processes []models.Process, limit int) []models.Process 
 }
 
 func detectLocalIP() string {
-	addrs, err := interfaceAddrsFunc()
-	if err != nil {
-		return ""
-	}
+	ip, _ := detectLocalNetworkMetadata()
+	return ip
+}
 
+func detectLocalIPFromAddrs(addrs []net.Addr) string {
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok || ipNet.IP == nil {

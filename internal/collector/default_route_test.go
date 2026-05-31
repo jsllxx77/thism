@@ -32,6 +32,27 @@ func TestParseIPv6DefaultRouteInterfaceNames(t *testing.T) {
 	}
 }
 
+func TestDetectedIPFamiliesReportsNonLoopbackIPv4AndIPv6(t *testing.T) {
+	originalInterfaceAddrsFunc := interfaceAddrsFunc
+	defer func() {
+		interfaceAddrsFunc = originalInterfaceAddrsFunc
+	}()
+
+	interfaceAddrsFunc = func() ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("127.0.0.1")},
+			&net.IPNet{IP: net.ParseIP("192.0.2.10")},
+			&net.IPNet{IP: net.ParseIP("2001:db8::10")},
+			&net.IPNet{IP: net.ParseIP("fe80::1")},
+		}, nil
+	}
+
+	families := detectedIPFamilies()
+	if len(families) != 2 || families[0] != "ipv4" || families[1] != "ipv6" {
+		t.Fatalf("expected IPv4 and IPv6 families, got %#v", families)
+	}
+}
+
 func TestCollectUsesAllActiveNonLoopbackInterfaces(t *testing.T) {
 	originalIOCountersFunc := ioCountersFunc
 	originalNetInterfacesFunc := netInterfacesFunc

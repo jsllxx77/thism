@@ -1588,8 +1588,8 @@ func TestCreateLatencyMonitorSkipsMismatchedIPFamilyNodes(t *testing.T) {
 	router := api.NewRouter(s, h, "admin-token", nil)
 
 	for _, node := range []*models.Node{
-		{ID: "node-v4", Name: "ipv4-node", Token: "token-v4", IP: "203.0.113.10", CreatedAt: time.Now().Unix()},
-		{ID: "node-v6", Name: "ipv6-node", Token: "token-v6", IP: "2001:db8::10", CreatedAt: time.Now().Unix()},
+		{ID: "node-v4", Name: "ipv4-node", Token: "token-v4", IP: "203.0.113.10", IPFamilies: []string{"ipv4"}, CreatedAt: time.Now().Unix()},
+		{ID: "node-v6", Name: "ipv6-node", Token: "token-v6", IP: "2001:db8::10", IPFamilies: []string{"ipv6"}, CreatedAt: time.Now().Unix()},
 	} {
 		if err := s.UpsertNode(node); err != nil {
 			t.Fatalf("UpsertNode %s: %v", node.ID, err)
