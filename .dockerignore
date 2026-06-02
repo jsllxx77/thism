@@ -10,7 +10,14 @@ README*.md
 SECURITY.md
 
 bin/
-dist/
+dist/*
+!dist/
+!dist/thism-agent-linux-amd64
+!dist/thism-agent-linux-arm64
+!dist/thism-agent-linux-amd64.sig
+!dist/thism-agent-linux-arm64.sig
+!dist/thism-agent-linux-amd64.version
+!dist/thism-agent-linux-arm64.version
 frontend/dist/
 frontend/node_modules/
 
