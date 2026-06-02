@@ -99,7 +99,7 @@ describe("node detail chart density", () => {
     latestCPUData = []
     mockMatchMedia()
 
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     nodeMock.mockResolvedValue({
       node: {
           id: "node-1",

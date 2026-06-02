@@ -50,8 +50,8 @@ describe("settings dispatcher health", () => {
     dispatcherRuntimeStatsMock.mockReset()
 
     nodesMock.mockResolvedValue({ nodes: [] })
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     notificationSettingsMock.mockResolvedValue({

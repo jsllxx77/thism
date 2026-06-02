@@ -34,7 +34,7 @@ type LiveMetricsMessage = Partial<MetricsRow> & {
 }
 
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 768px)"
-const DEFAULT_METRICS_RETENTION_DAYS = 7
+const DEFAULT_METRICS_RETENTION_DAYS = 30
 const SEVEN_DAYS_SECONDS = 604800
 const THIRTY_DAYS_SECONDS = 2592000
 

@@ -3,8 +3,8 @@ import { useLanguage } from "../../i18n/language"
 import { api } from "../../lib/api"
 import { Button } from "../ui/button"
 
-const DEFAULT_RETENTION_DAYS = 7
-const DEFAULT_OPTIONS = [7, 30]
+const DEFAULT_RETENTION_DAYS = 30
+const DEFAULT_OPTIONS = [30, 90, 180, 365]
 
 function normalizeOptions(options: number[] | undefined, fallback: number) {
   const values = Array.isArray(options)
@@ -15,10 +15,9 @@ function normalizeOptions(options: number[] | undefined, fallback: number) {
 }
 
 function getRetentionLabel(t: (key: string) => string, days: number) {
-  if (days === 30) {
-    return t("settingsPage.metricsRetention30Days")
-  }
-  return t("settingsPage.metricsRetention7Days")
+  const labelKey = `settingsPage.metricsRetention${days}Days`
+  const translated = t(labelKey)
+  return translated === labelKey ? `${days} days` : translated
 }
 
 export function MetricsRetentionCard() {

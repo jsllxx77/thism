@@ -26,7 +26,7 @@ type sqlExecer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-const DefaultMetricsRetentionDays = 7
+const DefaultMetricsRetentionDays = 30
 
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
@@ -36,7 +36,7 @@ const sqliteBusyTimeout = 5000
 const availabilityExpectedSampleIntervalSeconds int64 = 5
 const availabilityOutageThresholdSeconds int64 = 20
 
-var metricsRetentionOptions = []int{7, 30}
+var metricsRetentionOptions = []int{30, 90, 180, 365}
 
 func MetricsRetentionOptions() []int {
 	options := make([]int, len(metricsRetentionOptions))

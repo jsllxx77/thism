@@ -63,7 +63,7 @@ describe("node detail page states", () => {
         dispatchEvent: () => false,
       }),
     })
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
   })
 
@@ -338,7 +338,7 @@ describe("node detail page states", () => {
 
 
   it("shows a 30d metric range when retention is set to 30 days", async () => {
-    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     nodeMock.mockResolvedValue({
       node: {
         id: "node-1",

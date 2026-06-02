@@ -48,8 +48,8 @@ describe("settings change password", () => {
     versionMetaMock.mockReset()
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
     nodesMock.mockResolvedValue({ nodes: [] })
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     notificationSettingsMock.mockResolvedValue({

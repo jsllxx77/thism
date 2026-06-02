@@ -35,8 +35,8 @@ describe("settings version metadata", () => {
     versionMetaMock.mockReset()
 
     nodesMock.mockResolvedValue({ nodes: [] })
-    metricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
-    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     agentReleaseMock.mockResolvedValue({ target_version: "v1.2.3", download_url: "https://example.com/amd64", sha256: "sha", check_interval_seconds: 1800 })
     versionMetaMock.mockResolvedValue({ version: "v1.2.3", commit: "abc1234", build_time: "2026-03-18T04:00:00Z" })
   })

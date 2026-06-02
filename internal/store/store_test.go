@@ -659,7 +659,7 @@ func TestStoreUpdateJobLifecycle(t *testing.T) {
 	}
 }
 
-func TestStoreMetricsRetentionDefaultsToSevenDays(t *testing.T) {
+func TestStoreMetricsRetentionDefaultsToThirtyDays(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -670,8 +670,8 @@ func TestStoreMetricsRetentionDefaultsToSevenDays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMetricsRetentionDays: %v", err)
 	}
-	if days != 7 {
-		t.Fatalf("expected default retention 7 days, got %d", days)
+	if days != 30 {
+		t.Fatalf("expected default retention 30 days, got %d", days)
 	}
 }
 
@@ -682,7 +682,7 @@ func TestStoreMetricsRetentionRoundTrip(t *testing.T) {
 	}
 	defer s.Close()
 
-	if err := s.SetMetricsRetentionDays(30); err != nil {
+	if err := s.SetMetricsRetentionDays(90); err != nil {
 		t.Fatalf("SetMetricsRetentionDays: %v", err)
 	}
 
@@ -690,12 +690,19 @@ func TestStoreMetricsRetentionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMetricsRetentionDays: %v", err)
 	}
-	if days != 30 {
-		t.Fatalf("expected persisted retention 30 days, got %d", days)
+	if days != 90 {
+		t.Fatalf("expected persisted retention 90 days, got %d", days)
 	}
 
-	if err := s.SetMetricsRetentionDays(14); err == nil {
-		t.Fatal("expected unsupported retention value to fail")
+	for _, unsupported := range []int{7, 14} {
+		if err := s.SetMetricsRetentionDays(unsupported); err == nil {
+			t.Fatalf("expected unsupported retention value %d to fail", unsupported)
+		}
+	}
+	for _, supported := range []int{30, 90, 180, 365} {
+		if err := s.SetMetricsRetentionDays(supported); err != nil {
+			t.Fatalf("expected supported retention value %d to succeed: %v", supported, err)
+		}
 	}
 }
 

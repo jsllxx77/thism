@@ -43,8 +43,8 @@ describe("metrics retention settings", () => {
         check_interval_seconds: 1800,
       }),
     )
-    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [7, 30] })
-    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 7, options: [7, 30] })
+    metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    updateMetricsRetentionMock.mockResolvedValue({ retention_days: 90, options: [30, 90, 180, 365] })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
@@ -81,12 +81,16 @@ describe("metrics retention settings", () => {
     await user.click(await screen.findByRole("tab", { name: "Monitoring" }))
     expect(await screen.findByRole("heading", { name: "Metrics Retention", level: 3 })).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "30 days" })).toBeChecked()
+    expect(screen.queryByRole("radio", { name: "7 days" })).not.toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "90 days" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "180 days" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "365 days" })).toBeInTheDocument()
 
-    await user.click(screen.getByRole("radio", { name: "7 days" }))
+    await user.click(screen.getByRole("radio", { name: "90 days" }))
     await user.click(screen.getByRole("button", { name: "Save retention" }))
 
     await waitFor(() => {
-      expect(updateMetricsRetentionMock).toHaveBeenCalledWith(7)
+      expect(updateMetricsRetentionMock).toHaveBeenCalledWith(90)
     })
     expect(await screen.findByText("Metrics retention updated.")).toBeInTheDocument()
   })
