@@ -76,7 +76,7 @@ function AvailabilityRankingChart({ rows, title }: { rows: NodeAvailabilityRepor
   const data = useMemo(
     () =>
       [...rows]
-        .sort((left, right) => left.availability_percent - right.availability_percent || left.name.localeCompare(right.name))
+        .sort((left, right) => right.availability_percent - left.availability_percent || left.name.localeCompare(right.name))
         .slice(0, 8)
         .map((row) => ({
           nodeID: row.node_id,

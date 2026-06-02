@@ -576,6 +576,24 @@ func decodeIPFamilies(raw string) []string {
 	return normalizeIPFamilies(families)
 }
 
+func ipFamiliesExpanded(previousFamilies, currentFamilies []string) bool {
+	previous := normalizeIPFamilies(previousFamilies)
+	current := normalizeIPFamilies(currentFamilies)
+	if len(current) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(previous))
+	for _, family := range previous {
+		seen[family] = struct{}{}
+	}
+	for _, family := range current {
+		if _, ok := seen[family]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 func latencyMonitorAppliesToNodeFamilies(monitor *models.LatencyMonitor, families []string) bool {
 	monitorFamily := latencyMonitorFamily(monitor)
 	if monitorFamily == ipFamilyUnknown {
@@ -886,6 +904,45 @@ func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func backfillLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID string, nodeFamilies []string) (bool, error) {
+	if strings.TrimSpace(nodeID) == "" || len(normalizeIPFamilies(nodeFamilies)) == 0 {
+		return false, nil
+	}
+	rows, err := tx.Query(`
+SELECT id, name, type, target, interval_seconds, auto_assign_new_nodes, created_at, updated_at
+FROM monitor_items
+WHERE auto_assign_new_nodes = 1
+`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	changed := false
+	for rows.Next() {
+		var monitor models.LatencyMonitor
+		var autoAssign int
+		if err := rows.Scan(&monitor.ID, &monitor.Name, &monitor.Type, &monitor.Target, &monitor.IntervalSeconds, &autoAssign, &monitor.CreatedAt, &monitor.UpdatedAt); err != nil {
+			return false, err
+		}
+		monitor.AutoAssignNewNodes = autoAssign == 1
+		if !latencyMonitorAppliesToNodeFamilies(&monitor, nodeFamilies) {
+			continue
+		}
+		result, err := tx.Exec(`INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id) VALUES (?, ?)`, monitor.ID, nodeID)
+		if err != nil {
+			return false, err
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected > 0 {
+			changed = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return changed, nil
 }
 
 func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID string, nodeFamilies []string) (bool, error) {
@@ -2285,6 +2342,17 @@ func updateNodeMetadataWith(db sqlExecer, nodeID, ip string, ipFamilies []string
 	return err
 }
 
+func loadNodeIPFamiliesWith(db queryRower, nodeID string) ([]string, error) {
+	var rawFamilies string
+	if err := db.QueryRow(`SELECT ip_families FROM nodes WHERE id = ?`, nodeID).Scan(&rawFamilies); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return decodeIPFamilies(rawFamilies), nil
+}
+
 // GetNodeByToken returns the node with the given token, or (nil, nil) if not found.
 func (s *Store) GetNodeByToken(token string) (*models.Node, error) {
 	row := s.db.QueryRow(`
@@ -2810,6 +2878,10 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 	}
 	defer tx.Rollback()
 
+	previousFamilies, err := loadNodeIPFamiliesWith(tx, nodeID)
+	if err != nil {
+		return false, err
+	}
 	if err := insertMetricsWith(tx, nodeID, payload); err != nil {
 		return false, err
 	}
@@ -2819,6 +2891,13 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies)
 	if err != nil {
 		return false, err
+	}
+	if ipFamiliesExpanded(previousFamilies, payload.IPFamilies) {
+		backfilled, err := backfillLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies)
+		if err != nil {
+			return false, err
+		}
+		latencyAssignmentsChanged = latencyAssignmentsChanged || backfilled
 	}
 	if len(payload.Processes) > 0 {
 		processesJSON, err := json.Marshal(payload.Processes)

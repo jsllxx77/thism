@@ -6,6 +6,7 @@ import { Reports } from "./Reports"
 
 type RechartsProps = {
   children?: React.ReactNode
+  data?: Array<{ nodeID: string; name: string }>
 }
 
 vi.mock("../lib/api", () => ({
@@ -16,7 +17,16 @@ vi.mock("../lib/api", () => ({
 
 vi.mock("recharts", () => ({
   ResponsiveContainer: ({ children }: RechartsProps) => <div data-testid="responsive-container">{children}</div>,
-  BarChart: ({ children }: RechartsProps) => <svg data-testid="bar-chart">{children}</svg>,
+  BarChart: ({ children, data = [] }: RechartsProps) => (
+    <svg data-testid="bar-chart">
+      {data.map((row) => (
+        <text key={row.nodeID} data-testid="availability-ranking-row">
+          {row.name}
+        </text>
+      ))}
+      {children}
+    </svg>
+  ),
   CartesianGrid: () => <div data-testid="cartesian-grid" />,
   XAxis: () => <div data-testid="x-axis" />,
   YAxis: () => <div data-testid="y-axis" />,
@@ -85,6 +95,54 @@ describe("reports page", () => {
     render(<Reports />)
 
     expect(await screen.findByText("No nodes match this report filter.")).toBeInTheDocument()
+  })
+
+  it("orders the availability ranking from highest availability to lowest", async () => {
+    vi.mocked(api.availabilityReport).mockResolvedValue(report({
+      nodes: [
+        {
+          node_id: "node-a",
+          name: "alpha",
+          tags: ["prod"],
+          last_seen: Math.floor(Date.now() / 1000),
+          availability_percent: 99.5,
+          expected_samples: 20,
+          observed_samples: 19,
+          offline_duration_seconds: 60,
+          outage_count: 1,
+          latency_p95_ms: 42.5,
+        },
+        {
+          node_id: "node-b",
+          name: "bravo",
+          tags: ["prod"],
+          last_seen: Math.floor(Date.now() / 1000),
+          availability_percent: 99.99,
+          expected_samples: 20,
+          observed_samples: 20,
+          offline_duration_seconds: 0,
+          outage_count: 0,
+          latency_p95_ms: 24.1,
+        },
+        {
+          node_id: "node-c",
+          name: "charlie",
+          tags: ["dev"],
+          last_seen: Math.floor(Date.now() / 1000),
+          availability_percent: 99.7,
+          expected_samples: 20,
+          observed_samples: 20,
+          offline_duration_seconds: 20,
+          outage_count: 1,
+          latency_p95_ms: 31.2,
+        },
+      ],
+    }))
+
+    render(<Reports />)
+
+    const rankingRows = await screen.findAllByTestId("availability-ranking-row")
+    expect(rankingRows.map((row) => row.textContent)).toEqual(["bravo", "charlie", "alpha"])
   })
 
   it("renders nodes when an older report payload has null tags", async () => {

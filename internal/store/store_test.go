@@ -1356,6 +1356,130 @@ func TestAgentSnapshotKeepsLatencyAssignmentsWithoutExplicitIPFamilyCapability(t
 	}
 }
 
+func TestAgentSnapshotBackfillsLatencyAssignmentsWhenIPFamilyCapabilityExpands(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha", IP: "203.0.113.10", IPFamilies: []string{"ipv4"}}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v4",
+		Name:               "IPv4 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "1.1.1.1:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor IPv4: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v6",
+		Name:               "IPv6 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "[2606:4700:4700::1111]:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor IPv6: %v", err)
+	}
+
+	before, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID before snapshot: %v", err)
+	}
+	if len(before) != 1 || before[0].ID != "monitor-v4" {
+		t.Fatalf("expected only IPv4 monitor before capability expansion, got %#v", before)
+	}
+
+	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", &models.MetricsPayload{
+		TS:         1700000100,
+		IPFamilies: []string{"ipv4", "ipv6"},
+		Mem:        models.MemStats{Used: 1, Total: 2},
+		Net:        models.NetStats{RxBytes: 1, TxBytes: 2},
+	}, "203.0.113.10", 1700000100)
+	if err != nil {
+		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+	if !assignmentsChanged {
+		t.Fatal("expected capability expansion to backfill latency monitor assignments")
+	}
+
+	after, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID after snapshot: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected IPv4 and IPv6 monitors after capability expansion, got %#v", after)
+	}
+}
+
+func TestAgentSnapshotDoesNotBackfillLatencyAssignmentsWithoutNewIPFamilyCapability(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha", IP: "203.0.113.10", IPFamilies: []string{"ipv4", "ipv6"}}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	monitor := &models.LatencyMonitor{
+		ID:                 "monitor-v6",
+		Name:               "IPv6 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "[2606:4700:4700::1111]:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}
+	if err := s.CreateLatencyMonitor(monitor, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	monitor.UpdatedAt = 1700000001
+	if err := s.UpdateLatencyMonitor(monitor, nil); err != nil {
+		t.Fatalf("UpdateLatencyMonitor manual removal: %v", err)
+	}
+
+	before, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID before snapshot: %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("expected manual removal to leave no assignments before snapshot, got %#v", before)
+	}
+
+	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", &models.MetricsPayload{
+		TS:         1700000100,
+		IPFamilies: []string{"ipv4", "ipv6"},
+		Mem:        models.MemStats{Used: 1, Total: 2},
+		Net:        models.NetStats{RxBytes: 1, TxBytes: 2},
+	}, "203.0.113.10", 1700000100)
+	if err != nil {
+		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+	if assignmentsChanged {
+		t.Fatal("expected unchanged capability to keep latency monitor assignments untouched")
+	}
+
+	after, err := s.ListLatencyMonitorsByNodeID("node-1")
+	if err != nil {
+		t.Fatalf("ListLatencyMonitorsByNodeID after snapshot: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("expected no backfill when capability did not expand, got %#v", after)
+	}
+}
+
 func TestLatencyResultsQueryByNode(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {
