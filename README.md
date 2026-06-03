@@ -11,7 +11,9 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - SQLite storage with no external database requirement
 - Server-hosted agent install script and release manifest
 - Ed25519-signed agent self-updates (fail-closed when the public key is missing)
+- Node tags, tag filtering, and SLA-style availability reports
 - Built-in ICMP, TCP, and HTTP latency monitoring from selected nodes
+- Configurable metrics retention, defaulting to 30 days with longer reporting options
 - Prebuilt GHCR image plus Docker Compose deployment path
 
 ## Quick Start
@@ -76,6 +78,29 @@ The generated command installs `thism-agent` into `/usr/local/bin`, writes a `sy
 
 If the node already exists and you need the command again, open `Settings` -> `Node Management` and click `Get Script` on that node row.
 
+## Node Tags and Reports
+
+Use tags to organize nodes by environment, region, workload, or any other operator-owned grouping.
+
+To edit tags:
+
+1. Open `Settings`.
+2. In the `Node Management` section, click `Edit tags` on a node row.
+3. Enter comma-separated tags such as `prod, hk, database`.
+4. Save the node.
+
+Tags are normalized to lowercase so filters treat `Prod`, `prod`, and `PROD` as the same tag.
+
+The `Reports` page summarizes availability and latency for the selected time window. It includes:
+
+- `24h`, `7d`, and `30d` report ranges
+- Tag filtering
+- Average availability, nodes below 99%, total offline time, and highest p95 latency
+- Availability ranking, offline impact, and SLA distribution charts
+- Node-level SLA rows with samples, outages, p95 latency, and last seen status
+
+Availability reports are computed from retained metrics and latency samples. If historical data has already been pruned, older report windows may contain less evidence than the selected range implies.
+
 To uninstall an agent from a monitored Linux host:
 
 ```bash
@@ -101,6 +126,19 @@ To configure a monitor:
 3. Open `Latency Monitors`.
 4. Create a monitor, choose the target, interval, and nodes that should run it.
 5. Open a node detail page to view the latency chart for the monitors assigned to that node.
+
+## Metrics Retention
+
+Metrics retention controls how long historical metrics and latency samples stay on the server. The default is `30 days`; available options are `30`, `90`, `180`, and `365` days.
+
+To change retention:
+
+1. Open `Settings`.
+2. Switch to the `Monitoring` section.
+3. Open `Metrics Retention`.
+4. Choose the retention period and save.
+
+Changes apply immediately and prune metric rows older than the selected period. Reports and long-range node detail charts depend on this retained history.
 
 ## Releases and Update Integrity
 
