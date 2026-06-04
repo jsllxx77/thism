@@ -37,6 +37,26 @@ describe("node card redesign", () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+  it("stretches the visible card to the dashboard grid row height", () => {
+    const { container } = render(<NodeCard node={createNode()} cpu={42.3} memUsed={512} memTotal={1024} />)
+
+    const button = container.querySelector("button") as HTMLElement | null
+    const card = container.querySelector("button > div") as HTMLElement | null
+
+    expect(button?.className).toContain("h-full")
+    expect(card?.className).toContain("h-full")
+  })
+
+  it("reserves a tag row for cards without tags", () => {
+    const { container } = render(<NodeCard node={createNode()} cpu={42.3} memUsed={512} memTotal={1024} />)
+
+    const tagSlot = container.querySelector("[data-node-card-tag-slot]") as HTMLElement | null
+
+    expect(tagSlot).toBeInTheDocument()
+    expect(tagSlot?.className).toContain("min-h-")
+    expect(tagSlot).toBeEmptyDOMElement()
+  })
+
 
   it("uses a softer orange progress tone in light mode for high load", () => {
     document.documentElement.classList.remove("dark")

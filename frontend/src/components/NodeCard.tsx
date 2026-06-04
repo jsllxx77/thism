@@ -79,6 +79,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
   const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
+  const tags = node.tags ?? []
   const handleClick = onClick ?? (onSelectNode ? () => onSelectNode(node.id) : undefined)
 
   return (
@@ -86,11 +87,11 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
       type="button"
       onClick={handleClick}
       aria-label={node.name}
-      className={`w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-transform hover:-translate-y-0.5 ${
+      className={`h-full w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-transform hover:-translate-y-0.5 ${
         !node.online ? "opacity-80" : ""
       }`}
     >
-      <Card className="panel-card panel-card-hover enterprise-surface rounded-[24px]">
+      <Card className="panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
         <CardContent className="p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -99,7 +100,9 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
                 <span className="truncate">{node.name}</span>
               </h3>
               <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{subtitle}</p>
-              {(node.tags ?? []).length > 0 && <NodeTagChips tags={node.tags} className="mt-2" />}
+              <div data-node-card-tag-slot className="mt-2 min-h-[22px]">
+                {tags.length > 0 && <NodeTagChips tags={tags} />}
+              </div>
             </div>
             <Badge
               variant={node.online ? "secondary" : "outline"}
