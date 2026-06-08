@@ -4,6 +4,17 @@
 
 轻量级自托管服务器监控。单个二进制，零外部依赖。
 
+## 界面预览
+
+<p>
+  <img src="docs/assets/previews/dashboard.png" alt="ThisM 仪表盘，展示节点健康卡片与资源使用情况" width="100%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/reports.png" alt="ThisM 可用性报告，展示 SLA 图表与节点排行" width="49%">
+  <img src="docs/assets/previews/node-detail.png" alt="ThisM 节点详情，展示硬件信息卡片" width="49%">
+</p>
+
 ## 亮点
 
 - 单个 Go 服务端二进制，内嵌 React 前端

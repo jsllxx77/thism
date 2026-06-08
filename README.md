@@ -4,6 +4,17 @@ English | [简体中文](README.zh-CN.md)
 
 Lightweight self-hosted server monitoring. One binary, zero external dependencies.
 
+## Preview
+
+<p>
+  <img src="docs/assets/previews/dashboard.png" alt="ThisM dashboard showing node health cards and resource usage" width="100%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/reports.png" alt="ThisM availability report with SLA charts and node rankings" width="49%">
+  <img src="docs/assets/previews/node-detail.png" alt="ThisM node detail view with hardware profile cards" width="49%">
+</p>
+
 ## Highlights
 
 - Single Go server binary with embedded React frontend
