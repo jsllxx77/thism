@@ -12,7 +12,17 @@
 
 <p>
   <img src="docs/assets/previews/reports.png" alt="ThisM 可用性报告，展示 SLA 图表与节点排行" width="49%">
-  <img src="docs/assets/previews/node-detail.png" alt="ThisM 节点详情，展示硬件信息卡片" width="49%">
+  <img src="docs/assets/previews/dashboard-admin-table.png" alt="ThisM 管理员节点清单表格，展示节点版本与已遮挡的 IP 地址" width="49%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/node-detail-metrics.png" alt="ThisM 管理员节点详情，展示硬件信息与指标图表" width="49%">
+  <img src="docs/assets/previews/node-detail-runtime.png" alt="ThisM 管理员节点详情，展示延迟监测与进程列表" width="49%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/settings-monitoring.png" alt="ThisM 监控设置，展示指标保留、仪表盘可见性与延迟监测" width="49%">
+  <img src="docs/assets/previews/settings-node-management.png" alt="ThisM 节点管理设置，展示节点接入与管理操作" width="49%">
 </p>
 
 ## 亮点

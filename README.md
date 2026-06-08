@@ -12,7 +12,17 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 
 <p>
   <img src="docs/assets/previews/reports.png" alt="ThisM availability report with SLA charts and node rankings" width="49%">
-  <img src="docs/assets/previews/node-detail.png" alt="ThisM node detail view with hardware profile cards" width="49%">
+  <img src="docs/assets/previews/dashboard-admin-table.png" alt="ThisM administrator node inventory table with node versions and redacted IP addresses" width="49%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/node-detail-metrics.png" alt="ThisM administrator node detail view with hardware profile and metric charts" width="49%">
+  <img src="docs/assets/previews/node-detail-runtime.png" alt="ThisM administrator node detail view with latency monitors and top processes" width="49%">
+</p>
+
+<p>
+  <img src="docs/assets/previews/settings-monitoring.png" alt="ThisM monitoring settings with retention, dashboard visibility, and latency monitors" width="49%">
+  <img src="docs/assets/previews/settings-node-management.png" alt="ThisM node management settings with enrollment and node actions" width="49%">
 </p>
 
 ## Highlights
