@@ -485,7 +485,7 @@ export function NotificationsCard({ active = true }: Props) {
                     }
                     setSettings((current: NotificationSettings) => ({ ...current, time_zone_mode: mode }))
                   }}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${settings.time_zone_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
+                  className={`motion-choice-card rounded-2xl border px-4 py-3 text-left text-sm ${settings.time_zone_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
                 >
                   {label}
                 </button>
@@ -506,7 +506,7 @@ export function NotificationsCard({ active = true }: Props) {
                         type="button"
                         aria-pressed={selected}
                         onClick={() => selectCommonTimezone(timeZone)}
-                        className={`rounded-full border px-3 py-2 text-xs font-medium transition ${selected ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
+                        className={`motion-segmented-option rounded-full border px-3 py-2 text-xs font-medium ${selected ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
                       >
                         {timeZone}
                       </button>
@@ -516,7 +516,7 @@ export function NotificationsCard({ active = true }: Props) {
                     type="button"
                     aria-pressed={customTimezoneEntryMode === "manual"}
                     onClick={enableManualTimezoneInput}
-                    className={`rounded-full border px-3 py-2 text-xs font-medium transition ${customTimezoneEntryMode === "manual" ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
+                    className={`motion-segmented-option rounded-full border px-3 py-2 text-xs font-medium ${customTimezoneEntryMode === "manual" ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-emerald-400/50 dark:hover:text-emerald-200"}`}
                   >
                     {t("settingsPage.notificationTimezoneManualEntry")}
                   </button>
@@ -608,7 +608,7 @@ export function NotificationsCard({ active = true }: Props) {
                   key={mode}
                   type="button"
                   onClick={() => setScopeMode(mode)}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${settings.node_scope_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
+                  className={`motion-choice-card rounded-2xl border px-4 py-3 text-left text-sm ${settings.node_scope_mode === mode ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-slate-200 text-slate-700 dark:border-white/10 dark:text-slate-200"}`}
                 >
                   {label}
                 </button>
@@ -673,10 +673,10 @@ export function NotificationsCard({ active = true }: Props) {
                 aria-checked={settings.notify_node_offline}
                 aria-label={t("settingsPage.notifyNodeOffline")}
                 onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_node_offline: !current.notify_node_offline }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_node_offline ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                className={`motion-toggle relative inline-flex h-6 w-11 items-center rounded-full ${settings.notify_node_offline ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_node_offline ? "translate-x-5" : "translate-x-1"}`}
+                  className={`motion-toggle__thumb inline-block h-5 w-5 transform rounded-full bg-white ${settings.notify_node_offline ? "translate-x-5" : "translate-x-1"}`}
                 />
               </button>
             </label>
@@ -691,10 +691,10 @@ export function NotificationsCard({ active = true }: Props) {
                 aria-checked={settings.notify_node_online}
                 aria-label={t("settingsPage.notifyNodeOnline")}
                 onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_node_online: !current.notify_node_online }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_node_online ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                className={`motion-toggle relative inline-flex h-6 w-11 items-center rounded-full ${settings.notify_node_online ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_node_online ? "translate-x-5" : "translate-x-1"}`}
+                  className={`motion-toggle__thumb inline-block h-5 w-5 transform rounded-full bg-white ${settings.notify_node_online ? "translate-x-5" : "translate-x-1"}`}
                 />
               </button>
             </label>
@@ -709,10 +709,10 @@ export function NotificationsCard({ active = true }: Props) {
                 aria-checked={settings.notify_dispatcher_drops}
                 aria-label={t("settingsPage.notifyDispatcherDrops")}
                 onClick={() => setSettings((current: NotificationSettings) => ({ ...current, notify_dispatcher_drops: !current.notify_dispatcher_drops }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.notify_dispatcher_drops ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                className={`motion-toggle relative inline-flex h-6 w-11 items-center rounded-full ${settings.notify_dispatcher_drops ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${settings.notify_dispatcher_drops ? "translate-x-5" : "translate-x-1"}`}
+                  className={`motion-toggle__thumb inline-block h-5 w-5 transform rounded-full bg-white ${settings.notify_dispatcher_drops ? "translate-x-5" : "translate-x-1"}`}
                 />
               </button>
             </label>

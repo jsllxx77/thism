@@ -233,7 +233,7 @@ export function LatencyMonitorsCard({ nodes }: Props) {
       ) : (
         <div className="mt-4 space-y-3">
           {monitors.map((monitor) => (
-            <div key={monitor.id} className="enterprise-inner-surface rounded-2xl border px-4 py-4">
+            <div key={monitor.id} className="motion-action-row enterprise-inner-surface rounded-2xl border px-4 py-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -345,8 +345,8 @@ export function LatencyMonitorsCard({ nodes }: Props) {
                       !applicable
                         ? "cursor-not-allowed border-slate-200 bg-slate-100/70 text-slate-400 opacity-70 dark:border-white/8 dark:bg-slate-900/60 dark:text-slate-500"
                         : checked
-                        ? "border-slate-300 bg-slate-50 text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-50"
-                        : "cursor-pointer border-slate-200 bg-white/80 text-slate-600 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200"
+                        ? "motion-choice-card cursor-pointer border-slate-300 bg-slate-50 text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-50"
+                        : "motion-choice-card cursor-pointer border-slate-200 bg-white/80 text-slate-600 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200"
                     }`}
                   >
                     <span className="inline-flex min-w-0 items-center">

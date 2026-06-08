@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
+import { ArrowUpDown, ChevronUp } from "lucide-react"
 import { useLanguage } from "../../i18n/language"
 import type { Node } from "../../lib/api"
 import { CountryFlag } from "../../components/CountryFlag"
@@ -9,6 +10,32 @@ type SortKey = "name" | "status"
 type Props = {
   nodes: Node[]
   onSelectNode: (id: string) => void
+}
+
+function SortButton({
+  active,
+  ascending,
+  children,
+  onClick,
+}: {
+  active: boolean
+  ascending: boolean
+  children: ReactNode
+  onClick: () => void
+}) {
+  const Icon = active ? ChevronUp : ArrowUpDown
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-active={active}
+      className="motion-sort-button text-left hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-slate-200"
+    >
+      <span>{children}</span>
+      <Icon className={`motion-sort-icon h-3.5 w-3.5 ${active && !ascending ? "rotate-180" : ""}`} />
+    </button>
+  )
 }
 
 export function NodeTable({ nodes, onSelectNode }: Props) {
@@ -40,31 +67,31 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
   }
 
   return (
-    <div className="panel-card enterprise-surface overflow-x-auto rounded-[24px] p-4">
+    <div className="motion-results-region panel-card enterprise-surface overflow-x-auto rounded-[24px] p-4">
       <p className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("dashboard.table.title")}</p>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            <th className="pb-2 pr-3 font-medium">
-              <button type="button" onClick={() => toggleSort("name")} className="text-left hover:text-slate-900 dark:hover:text-slate-200">
+            <th className="pb-2 pr-3 font-medium" aria-sort={sortKey === "name" ? (sortAsc ? "ascending" : "descending") : "none"}>
+              <SortButton active={sortKey === "name"} ascending={sortAsc} onClick={() => toggleSort("name")}>
                 {t("dashboard.table.nodeName")}
-              </button>
+              </SortButton>
             </th>
             <th className="pb-2 pr-3 font-medium">{t("dashboard.table.agent")}</th>
             <th className="pb-2 pr-3 font-medium">{t("dashboard.table.tags")}</th>
             <th className="pb-2 pr-3 font-medium">{t("dashboard.table.ip")}</th>
-            <th className="pb-2 pr-3 font-medium">
-              <button type="button" onClick={() => toggleSort("status")} className="text-left hover:text-slate-900 dark:hover:text-slate-200">
+            <th className="pb-2 pr-3 font-medium" aria-sort={sortKey === "status" ? (sortAsc ? "ascending" : "descending") : "none"}>
+              <SortButton active={sortKey === "status"} ascending={sortAsc} onClick={() => toggleSort("status")}>
                 {t("dashboard.table.status")}
-              </button>
+              </SortButton>
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="motion-table-body">
           {sorted.map((node) => (
             <tr
               key={node.id}
-              className="border-b border-slate-100 hover:bg-white/80 dark:border-slate-800 dark:hover:bg-white/[0.02]"
+              className="motion-table-row border-b border-slate-100 dark:border-slate-800"
             >
               <td className="py-2.5 pr-3 text-slate-900 dark:text-slate-100">
                 <button

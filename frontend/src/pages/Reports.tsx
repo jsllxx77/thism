@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useReducedMotion } from "framer-motion"
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { api, type AvailabilityReport, type NodeAvailabilityReport } from "../lib/api"
 import { useLanguage } from "../i18n/language"
@@ -65,14 +66,26 @@ function ReportMetric({ label, value }: { label: string; value: string }) {
 
 function ReportChartPanel({ title, className = "", children }: { title: string; className?: string; children: ReactNode }) {
   return (
-    <section aria-label={title} className={`panel-card enterprise-surface rounded-[24px] p-4 ${className}`.trim()}>
+    <section aria-label={title} className={`motion-chart-panel panel-card enterprise-surface rounded-[24px] p-4 ${className}`.trim()}>
       <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title}</h2>
       {children}
     </section>
   )
 }
 
+function ChartLoadingSkeleton() {
+  return (
+    <div className="chart-skeleton mt-4 rounded-2xl bg-slate-100/80 p-4 dark:bg-slate-900/70" aria-hidden="true">
+      <div className="chart-skeleton__axis" />
+      <div className="chart-skeleton__bar chart-skeleton__bar--one" />
+      <div className="chart-skeleton__bar chart-skeleton__bar--two" />
+      <div className="chart-skeleton__bar chart-skeleton__bar--three" />
+    </div>
+  )
+}
+
 function AvailabilityRankingChart({ rows, title }: { rows: NodeAvailabilityReport[]; title: string }) {
+  const reduceMotion = useReducedMotion()
   const data = useMemo(
     () =>
       [...rows]
@@ -110,12 +123,19 @@ function AvailabilityRankingChart({ rows, title }: { rows: NodeAvailabilityRepor
             />
             <Tooltip
               cursor={{ fill: "rgba(148, 163, 184, 0.12)" }}
+              wrapperStyle={{ outline: "none", transition: "opacity 160ms ease, transform 160ms ease" }}
               contentStyle={chartTooltipStyle()}
               itemStyle={{ color: "hsl(var(--popover-foreground))" }}
               labelStyle={{ color: "hsl(var(--popover-foreground))" }}
               formatter={(value) => [formatPercent(Number(value)), title]}
             />
-            <Bar dataKey="availability" radius={[0, 8, 8, 0]} isAnimationActive={false}>
+            <Bar
+              dataKey="availability"
+              radius={[0, 8, 8, 0]}
+              isAnimationActive={!reduceMotion}
+              animationDuration={420}
+              animationEasing="ease-out"
+            >
               {data.map((row) => (
                 <Cell key={row.nodeID} fill={availabilityColor(row.availability)} />
               ))}
@@ -166,7 +186,7 @@ function OfflineImpactChart({
                 </span>
               </div>
               <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800">
-                <div className="h-full rounded-full bg-amber-500" style={{ width: `${width}%` }} />
+                <div className="motion-report-bar h-full rounded-full bg-amber-500" style={{ width: `${width}%` }} />
               </div>
             </div>
           )
@@ -215,7 +235,7 @@ function SlaDistributionChart({
           segment.count > 0 ? (
             <div
               key={segment.key}
-              className="h-full"
+              className="motion-report-segment h-full"
               style={{ flexBasis: `${(segment.count / total) * 100}%`, backgroundColor: segment.color }}
               title={`${segment.label}: ${nodeCountLabel(segment.count)}`}
             />
@@ -294,15 +314,20 @@ export function Reports() {
   const nowMs = Date.now()
 
   const rows = useMemo(() => report?.nodes ?? [], [report])
+  const reportMotionKey = [
+    rangeKey,
+    tagFilter,
+    rows.map((row) => row.node_id).join("|"),
+  ].join(":")
 
   return (
-    <MotionSection className="mx-auto max-w-[1440px] space-y-6" testId="motion-reports-root">
+    <MotionSection className="mx-auto max-w-[1440px] space-y-6" testId="motion-reports-root" variant="page">
       <section className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t("reportsPage.title")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">{t("reportsPage.subtitle")}</p>
       </section>
 
-      <section className="panel-card enterprise-surface rounded-[24px] p-4">
+      <section className="motion-filter-panel panel-card enterprise-surface rounded-[24px] p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
           <div className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
             <span>{t("reportsPage.rangeLabel")}</span>
@@ -352,7 +377,7 @@ export function Reports() {
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("reportsPage.loading")}</p>
           <div className="mt-4 space-y-3">
             <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/70" />
-            <div className="h-24 animate-pulse rounded-xl bg-slate-200/70 dark:bg-slate-800/70" />
+            <ChartLoadingSkeleton />
           </div>
         </section>
       ) : error ? (
@@ -368,7 +393,7 @@ export function Reports() {
         </section>
       ) : report ? (
         <>
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section key={`metrics:${reportMotionKey}`} className="motion-results-region grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <ReportMetric label={t("reportsPage.averageAvailability")} value={formatPercent(report.overview.average_availability_percent)} />
             <ReportMetric label={t("reportsPage.nodesBelow99")} value={String(report.overview.nodes_below_99)} />
             <ReportMetric label={t("reportsPage.totalOffline")} value={formatSeconds(report.overview.total_offline_duration_seconds)} />
@@ -376,11 +401,11 @@ export function Reports() {
           </section>
 
           {rows.length === 0 ? (
-            <section className="panel-card rounded-2xl border border-slate-200 px-6 py-14 text-center dark:border-slate-700">
+            <section key={`empty:${reportMotionKey}`} className="motion-empty-state panel-card rounded-2xl border border-slate-200 px-6 py-14 text-center dark:border-slate-700">
               <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("reportsPage.empty")}</p>
             </section>
           ) : (
-            <>
+            <div key={`results:${reportMotionKey}`} className="motion-results-region space-y-6">
               <ReportCharts rows={rows} />
               <section className="panel-card enterprise-surface overflow-x-auto rounded-[24px] p-4">
                 <p className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("reportsPage.tableTitle")}</p>
@@ -396,9 +421,9 @@ export function Reports() {
                       <th className="pb-2 pr-3 font-medium">{t("reportsPage.lastSeen")}</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="motion-table-body">
                     {rows.map((row) => (
-                      <tr key={row.node_id} className="border-b border-slate-100 hover:bg-white/80 dark:border-slate-800 dark:hover:bg-white/[0.02]">
+                      <tr key={row.node_id} className="motion-table-row border-b border-slate-100 dark:border-slate-800">
                         <td className="py-2.5 pr-3 text-slate-900 dark:text-slate-100">
                           <div className="font-medium">{row.name}</div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -418,7 +443,7 @@ export function Reports() {
                   </tbody>
                 </table>
               </section>
-            </>
+            </div>
           )}
         </>
       ) : null}

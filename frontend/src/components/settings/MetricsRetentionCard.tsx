@@ -110,7 +110,7 @@ export function MetricsRetentionCard() {
                 return (
                   <label
                     key={days}
-                    className={`enterprise-inner-surface flex min-h-11 cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 transition-colors ${
+                    className={`motion-choice-card enterprise-inner-surface flex min-h-11 cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 ${
                       checked
                         ? "border-slate-300 bg-slate-50 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50"
                         : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:bg-slate-900"

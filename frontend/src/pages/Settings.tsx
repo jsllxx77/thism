@@ -283,13 +283,13 @@ export function Settings({ refreshNonce = 0 }: Props) {
       <Tabs value={activeSection} onValueChange={handleSectionChange} className="space-y-6">
         <TabsList
           aria-label={t("settingsPage.sectionTabsAriaLabel")}
-          className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-[24px] border border-slate-200/80 bg-white/75 p-2 dark:border-white/10 dark:bg-slate-950/70"
+          className="motion-segmented-shell flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-[24px] border border-slate-200/80 bg-white/75 p-2 dark:border-white/10 dark:bg-slate-950/70"
         >
           {sectionTabs.map((section) => (
             <TabsTrigger
               key={section.value}
               value={section.value}
-              className="enterprise-chip h-10 rounded-full border border-transparent px-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 data-[state=active]:border-slate-300 data-[state=active]:bg-slate-900 data-[state=active]:text-white dark:text-slate-300 dark:data-[state=active]:border-white/10 dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-950"
+              className="motion-segmented-option enterprise-chip h-10 rounded-full border border-transparent px-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 data-[state=active]:border-slate-300 data-[state=active]:bg-slate-900 data-[state=active]:text-white dark:text-slate-300 dark:data-[state=active]:border-white/10 dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-950"
             >
               {section.label}
             </TabsTrigger>

@@ -322,11 +322,24 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.02}>
       {loadingDetail ? (
-        <section className="panel-card rounded-2xl border border-slate-200 p-6 dark:border-slate-700">
+        <section className="panel-card enterprise-surface rounded-[24px] border border-slate-200 p-6 dark:border-slate-700">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("nodeDetail.loading")}</p>
-          <div className="mt-4 space-y-3">
-            <div className="h-4 w-1/4 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/70" />
-            <div className="h-16 animate-pulse rounded-xl bg-slate-200/70 dark:bg-slate-800/70" />
+          <div className="content-skeleton mt-4 space-y-4">
+            <div className="enterprise-inner-surface rounded-2xl p-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-2">
+                  <div className="content-skeleton__line h-4 w-40" />
+                  <div className="content-skeleton__line h-3 w-64 max-w-full" />
+                </div>
+                <div className="content-skeleton__pill h-7 w-24" />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="content-skeleton__block h-24" />
+              <div className="content-skeleton__block h-24" />
+              <div className="content-skeleton__block h-24" />
+            </div>
+            <div className="content-skeleton__block h-32" />
           </div>
         </section>
       ) : detailError ? (

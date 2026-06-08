@@ -4,6 +4,7 @@ import type { Process } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
 import { formatBytes } from "../../lib/units"
 import { Card, CardContent } from "../ui/card"
+import { CollapsibleContent } from "./CollapsibleContent"
 
 type Props = {
   processes: Process[]
@@ -27,11 +28,11 @@ export function ProcessTable({ processes, defaultOpen = false }: Props) {
       <CardContent className="p-4">
         <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-between text-left">
           <span className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("nodeDetail.processSnapshot")}</span>
-          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-out dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
         </button>
 
-        {open && (
-          <div className="enterprise-inner-surface mt-3 overflow-x-auto rounded-2xl p-2">
+        <CollapsibleContent open={open}>
+          <div className="enterprise-inner-surface overflow-x-auto rounded-2xl p-2">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -53,7 +54,7 @@ export function ProcessTable({ processes, defaultOpen = false }: Props) {
               </tbody>
             </table>
           </div>
-        )}
+        </CollapsibleContent>
       </CardContent>
     </Card>
   )

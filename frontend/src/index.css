@@ -30,6 +30,10 @@
     --chart-5: 36 72% 48%;
     --radius: 0.5rem;
     --app-font-family: "Outfit", "Geist", "Segoe UI", "Helvetica Neue", sans-serif;
+    --motion-fast: 160ms;
+    --motion-medium: 220ms;
+    --motion-slow: 320ms;
+    --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .dark {
@@ -125,6 +129,542 @@ body {
 
 .panel-card-hover:active {
   transform: translateY(0) scale(0.995);
+}
+
+.node-card-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.node-card-shell::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(135deg, rgba(40, 89, 173, 0.08), transparent 42%);
+  transition: opacity var(--motion-medium) var(--motion-ease);
+}
+
+.group\/card:hover .node-card-shell::before,
+.group\/card:focus-visible .node-card-shell::before {
+  opacity: 1;
+}
+
+.metric-value {
+  display: inline-flex;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: flex-end;
+  border-radius: 9999px;
+  padding: 0 0.25rem;
+  transition: background-color var(--motion-medium) var(--motion-ease), color var(--motion-medium) var(--motion-ease);
+}
+
+.metric-value--flash {
+  animation: metric-value-flash 360ms var(--motion-ease);
+}
+
+.dark .metric-value--flash {
+  animation-name: metric-value-flash-dark;
+}
+
+.motion-dialog-overlay[data-state="open"] {
+  animation: motion-overlay-in var(--motion-medium) var(--motion-ease);
+}
+
+.motion-dialog-overlay[data-state="closed"] {
+  animation: motion-overlay-out var(--motion-fast) ease-in;
+}
+
+.motion-dialog-content[data-state="open"] {
+  animation: motion-dialog-in var(--motion-medium) var(--motion-ease);
+}
+
+.motion-dialog-content[data-state="closed"] {
+  animation: motion-dialog-out var(--motion-fast) ease-in;
+}
+
+.motion-select-content[data-state="open"] {
+  animation: motion-select-in var(--motion-fast) var(--motion-ease);
+}
+
+.motion-select-content[data-state="closed"] {
+  animation: motion-select-out var(--motion-fast) ease-in;
+}
+
+.motion-tabs-content[data-state="active"] {
+  animation: motion-tabs-in var(--motion-medium) var(--motion-ease);
+}
+
+.motion-card-grid > * {
+  animation: motion-card-in var(--motion-medium) var(--motion-ease) backwards;
+}
+
+.motion-card-grid > *:nth-child(2) { animation-delay: 24ms; }
+.motion-card-grid > *:nth-child(3) { animation-delay: 48ms; }
+.motion-card-grid > *:nth-child(4) { animation-delay: 72ms; }
+.motion-card-grid > *:nth-child(5) { animation-delay: 96ms; }
+.motion-card-grid > *:nth-child(6) { animation-delay: 120ms; }
+.motion-card-grid > *:nth-child(7) { animation-delay: 144ms; }
+.motion-card-grid > *:nth-child(8) { animation-delay: 168ms; }
+
+.motion-filter-panel {
+  animation: motion-filter-in var(--motion-medium) var(--motion-ease) both;
+}
+
+.motion-results-region,
+.motion-empty-state {
+  animation: motion-results-in var(--motion-medium) var(--motion-ease) both;
+}
+
+.motion-table-row > td {
+  transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.motion-table-row:hover > td,
+.motion-table-row:focus-within > td {
+  background-color: rgba(255, 255, 255, 0.84);
+}
+
+.motion-table-row:hover > td:first-child,
+.motion-table-row:focus-within > td:first-child {
+  box-shadow: inset 2px 0 0 rgba(37, 99, 235, 0.42);
+}
+
+.dark .motion-table-row:hover > td,
+.dark .motion-table-row:focus-within > td {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.dark .motion-table-row:hover > td:first-child,
+.dark .motion-table-row:focus-within > td:first-child {
+  box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.46);
+}
+
+.motion-table-body > tr {
+  animation: motion-row-in var(--motion-medium) var(--motion-ease) both;
+}
+
+.motion-table-body > tr:nth-child(2) { animation-delay: 18ms; }
+.motion-table-body > tr:nth-child(3) { animation-delay: 36ms; }
+.motion-table-body > tr:nth-child(4) { animation-delay: 54ms; }
+.motion-table-body > tr:nth-child(5) { animation-delay: 72ms; }
+.motion-table-body > tr:nth-child(6) { animation-delay: 90ms; }
+.motion-table-body > tr:nth-child(7) { animation-delay: 108ms; }
+.motion-table-body > tr:nth-child(8) { animation-delay: 126ms; }
+
+.motion-chart-panel {
+  animation: motion-chart-panel-in var(--motion-medium) var(--motion-ease) both;
+}
+
+.motion-chart-tooltip {
+  animation: motion-tooltip-in var(--motion-fast) var(--motion-ease) both;
+  transform-origin: top center;
+}
+
+.motion-report-bar {
+  animation: motion-bar-grow 420ms var(--motion-ease) both;
+  transform-origin: left center;
+}
+
+.motion-report-segment {
+  animation: motion-segment-grow 420ms var(--motion-ease) both;
+  transform-origin: left center;
+}
+
+.chart-skeleton {
+  position: relative;
+  height: 9.5rem;
+  overflow: hidden;
+}
+
+.chart-skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.54), transparent);
+  animation: motion-skeleton-sheen 1.35s ease-in-out infinite;
+}
+
+.dark .chart-skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+.chart-skeleton__axis,
+.chart-skeleton__bar {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.dark .chart-skeleton__axis,
+.dark .chart-skeleton__bar {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.chart-skeleton__axis {
+  bottom: 1rem;
+  height: 1px;
+}
+
+.chart-skeleton__bar {
+  height: 0.75rem;
+  transform-origin: left center;
+  animation: motion-skeleton-bar 680ms var(--motion-ease) both;
+}
+
+.chart-skeleton__bar--one {
+  top: 1.35rem;
+  width: 78%;
+}
+
+.chart-skeleton__bar--two {
+  top: 3.75rem;
+  width: 58%;
+  animation-delay: 80ms;
+}
+
+.chart-skeleton__bar--three {
+  top: 6.15rem;
+  width: 88%;
+  animation-delay: 160ms;
+}
+
+.content-skeleton {
+  position: relative;
+  overflow: hidden;
+}
+
+.content-skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.52), transparent);
+  animation: motion-skeleton-sheen 1.35s ease-in-out infinite;
+}
+
+.dark .content-skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+.content-skeleton__line,
+.content-skeleton__block,
+.content-skeleton__pill {
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.dark .content-skeleton__line,
+.dark .content-skeleton__block,
+.dark .content-skeleton__pill {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.content-skeleton__block {
+  border-radius: 1rem;
+}
+
+.motion-action-row {
+  transition: background-color var(--motion-medium) var(--motion-ease), border-color var(--motion-medium) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.motion-action-row:hover,
+.motion-action-row:focus-within {
+  border-color: rgba(148, 163, 184, 0.46);
+  box-shadow: inset 2px 0 0 rgba(37, 99, 235, 0.34);
+}
+
+.motion-action-row:hover {
+  transform: translateY(-1px);
+}
+
+.motion-action-row:active {
+  transform: translateY(0) scale(0.995);
+}
+
+.dark .motion-action-row:hover,
+.dark .motion-action-row:focus-within {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.42);
+}
+
+.motion-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.25rem;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+
+.motion-sort-icon {
+  opacity: 0.42;
+  transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.motion-sort-button:hover .motion-sort-icon,
+.motion-sort-button:focus-visible .motion-sort-icon,
+.motion-sort-button[data-active="true"] .motion-sort-icon {
+  opacity: 1;
+}
+
+.motion-toggle {
+  transition: background-color var(--motion-medium) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease);
+}
+
+.motion-toggle[aria-checked="true"] {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.motion-toggle__thumb {
+  transition: transform var(--motion-medium) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
+}
+
+.motion-toggle:hover .motion-toggle__thumb,
+.motion-toggle:focus-visible .motion-toggle__thumb {
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
+}
+
+.motion-collapsible-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-top: 0;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-medium) var(--motion-ease), margin-top var(--motion-medium) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+
+.motion-collapsible-content[data-open="true"] {
+  grid-template-rows: 1fr;
+  margin-top: 0.75rem;
+  opacity: 1;
+}
+
+.motion-collapsible-content__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.motion-segmented-shell {
+  animation: motion-filter-in var(--motion-medium) var(--motion-ease) both;
+}
+
+.motion-segmented-option {
+  transition: background-color var(--motion-medium) var(--motion-ease), border-color var(--motion-medium) var(--motion-ease), color var(--motion-medium) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.motion-segmented-option:hover,
+.motion-segmented-option:focus-visible {
+  transform: translateY(-1px);
+}
+
+.motion-segmented-option:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.motion-choice-card {
+  transition: background-color var(--motion-medium) var(--motion-ease), border-color var(--motion-medium) var(--motion-ease), color var(--motion-medium) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+
+.motion-choice-card:hover,
+.motion-choice-card:focus-within {
+  transform: translateY(-1px);
+}
+
+.motion-choice-card:active {
+  transform: translateY(0) scale(0.995);
+}
+
+@keyframes metric-value-flash {
+  0% {
+    background-color: rgba(37, 99, 235, 0.13);
+    color: #1d4ed8;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes metric-value-flash-dark {
+  0% {
+    background-color: rgba(96, 165, 250, 0.16);
+    color: #bfdbfe;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes motion-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes motion-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes motion-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes motion-dialog-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+}
+
+@keyframes motion-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes motion-select-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.99);
+  }
+}
+
+@keyframes motion-tabs-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-filter-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-results-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-chart-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes motion-bar-grow {
+  from {
+    opacity: 0.72;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes motion-segment-grow {
+  from {
+    opacity: 0.74;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes motion-skeleton-sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes motion-skeleton-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
 .enterprise-surface {
@@ -273,10 +813,35 @@ table td {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
   .panel-card-hover,
   .panel-card-hover:hover,
   .panel-card-hover:active {
     transition: none;
     transform: none;
+  }
+
+  .node-card-shell::before {
+    opacity: 0 !important;
+  }
+
+  .motion-segmented-option:hover,
+  .motion-segmented-option:focus-visible,
+  .motion-segmented-option:active,
+  .motion-choice-card:hover,
+  .motion-choice-card:focus-within,
+  .motion-choice-card:active,
+  .motion-action-row:hover,
+  .motion-action-row:focus-within,
+  .motion-action-row:active {
+    transform: none !important;
   }
 }

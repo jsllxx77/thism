@@ -46,7 +46,7 @@ export function MetricsChart({
   const formatTooltipLabel = tooltipLabelFormatter ?? ((value: number) => new Date(value * 1000).toLocaleTimeString(language))
 
   return (
-    <div className="panel-card enterprise-surface rounded-[24px] p-4">
+    <div className="motion-chart-panel panel-card enterprise-surface rounded-[24px] p-4">
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">{label}</p>
       <ResponsiveContainer width="100%" height={120}>
         <AreaChart data={data} margin={{ top: 2, right: 0, left: -28, bottom: 0 }}>
@@ -72,6 +72,8 @@ export function MetricsChart({
             tickLine={false}
           />
           <Tooltip
+            cursor={{ stroke: color, strokeWidth: 1.25, strokeDasharray: "4 4", opacity: 0.55 }}
+            wrapperStyle={{ outline: "none", transition: "opacity 160ms ease, transform 160ms ease" }}
             contentStyle={{
               background: "hsl(var(--popover))",
               border: "1px solid hsl(var(--border))",
@@ -92,6 +94,7 @@ export function MetricsChart({
             fill={`url(#${gradId})`}
             strokeWidth={1.5}
             dot={false}
+            activeDot={{ r: 4, stroke: "hsl(var(--background))", strokeWidth: 2, fill: color }}
             isAnimationActive={false}
             connectNulls={false}
           />

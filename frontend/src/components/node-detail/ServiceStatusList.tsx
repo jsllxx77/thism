@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react"
 import type { ServiceCheck } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
 import { Card, CardContent } from "../ui/card"
+import { CollapsibleContent } from "./CollapsibleContent"
 
 type Props = {
   services: ServiceCheck[]
@@ -32,19 +33,19 @@ export function ServiceStatusList({ services, defaultOpen = false }: Props) {
       <CardContent className="p-4">
         <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-between text-left">
           <span className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("nodeDetail.serviceHealth")}</span>
-          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-out dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
         </button>
 
-        {open && (
-          <div className="enterprise-inner-surface mt-3 flex flex-wrap gap-2 rounded-2xl p-3">
+        <CollapsibleContent open={open}>
+          <div className="enterprise-inner-surface flex flex-wrap gap-2 rounded-2xl p-3">
             {services.map((service) => (
               <div key={service.name} className={`rounded-full border px-3 py-1.5 text-xs font-medium ${serviceClass(service.status)}`}>
                 <span className="mr-2">{service.name}</span>
                 <span data-status={service.status}>{translateServiceStatus(service.status)}</span>
               </div>
             ))}
-          </div>
-        )}
+            </div>
+        </CollapsibleContent>
       </CardContent>
     </Card>
   )

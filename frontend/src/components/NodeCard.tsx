@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
@@ -35,11 +35,47 @@ function MetricBar({ value, hasValue = true }: { value: number; hasValue?: boole
   return (
     <div className="h-1.5 rounded-full bg-slate-100 dark:bg-[#20242a]">
       <div
-        className="h-1.5 rounded-full transition-all duration-200"
+        className="h-1.5 rounded-full transition-[width,background-color] duration-300 ease-out"
         style={{ width: `${safeValue}%`, backgroundColor: metricColor(value) }}
       />
     </div>
   )
+}
+
+function useValueFlash(value: string | number | null | undefined) {
+  const previous = useRef(value)
+  const [flash, setFlash] = useState(false)
+
+  useEffect(() => {
+    if (previous.current === value) {
+      return undefined
+    }
+
+    const hadPreviousValue = previous.current !== null && previous.current !== undefined
+    previous.current = value
+
+    if (!hadPreviousValue || value === null || value === undefined) {
+      return undefined
+    }
+
+    const startId = window.setTimeout(() => {
+      setFlash(true)
+    }, 0)
+    const endId = window.setTimeout(() => {
+      setFlash(false)
+    }, 360)
+
+    return () => {
+      window.clearTimeout(startId)
+      window.clearTimeout(endId)
+    }
+  }, [value])
+
+  return flash
+}
+
+function metricValueClass(flash: boolean) {
+  return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${flash ? "metric-value--flash" : ""}`
 }
 
 function RelativeLastSeenLabel({ lastSeen }: { lastSeen: number }) {
@@ -77,6 +113,12 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
   const hasNetTxSpeed = showNetSpeed && typeof netTxSpeed === "number" && Number.isFinite(netTxSpeed) && netTxSpeed >= 0
   const netRxLabel = hasNetRxSpeed ? formatBytesPerSecond(netRxSpeed) : "—"
   const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
+  const cpuLabel = hasCpu ? `${cpu.toFixed(1)}%` : t("common.unavailable")
+  const memLabel = memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`
+  const cpuFlash = useValueFlash(hasCpu ? Number(cpu.toFixed(1)) : null)
+  const memFlash = useValueFlash(memPct === null ? null : Number(memPct.toFixed(1)))
+  const netRxFlash = useValueFlash(hasNetRxSpeed ? netRxLabel : null)
+  const netTxFlash = useValueFlash(hasNetTxSpeed ? netTxLabel : null)
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
   const tags = node.tags ?? []
@@ -87,12 +129,12 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
       type="button"
       onClick={handleClick}
       aria-label={node.name}
-      className={`h-full w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-transform hover:-translate-y-0.5 ${
+      className={`group/card h-full w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-[opacity,transform] duration-200 ease-out hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white active:translate-y-0 dark:focus-visible:ring-offset-slate-950 ${
         !node.online ? "opacity-80" : ""
       }`}
     >
-      <Card className="panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
-        <CardContent className="p-4">
+      <Card className="node-card-shell panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
+        <CardContent className="relative z-[1] p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="flex min-w-0 items-center text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -108,10 +150,11 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
               variant={node.online ? "secondary" : "outline"}
               className={
                 node.online
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
-                  : "border-slate-300 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
+                  ? "gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+                  : "gap-1.5 border-slate-300 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
               }
             >
+              <span className={`h-1.5 w-1.5 rounded-full ${node.online ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]" : "bg-slate-400 dark:bg-slate-500"}`} />
               {node.online ? t("common.online") : t("common.offline")}
             </Badge>
           </div>
@@ -122,7 +165,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
                 <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
                   <Cpu className="h-3 w-3" /> {t("dashboard.nodeCard.cpu")}
                 </span>
-                <span className="text-slate-700 dark:text-slate-200">{hasCpu ? `${cpu.toFixed(1)}%` : t("common.unavailable")}</span>
+                <span className={metricValueClass(cpuFlash)}>{cpuLabel}</span>
               </div>
               <MetricBar value={hasCpu ? Number(cpu.toFixed(1)) : 0} hasValue={hasCpu} />
             </div>
@@ -132,7 +175,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
                 <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
                   <MemoryStick className="h-3 w-3" /> {t("dashboard.nodeCard.memory")}
                 </span>
-                <span className="text-slate-700 dark:text-slate-200">{memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`}</span>
+                <span className={metricValueClass(memFlash)}>{memLabel}</span>
               </div>
               <MetricBar value={memPct === null ? 0 : Number(memPct.toFixed(1))} hasValue={memPct !== null} />
             </div>
@@ -140,11 +183,11 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
             <div className={`space-y-1 ${showNetSpeed ? "" : "opacity-60"}`}>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.inboundSpeed")}</span>
-                <span className="text-slate-700 dark:text-slate-200 tabular-nums">↓ {netRxLabel}</span>
+                <span className={metricValueClass(netRxFlash)}>↓ {netRxLabel}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.outboundSpeed")}</span>
-                <span className="text-slate-700 dark:text-slate-200 tabular-nums">↑ {netTxLabel}</span>
+                <span className={metricValueClass(netTxFlash)}>↑ {netTxLabel}</span>
               </div>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react"
 import type { DockerContainer } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
 import { Card, CardContent } from "../ui/card"
+import { CollapsibleContent } from "./CollapsibleContent"
 
 type Props = {
   containers: DockerContainer[]
@@ -27,11 +28,11 @@ export function DockerContainerTable({ containers, defaultOpen = false }: Props)
               {containers.length}
             </span>
           </div>
-          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ease-out dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
         </button>
 
-        {open && (
-          <div className="enterprise-inner-surface mt-3 overflow-x-auto rounded-2xl p-2">
+        <CollapsibleContent open={open}>
+          <div className="enterprise-inner-surface overflow-x-auto rounded-2xl p-2">
             {containers.length === 0 ? (
               <p className="px-2 py-3 text-xs text-slate-500 dark:text-slate-400">{t("nodeDetail.dockerEmpty")}</p>
             ) : (
@@ -61,9 +62,8 @@ export function DockerContainerTable({ containers, defaultOpen = false }: Props)
               </table>
             )}
           </div>
-        )}
+        </CollapsibleContent>
       </CardContent>
     </Card>
   )
 }
-

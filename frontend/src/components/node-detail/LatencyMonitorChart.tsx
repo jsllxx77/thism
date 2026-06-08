@@ -77,7 +77,7 @@ function TooltipContent({
 
   return (
     <div
-      className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-xl dark:border-white/10 dark:bg-slate-950/95"
+      className="motion-chart-tooltip rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-xl dark:border-white/10 dark:bg-slate-950/95"
       role="status"
     >
       <p className="font-medium text-slate-800 dark:text-slate-100">
@@ -180,7 +180,7 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
   }
 
   return (
-    <section className="panel-card enterprise-surface rounded-[24px] p-4">
+    <section className="motion-chart-panel panel-card enterprise-surface rounded-[24px] p-4">
       <div className="flex flex-col gap-4">
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("nodeDetail.latencyMonitorsTitle")}</h3>
@@ -274,6 +274,8 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
               domain={[0, "auto"]}
             />
             <Tooltip
+              cursor={{ stroke: "rgba(37, 99, 235, 0.34)", strokeWidth: 1.5, strokeDasharray: "4 4" }}
+              wrapperStyle={{ outline: "none", transition: "opacity 160ms ease, transform 160ms ease" }}
               content={(
                 <TooltipContent
                   resultsByTimestamp={chartState.resultsByTimestamp}
@@ -291,7 +293,7 @@ export function LatencyMonitorChart({ monitors, results, range }: Props) {
                   stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                   strokeWidth={2}
                   dot={showDots ? { r: 2, strokeWidth: 0, fill: SERIES_COLORS[index % SERIES_COLORS.length] } : false}
-                  activeDot={{ r: 4 }}
+                  activeDot={{ r: 5, stroke: "hsl(var(--background))", strokeWidth: 2, fill: SERIES_COLORS[index % SERIES_COLORS.length] }}
                   connectNulls
                   isAnimationActive={false}
                 />

@@ -253,21 +253,44 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   }, [effectiveNodes])
 
   const showTable = accessMode !== "guest" && viewMode === "table"
+  const resultMotionKey = [
+    showTable ? "table" : "cards",
+    statusFilter,
+    tagFilter,
+    searchFilter.trim().toLowerCase(),
+    filteredNodes.map((node) => node.id).join("|"),
+  ].join(":")
 
   return (
-    <MotionSection className="mx-auto max-w-[1440px] space-y-6" testId="motion-dashboard-root">
+    <MotionSection className="mx-auto max-w-[1440px] space-y-6" testId="motion-dashboard-root" variant="page">
       <section className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t("dashboard.title")}</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">{t("dashboard.subtitle")}</p>
       </section>
 
       {loadingNodes ? (
-        <section className="panel-card rounded-2xl border border-slate-200 p-6 dark:border-slate-700">
+        <section className="panel-card enterprise-surface rounded-[24px] border border-slate-200 p-6 dark:border-slate-700">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("dashboard.loadingInventory")}</p>
-          <div className="mt-4 space-y-3">
-            <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/70" />
-            <div className="h-16 animate-pulse rounded-xl bg-slate-200/70 dark:bg-slate-800/70" />
-            <div className="h-16 animate-pulse rounded-xl bg-slate-200/70 dark:bg-slate-800/70" />
+          <div className="content-skeleton mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="enterprise-inner-surface rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="content-skeleton__line h-3 w-28" />
+                    <div className="content-skeleton__line h-2.5 w-36" />
+                  </div>
+                  <div className="content-skeleton__pill h-5 w-14" />
+                </div>
+                <div className="mt-5 space-y-3">
+                  <div className="content-skeleton__line h-2 w-full" />
+                  <div className="content-skeleton__line h-2 w-4/5" />
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="content-skeleton__block h-8" />
+                    <div className="content-skeleton__block h-8" />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       ) : nodesError ? (
@@ -321,28 +344,30 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
           </MotionSection>
 
           {effectiveNodes.length === 0 ? (
-            <div className="panel-card flex flex-col items-center justify-center rounded-2xl border border-slate-200 py-24 text-slate-400 dark:border-slate-700 dark:text-slate-500">
+            <div className="motion-empty-state panel-card flex flex-col items-center justify-center rounded-2xl border border-slate-200 py-24 text-slate-400 dark:border-slate-700 dark:text-slate-500">
               <Activity className="mb-3 h-10 w-10" />
               <p className="text-sm">{t("dashboard.noNodesRegistered")}</p>
               <p className="mt-1 text-xs">{t("dashboard.registrationHint")}</p>
             </div>
           ) : filteredNodes.length === 0 ? (
-            <section className="panel-card rounded-2xl border border-slate-200 px-6 py-14 text-center dark:border-slate-700">
+            <section key={resultMotionKey} className="motion-empty-state panel-card rounded-2xl border border-slate-200 px-6 py-14 text-center dark:border-slate-700">
               <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("dashboard.noNodesMatch")}</p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("dashboard.adjustFilters")}</p>
             </section>
           ) : showTable ? (
-            <Suspense
-              fallback={
-                <div className="panel-card rounded-[24px] border border-slate-200/80 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                  {t("common.loading")}...
-                </div>
-              }
-            >
-              <NodeTable nodes={filteredNodes} onSelectNode={onSelectNode} />
-            </Suspense>
+            <div key={resultMotionKey} className="motion-results-region">
+              <Suspense
+                fallback={
+                  <div className="panel-card rounded-[24px] border border-slate-200/80 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    {t("common.loading")}...
+                  </div>
+                }
+              >
+                <NodeTable nodes={filteredNodes} onSelectNode={onSelectNode} />
+              </Suspense>
+            </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div key={resultMotionKey} className="motion-results-region motion-card-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredNodes.map((node) => (
                 <NodeCard
                   key={node.id}
