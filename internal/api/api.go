@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"github.com/thism-dev/thism/internal/alerting"
+	frontendSkins "github.com/thism-dev/thism/internal/frontend/skins"
 	"github.com/thism-dev/thism/internal/geo"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
@@ -41,6 +43,7 @@ const guestSessionCookieName = "thism_guest"
 const csrfCookieName = "thism_csrf"
 const uiLanguageCookieName = "thism-lang"
 const maxJSONBodyBytes int64 = 1 << 20
+const maxFrontendSkinBodyBytes int64 = 48 << 20
 const loginFailureDelay = 250 * time.Millisecond
 const loginFailureWindow = 5 * time.Minute
 const loginFailureLockout = 5
@@ -66,6 +69,14 @@ type AuthConfig struct {
 	AdminToken string
 	Username   string
 	Password   string
+}
+
+type frontendSkinService interface {
+	List() ([]frontendSkins.Skin, error)
+	Has(id string) bool
+	InstallArchive(filename string, data []byte) (frontendSkins.Skin, error)
+	InstallFromGitHub(ctx context.Context, input string) (frontendSkins.Skin, error)
+	Delete(id string) error
 }
 
 func (c AuthConfig) PasswordLoginEnabled() bool {
@@ -390,6 +401,10 @@ func NewRouterWithAuth(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHand
 }
 
 func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler, countryResolver geo.CountryResolver) http.Handler {
+	return NewRouterWithAuthGeoAndFrontendSkins(s, h, auth, frontendHandler, countryResolver, nil)
+}
+
+func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler, countryResolver geo.CountryResolver, frontendSkins frontendSkinService) http.Handler {
 	authState := newAuthManager(auth, s)
 
 	// Load persisted credentials if present, otherwise bootstrap from startup
@@ -418,7 +433,9 @@ func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, fronte
 
 	r := chi.NewRouter()
 	r.Use(secureHeaders)
-	r.Use(limitRequestBody(maxJSONBodyBytes))
+	r.Use(limitRequestBody(maxJSONBodyBytes, map[string]int64{
+		"/api/frontend-skins/install": maxFrontendSkinBodyBytes,
+	}))
 	r.Use(csrfProtection)
 
 	// ---------------------------------------------------------------
@@ -526,6 +543,19 @@ func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, fronte
 
 		r.Post("/api/settings/notifications/test", func(w http.ResponseWriter, req *http.Request) {
 			handleSendTestNotification(w, req, s)
+		})
+
+		r.Get("/api/frontend-skins", func(w http.ResponseWriter, req *http.Request) {
+			handleListFrontendSkins(w, req, s, frontendSkins)
+		})
+		r.Post("/api/frontend-skins/install", func(w http.ResponseWriter, req *http.Request) {
+			handleInstallFrontendSkin(w, req, s, frontendSkins)
+		})
+		r.Post("/api/frontend-skins/select", func(w http.ResponseWriter, req *http.Request) {
+			handleSelectFrontendSkin(w, req, s, frontendSkins)
+		})
+		r.Delete("/api/frontend-skins/{id}", func(w http.ResponseWriter, req *http.Request) {
+			handleDeleteFrontendSkin(w, req, s, frontendSkins)
 		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
@@ -768,7 +798,7 @@ func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: https://api.github.com https://raw.githubusercontent.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		if requestIsSecure(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -777,13 +807,19 @@ func secureHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func limitRequestBody(limit int64) func(http.Handler) http.Handler {
+func limitRequestBody(limit int64, pathLimits map[string]int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			requestLimit := limit
+			if pathLimits != nil {
+				if override, ok := pathLimits[r.URL.Path]; ok && override > requestLimit {
+					requestLimit = override
+				}
 			}
-			if r.ContentLength > limit {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, requestLimit)
+			}
+			if r.ContentLength > requestLimit {
 				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
 				return
 			}
@@ -1736,6 +1772,168 @@ func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *st
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+func handleListFrontendSkins(w http.ResponseWriter, _ *http.Request, s *store.Store, skinService frontendSkinService) {
+	skins := []frontendSkins.Skin{frontendSkins.BuiltInSkin()}
+	if skinService != nil {
+		listed, err := skinService.List()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		skins = listed
+	}
+
+	activeID := store.DefaultFrontendSkinID
+	if s != nil {
+		if stored, err := s.GetFrontendSkinID(); err == nil && stored != "" {
+			activeID = stored
+		} else if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if !frontendSkinExists(skins, activeID) {
+		activeID = store.DefaultFrontendSkinID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active_skin_id": activeID,
+		"skins":          skins,
+	})
+}
+
+func handleInstallFrontendSkin(w http.ResponseWriter, r *http.Request, s *store.Store, skinService frontendSkinService) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	if skinService == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "frontend skin service unavailable"})
+		return
+	}
+	var req struct {
+		Source string `json:"source"`
+		URL    string `json:"url"`
+		Name   string `json:"name"`
+		Data   string `json:"data"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	var (
+		installed frontendSkins.Skin
+		err       error
+	)
+	switch strings.TrimSpace(req.Source) {
+	case "github":
+		if strings.TrimSpace(req.URL) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "github url is required"})
+			return
+		}
+		installed, err = skinService.InstallFromGitHub(r.Context(), req.URL)
+	case "archive":
+		if strings.TrimSpace(req.Data) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "frontend skin archive data is required"})
+			return
+		}
+		data, decodeErr := base64.StdEncoding.DecodeString(req.Data)
+		if decodeErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "frontend skin archive data must be base64"})
+			return
+		}
+		installed, err = skinService.InstallArchive(req.Name, data)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "frontend skin source must be archive or github"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.SetFrontendSkinID(installed.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"skin":           installed,
+		"active_skin_id": installed.ID,
+	})
+}
+
+func handleSelectFrontendSkin(w http.ResponseWriter, r *http.Request, s *store.Store, skinService frontendSkinService) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	id := strings.TrimSpace(req.ID)
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "frontend skin id is required"})
+		return
+	}
+	if id != frontendSkins.BuiltInSkinID {
+		if skinService == nil || !skinService.Has(id) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "frontend skin is not installed"})
+			return
+		}
+	}
+	if err := s.SetFrontendSkinID(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"active_skin_id": id})
+}
+
+func handleDeleteFrontendSkin(w http.ResponseWriter, r *http.Request, s *store.Store, skinService frontendSkinService) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == frontendSkins.BuiltInSkinID {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "classic frontend skin cannot be deleted"})
+		return
+	}
+	if skinService == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "frontend skin service unavailable"})
+		return
+	}
+	if err := skinService.Delete(id); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	activeID := store.DefaultFrontendSkinID
+	if s != nil {
+		stored, err := s.GetFrontendSkinID()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if stored == id {
+			if err := s.SetFrontendSkinID(store.DefaultFrontendSkinID); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		} else {
+			activeID = stored
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"active_skin_id": activeID,
+	})
+}
+
+func frontendSkinExists(skins []frontendSkins.Skin, id string) bool {
+	for _, skin := range skins {
+		if skin.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func handleSendTestNotification(w http.ResponseWriter, r *http.Request, s *store.Store) {

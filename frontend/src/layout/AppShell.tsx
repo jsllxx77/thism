@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { BarChart3, FileText, LogIn, Moon, RefreshCw, Settings2, Sun } from "lucide-react"
+import { BarChart3, FileText, LogIn, Moon, Palette, RefreshCw, Settings2, Sun } from "lucide-react"
 import { api, type AccessMode } from "../lib/api"
 import { Button } from "../components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui/select"
 import { RouteContainer } from "./RouteContainer"
 import { useThemeMode } from "../theme/mode"
+import { type AppThemeDefinition, type AppThemeName, useAppTheme } from "../theme/theme-context"
 import { useLanguage } from "../i18n/language"
+
+function getThemeLabel(theme: AppThemeDefinition, labels: Record<string, string>) {
+  return theme.source === "built-in" ? labels[theme.labelKey] : theme.label
+}
 
 function ShellLoadingState() {
   return (
@@ -19,6 +25,7 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode, toggleMode } = useThemeMode()
+  const { theme, setTheme, themes } = useAppTheme()
   const { messages, labelForLanguageToggle, toggleLanguage } = useLanguage()
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
@@ -35,6 +42,9 @@ export function AppShell() {
       : onRootPage
         ? messages.shell.pageTitles.dashboard
         : messages.shell.pageTitles.notFound
+  const currentTheme = themes.find((option) => option.name === theme) ?? themes[0]
+  const currentThemeLabel = getThemeLabel(currentTheme, messages.shell.themePicker)
+  const selectTheme = (value: string) => setTheme(value as AppThemeName)
 
   useEffect(() => {
     let active = true
@@ -118,6 +128,37 @@ export function AppShell() {
             >
               {labelForLanguageToggle}
             </Button>
+            <Select value={theme} onValueChange={selectTheme}>
+              <SelectTrigger
+                aria-label={messages.shell.themePicker.label}
+                title={currentThemeLabel}
+                className="h-11 w-[3.25rem] border-border bg-card px-2 text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-ring sm:h-9 sm:w-36 sm:px-3"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Palette className="h-4 w-4 shrink-0" aria-hidden />
+                  <span
+                    className="hidden h-2.5 w-2.5 shrink-0 rounded-full border border-border sm:inline-block"
+                    style={{ backgroundColor: currentTheme.accent }}
+                    aria-hidden
+                  />
+                  <span className="hidden truncate sm:inline">{currentThemeLabel}</span>
+                </span>
+              </SelectTrigger>
+              <SelectContent align="end">
+                {themes.map((option) => (
+                  <SelectItem key={option.name} value={option.name}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full border border-border"
+                        style={{ backgroundColor: option.accent }}
+                        aria-hidden
+                      />
+                      {getThemeLabel(option, messages.shell.themePicker)}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               type="button"
               variant="outline"

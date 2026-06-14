@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/thism-dev/thism/internal/alerting"
 	"github.com/thism-dev/thism/internal/api"
+	frontendSkins "github.com/thism-dev/thism/internal/frontend/skins"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/models"
 	"github.com/thism-dev/thism/internal/notify"
@@ -2174,6 +2177,147 @@ func TestGetMetricsRetentionDefaultsToThirtyDays(t *testing.T) {
 	}
 }
 
+func TestFrontendSkinsDefaultToClassic(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	manager, err := frontendSkins.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	router := api.NewRouterWithAuthGeoAndFrontendSkins(s, h, api.AuthConfig{AdminToken: "test-admin-token"}, nil, nil, manager)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/frontend-skins", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		ActiveSkinID string `json:"active_skin_id"`
+		Skins        []struct {
+			ID     string `json:"id"`
+			Source string `json:"source"`
+		} `json:"skins"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.ActiveSkinID != "classic" || len(body.Skins) != 1 || body.Skins[0].ID != "classic" || body.Skins[0].Source != "built-in" {
+		t.Fatalf("unexpected frontend skins response: %#v", body)
+	}
+}
+
+func TestFrontendSkinArchiveInstallSelectsSkin(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	manager, err := frontendSkins.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	router := api.NewRouterWithAuthGeoAndFrontendSkins(s, h, api.AuthConfig{AdminToken: "test-admin-token"}, nil, nil, manager)
+
+	archive := buildAPISkinArchive(t, map[string]string{
+		"thism-frontend-skin.json": `{
+			"type": "thism-frontend-skin",
+			"version": 1,
+			"id": "shadcn-dashboard",
+			"name": "Shadcn Dashboard",
+			"entry": "index.html",
+			"apiVersion": "thism.v1",
+			"assets": ["index.html", "assets/app.js"]
+		}`,
+		"index.html":    "<div id=\"root\"></div>",
+		"assets/app.js": "console.log('ok')",
+	})
+	payload := map[string]string{
+		"source": "archive",
+		"name":   "shadcn-dashboard.thism-frontend-skin.zip",
+		"data":   base64.StdEncoding.EncodeToString(archive),
+	}
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/frontend-skins/install", bytes.NewReader(rawPayload))
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var installBody struct {
+		ActiveSkinID string `json:"active_skin_id"`
+		Skin         struct {
+			ID string `json:"id"`
+		} `json:"skin"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &installBody); err != nil {
+		t.Fatalf("unmarshal install response: %v", err)
+	}
+	if installBody.ActiveSkinID != "shadcn-dashboard" || installBody.Skin.ID != "shadcn-dashboard" {
+		t.Fatalf("unexpected install response: %#v", installBody)
+	}
+	storedID, err := s.GetFrontendSkinID()
+	if err != nil {
+		t.Fatalf("GetFrontendSkinID: %v", err)
+	}
+	if storedID != "shadcn-dashboard" {
+		t.Fatalf("expected installed skin to be active, got %q", storedID)
+	}
+}
+
+func TestFrontendSkinDeleteActiveFallsBackToClassic(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	manager, err := frontendSkins.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if _, err := manager.InstallArchive("compact.thism-frontend-skin.zip", buildAPISkinArchive(t, map[string]string{
+		"thism-frontend-skin.json": `{
+			"type": "thism-frontend-skin",
+			"version": 1,
+			"id": "compact",
+			"name": "Compact",
+			"entry": "index.html",
+			"apiVersion": "thism.v1"
+		}`,
+		"index.html": "<div>compact</div>",
+	})); err != nil {
+		t.Fatalf("InstallArchive: %v", err)
+	}
+	if err := s.SetFrontendSkinID("compact"); err != nil {
+		t.Fatalf("SetFrontendSkinID: %v", err)
+	}
+	router := api.NewRouterWithAuthGeoAndFrontendSkins(s, h, api.AuthConfig{AdminToken: "test-admin-token"}, nil, nil, manager)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/frontend-skins/compact", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	storedID, err := s.GetFrontendSkinID()
+	if err != nil {
+		t.Fatalf("GetFrontendSkinID: %v", err)
+	}
+	if storedID != "classic" {
+		t.Fatalf("expected classic fallback, got %q", storedID)
+	}
+}
+
 func TestGetVersionMetadata(t *testing.T) {
 	originalVersion := sharedversion.Version
 	originalCommit := sharedversion.Commit
@@ -2569,4 +2713,23 @@ func TestTelegramSenderTestEndpointAcceptsTopicTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
+}
+
+func buildAPISkinArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for name, content := range files {
+		fileWriter, err := writer.Create(name)
+		if err != nil {
+			t.Fatalf("create zip file %s: %v", name, err)
+		}
+		if _, err := fileWriter.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip file %s: %v", name, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buffer.Bytes()
 }

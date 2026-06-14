@@ -133,7 +133,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
         !node.online ? "opacity-80" : ""
       }`}
     >
-      <Card className="node-card-shell panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
+      <Card className="node-card-shell theme-dashboard-card panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
         <CardContent className="relative z-[1] p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">

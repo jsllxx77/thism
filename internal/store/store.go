@@ -31,6 +31,8 @@ const DefaultMetricsRetentionDays = 30
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
+const frontendSkinSettingKey = "frontend_skin_id"
+const DefaultFrontendSkinID = "classic"
 const adminSessionTTL = 30 * 24 * time.Hour
 const sqliteBusyTimeout = 5000
 const availabilityExpectedSampleIntervalSeconds int64 = 5
@@ -425,6 +427,37 @@ ON CONFLICT(key) DO UPDATE SET
 	value = excluded.value,
 	updated_at = excluded.updated_at
 `, metricsRetentionSettingKey, strconv.Itoa(days), time.Now().Unix())
+	return err
+}
+
+func (s *Store) GetFrontendSkinID() (string, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, frontendSkinSettingKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return DefaultFrontendSkinID, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return DefaultFrontendSkinID, nil
+	}
+	return value, nil
+}
+
+func (s *Store) SetFrontendSkinID(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("frontend skin id is required")
+	}
+	_, err := s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, frontendSkinSettingKey, id, time.Now().Unix())
 	return err
 }
 

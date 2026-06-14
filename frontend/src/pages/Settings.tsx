@@ -2,10 +2,12 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEve
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { DashboardVisibilityCard } from "../components/settings/DashboardVisibilityCard"
+import { FrontendSkinSystemCard } from "../components/settings/FrontendSkinSystemCard"
 import { LatencyMonitorsCard } from "../components/settings/LatencyMonitorsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
+import { ThemeSystemCard } from "../components/settings/ThemeSystemCard"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
@@ -21,7 +23,7 @@ type Props = {
 
 const AddNodeModal = lazy(async () => ({ default: (await import("../components/AddNodeModal")).AddNodeModal }))
 
-const settingsSections = ["nodes", "agent", "monitoring", "alerts", "security"] as const
+const settingsSections = ["nodes", "agent", "monitoring", "appearance", "alerts", "security"] as const
 
 type SettingsSection = (typeof settingsSections)[number]
 type MountedSections = Record<SettingsSection, boolean>
@@ -54,6 +56,7 @@ function createMountedSections(initialSection: SettingsSection): MountedSections
     nodes: initialSection === "nodes",
     agent: initialSection === "agent",
     monitoring: initialSection === "monitoring",
+    appearance: initialSection === "appearance",
     alerts: initialSection === "alerts",
     security: initialSection === "security",
   }
@@ -165,6 +168,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
         { value: "nodes", label: t("settingsPage.sectionNodes") },
         { value: "agent", label: t("settingsPage.sectionAgent") },
         { value: "monitoring", label: t("settingsPage.sectionMonitoring") },
+        { value: "appearance", label: t("settingsPage.sectionAppearance") },
         { value: "alerts", label: t("settingsPage.sectionAlerts") },
         { value: "security", label: t("settingsPage.sectionSecurity") },
       ] satisfies Array<{ value: SettingsSection; label: string }>,
@@ -345,6 +349,11 @@ export function Settings({ refreshNonce = 0 }: Props) {
           <MetricsRetentionCard />
           <DashboardVisibilityCard />
           <LatencyMonitorsCard nodes={effectiveNodes} />
+        </TabsContent>
+
+        <TabsContent value="appearance" {...getTabsContentProps("appearance")} hidden={activeSection !== "appearance"} className="space-y-6">
+          <ThemeSystemCard />
+          <FrontendSkinSystemCard />
         </TabsContent>
 
         <TabsContent value="alerts" {...getTabsContentProps("alerts")} hidden={activeSection !== "alerts"} className="space-y-6">

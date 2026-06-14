@@ -44,9 +44,9 @@ export function OverviewStats({
   void _heartbeat
 
   return (
-    <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <section className="theme-stat-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
       {items.map((item) => (
-        <Card key={item.label} className="panel-card enterprise-surface rounded-[24px]">
+        <Card key={item.label} className="theme-stat-card panel-card enterprise-surface rounded-[24px]">
           <CardContent className="p-5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">{item.label}</p>
             <p className={`mt-3 text-2xl font-semibold tracking-tight ${accentClass(item.accent)}`}>{item.value}</p>

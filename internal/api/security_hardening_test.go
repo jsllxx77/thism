@@ -37,6 +37,12 @@ func TestRouterAddsSecureResponseHeaders(t *testing.T) {
 	if !strings.Contains(headers.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatalf("expected CSP frame-ancestors directive, got %q", headers.Get("Content-Security-Policy"))
 	}
+	if !strings.Contains(headers.Get("Content-Security-Policy"), "https://api.github.com") {
+		t.Fatalf("expected CSP to allow GitHub API theme imports, got %q", headers.Get("Content-Security-Policy"))
+	}
+	if !strings.Contains(headers.Get("Content-Security-Policy"), "https://raw.githubusercontent.com") {
+		t.Fatalf("expected CSP to allow raw GitHub theme imports, got %q", headers.Get("Content-Security-Policy"))
+	}
 	if headers.Get("Referrer-Policy") == "" {
 		t.Fatal("expected Referrer-Policy header")
 	}

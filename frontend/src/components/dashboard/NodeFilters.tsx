@@ -24,7 +24,7 @@ export function NodeFilters({ status, search, tag = "all", availableTags = [], o
   ]
 
   return (
-    <section className="motion-filter-panel panel-card enterprise-surface rounded-[24px] p-4">
+    <section className="motion-filter-panel theme-filter-panel panel-card enterprise-surface rounded-[24px] p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <div className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
           <span>{t("dashboard.filters.status")}</span>

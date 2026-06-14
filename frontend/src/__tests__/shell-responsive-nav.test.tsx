@@ -66,8 +66,20 @@ describe("responsive shell nav", () => {
     expect(languageButton.className).toContain("dark:hover:text-slate-50")
     expect(await screen.findByRole("button", { name: "Refresh data" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
+    expect(await screen.findByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open reports" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open settings" })).toBeInTheDocument()
+  })
+
+  it("switches the runtime theme from the header", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("combobox", { name: "Theme" }))
+    await user.click(await screen.findByRole("option", { name: "Ocean" }))
+
+    expect(document.documentElement.dataset.theme).toBe("ocean")
+    expect(localStorage.getItem("thism-color-theme")).toBe("ocean")
   })
 
   it("shows a guest mode badge linking back to login", async () => {

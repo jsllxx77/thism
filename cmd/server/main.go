@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/thism-dev/thism/frontend"
 	"github.com/thism-dev/thism/internal/api"
+	frontendSkins "github.com/thism-dev/thism/internal/frontend/skins"
 	"github.com/thism-dev/thism/internal/geo"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/store"
@@ -39,6 +42,14 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
+func defaultFrontendSkinsDir(dbPath string) string {
+	dbPath = strings.TrimSpace(dbPath)
+	if dbPath == "" || dbPath == ":memory:" {
+		return "./frontend-skins"
+	}
+	return filepath.Join(filepath.Dir(dbPath), "frontend-skins")
+}
+
 func main() {
 	port := flag.String("port", envOr("THISM_PORT", "12026"), "HTTP port")
 	dbPath := flag.String("db", envOr("THISM_DB", "./thism.db"), "SQLite database path")
@@ -46,6 +57,7 @@ func main() {
 	adminUser := flag.String("admin-user", os.Getenv("THISM_ADMIN_USER"), "Admin username for login page authentication (env: THISM_ADMIN_USER)")
 	adminPass := flag.String("admin-pass", os.Getenv("THISM_ADMIN_PASS"), "Admin password for login page authentication (env: THISM_ADMIN_PASS)")
 	geoIPDBPath := flag.String("geoip-db", envOr("THISM_GEOIP_DB", geo.DefaultDBPath), "Path to local GeoIP mmdb database")
+	frontendSkinsDir := flag.String("frontend-skins-dir", os.Getenv("THISM_FRONTEND_SKINS_DIR"), "Directory for installed frontend skin packages (env: THISM_FRONTEND_SKINS_DIR)")
 	flag.Parse()
 
 	if *adminToken == "" {
@@ -67,16 +79,26 @@ func main() {
 	h := hub.New(s)
 	go h.Run()
 
+	skinDir := strings.TrimSpace(*frontendSkinsDir)
+	if skinDir == "" {
+		skinDir = defaultFrontendSkinsDir(*dbPath)
+	}
+	skinManager, err := frontendSkins.NewManager(skinDir)
+	if err != nil {
+		log.Fatalf("failed to open frontend skin manager: %v", err)
+	}
+
 	countryResolver := openCountryResolver(*geoIPDBPath)
 	if closer, ok := countryResolver.(interface{ Close() error }); ok {
 		defer closer.Close()
 	}
 
-	router := api.NewRouterWithAuthAndGeo(s, h, api.AuthConfig{
+	frontendHandler := frontend.HandlerWithSkins(frontend.Handler(), skinManager, s)
+	router := api.NewRouterWithAuthGeoAndFrontendSkins(s, h, api.AuthConfig{
 		AdminToken: *adminToken,
 		Username:   *adminUser,
 		Password:   *adminPass,
-	}, frontend.Handler(), countryResolver)
+	}, frontendHandler, countryResolver, skinManager)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

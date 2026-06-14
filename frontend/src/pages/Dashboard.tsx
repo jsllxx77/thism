@@ -367,7 +367,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
               </Suspense>
             </div>
           ) : (
-            <div key={resultMotionKey} className="motion-results-region motion-card-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div key={resultMotionKey} className="motion-results-region motion-card-grid theme-dashboard-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredNodes.map((node) => (
                 <NodeCard
                   key={node.id}
