@@ -50,7 +50,7 @@ func TestGuestSessionCannotAccessAdminEndpoints(t *testing.T) {
 	}{
 		{method: http.MethodPost, path: "/api/nodes/register"},
 		{method: http.MethodGet, path: "/api/nodes/node-1/install-command"},
-		{method: http.MethodGet, path: "/api/nodes/node-1/metrics"},
+		{method: http.MethodGet, path: "/api/nodes/node-1/processes"},
 		{method: http.MethodGet, path: "/api/nodes/node-1/services"},
 		{method: http.MethodGet, path: "/api/nodes/node-1/docker"},
 	}

@@ -64,6 +64,7 @@ const (
 )
 
 type accessRoleContextKey struct{}
+type cspNonceContextKey struct{}
 
 type AuthConfig struct {
 	AdminToken string
@@ -478,6 +479,14 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 			handleGetNode(w, req, s, h, countryResolver)
 		})
 
+		r.Get("/api/nodes/{id}/metrics", func(w http.ResponseWriter, req *http.Request) {
+			handleGetMetrics(w, req, s)
+		})
+
+		r.Get("/api/nodes/{id}/latency-results", func(w http.ResponseWriter, req *http.Request) {
+			handleGetLatencyResults(w, req, s)
+		})
+
 		r.Get("/api/meta/version", func(w http.ResponseWriter, req *http.Request) {
 			handleGetVersionMetadata(w, req)
 		})
@@ -572,14 +581,6 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 
 		r.Get("/api/nodes/{id}/install-command", func(w http.ResponseWriter, req *http.Request) {
 			handleGetInstallCommand(w, req, s)
-		})
-
-		r.Get("/api/nodes/{id}/metrics", func(w http.ResponseWriter, req *http.Request) {
-			handleGetMetrics(w, req, s)
-		})
-
-		r.Get("/api/nodes/{id}/latency-results", func(w http.ResponseWriter, req *http.Request) {
-			handleGetLatencyResults(w, req, s)
 		})
 
 		r.Get("/api/nodes/{id}/processes", func(w http.ResponseWriter, req *http.Request) {
@@ -796,9 +797,15 @@ func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
 
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonce, _ := generateHexBytes(16)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: https://api.github.com https://raw.githubusercontent.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+		scriptSrc := "script-src 'self'"
+		if nonce != "" {
+			scriptSrc += " 'nonce-" + nonce + "'"
+			r = r.WithContext(context.WithValue(r.Context(), cspNonceContextKey{}, nonce))
+		}
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: https://api.github.com https://raw.githubusercontent.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data: blob:; "+scriptSrc+"; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		if requestIsSecure(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -845,6 +852,9 @@ func csrfProtection(next http.Handler) http.Handler {
 
 func requiresCSRFCheck(r *http.Request) bool {
 	if r == nil || !isStateChangingMethod(r.Method) {
+		return false
+	}
+	if r.URL.Path == "/api/auth/guest" {
 		return false
 	}
 	if bearerToken(r) != "" {
@@ -941,6 +951,7 @@ const (
 
 type loginPageData struct {
 	Language             uiLanguage
+	ScriptNonce          string
 	PageTitle            string
 	BrandKicker          string
 	BrandTitle           string
@@ -1322,7 +1333,7 @@ var loginPageTemplate = template.Must(template.New("login-page").Parse(`<!doctyp
       </form>
     </section>
   </main>
-  <script>
+  <script nonce="{{.ScriptNonce}}">
     const form = document.getElementById("login-form");
     const errorMsg = document.getElementById("error-msg");
     const submitBtn = document.getElementById("submit-btn");
@@ -1543,12 +1554,22 @@ func loginPageDataForLanguage(language uiLanguage) loginPageData {
 	}
 }
 
-func renderLoginPageHTML(language uiLanguage) string {
+func renderLoginPageHTML(language uiLanguage, scriptNonce string) string {
 	var buf bytes.Buffer
-	if err := loginPageTemplate.Execute(&buf, loginPageDataForLanguage(language)); err != nil {
+	data := loginPageDataForLanguage(language)
+	data.ScriptNonce = scriptNonce
+	if err := loginPageTemplate.Execute(&buf, data); err != nil {
 		return ""
 	}
 	return buf.String()
+}
+
+func cspNonceFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	nonce, _ := r.Context().Value(cspNonceContextKey{}).(string)
+	return nonce
 }
 
 func handleLoginPage(w http.ResponseWriter, r *http.Request, auth *authManager) {
@@ -1564,7 +1585,7 @@ func handleLoginPage(w http.ResponseWriter, r *http.Request, auth *authManager) 
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderLoginPageHTML(resolveUILanguage(r))))
+	_, _ = w.Write([]byte(renderLoginPageHTML(resolveUILanguage(r), cspNonceFromRequest(r))))
 }
 
 func handlePasswordLogin(w http.ResponseWriter, r *http.Request, s *store.Store, auth *authManager) {
@@ -2796,6 +2817,9 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 	if monitors == nil {
 		monitors = []*models.LatencyMonitor{}
 	}
+	if accessRoleFromRequest(r) == accessRoleGuest {
+		monitors = redactedLatencyMonitors(monitors)
+	}
 	if results == nil {
 		results = []*models.LatencyMonitorResult{}
 	}
@@ -2806,6 +2830,22 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 			"resolution": metaResolution,
 		},
 	})
+}
+
+func redactedLatencyMonitors(monitors []*models.LatencyMonitor) []*models.LatencyMonitor {
+	redacted := make([]*models.LatencyMonitor, 0, len(monitors))
+	for _, monitor := range monitors {
+		if monitor == nil {
+			continue
+		}
+		current := *monitor
+		current.Target = ""
+		current.AutoAssignNewNodes = false
+		current.AssignedNodeCount = 0
+		current.AssignedNodeIDs = nil
+		redacted = append(redacted, &current)
+	}
+	return redacted
 }
 
 func handleGetProcesses(w http.ResponseWriter, r *http.Request, s *store.Store) {

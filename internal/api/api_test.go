@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1008,6 +1009,90 @@ func TestLoginPageIncludesGuestModeEntry(t *testing.T) {
 	}
 }
 
+func TestLoginPageAllowsInlineScriptWithCSPNonce(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{
+			AdminToken: "admin-token",
+			Username:   "admin",
+			Password:   "secret-pass",
+		},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend"))
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for login page, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	match := regexp.MustCompile(`<script nonce="([^"]+)">`).FindStringSubmatch(body)
+	if len(match) != 2 || strings.TrimSpace(match[1]) == "" {
+		t.Fatalf("expected login page inline script to carry a CSP nonce, got %q", body)
+	}
+	csp := resp.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'nonce-"+match[1]+"'") {
+		t.Fatalf("expected CSP to allow the login script nonce %q, got %q", match[1], csp)
+	}
+}
+
+func TestGuestLoginClearsStaleAdminCookieWithoutCSRF(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{
+			AdminToken: "admin-token",
+			Username:   "admin",
+			Password:   "secret-pass",
+		},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend"))
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
+	req.AddCookie(&http.Cookie{Name: "thism_admin", Value: "stale-session"})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected stale admin cookie to be cleared by guest login, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var guestCookie, clearedAdminCookie *http.Cookie
+	for _, cookie := range resp.Result().Cookies() {
+		switch cookie.Name {
+		case "thism_guest":
+			guestCookie = cookie
+		case "thism_admin":
+			clearedAdminCookie = cookie
+		}
+	}
+	if guestCookie == nil || guestCookie.Value != "1" {
+		t.Fatalf("expected thism_guest cookie to be set, got %#v", guestCookie)
+	}
+	if clearedAdminCookie == nil || clearedAdminCookie.MaxAge != -1 {
+		t.Fatalf("expected stale thism_admin cookie to be cleared, got %#v", clearedAdminCookie)
+	}
+}
+
 func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -1110,6 +1195,124 @@ func TestGuestSessionCanAccessFrontendAndGetsRedactedNodeData(t *testing.T) {
 	}
 	if body.Nodes[0].CountryCode != "HK" {
 		t.Fatalf("expected guest node country code to be preserved, got %q", body.Nodes[0].CountryCode)
+	}
+}
+
+func TestGuestSessionCanAccessNodeChartsWithoutMonitorTargets(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	if err := s.UpsertNode(&models.Node{
+		ID:        "node-1",
+		Name:      "edge-1",
+		Token:     "node-token-1",
+		CreatedAt: time.Now().Unix(),
+		LastSeen:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.InsertMetrics("node-1", &models.MetricsPayload{
+		TS:  1700000100,
+		CPU: 42.5,
+		Mem: models.MemStats{Used: 512, Total: 1024},
+		Disk: []models.DiskStats{
+			{Mount: "/", Used: 2048, Total: 4096},
+		},
+		Net: models.NetStats{RxBytes: 1000, TxBytes: 2000},
+	}); err != nil {
+		t.Fatalf("InsertMetrics: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Public latency",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "private.example.internal:443",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+	latency := 28.5
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+		MonitorID: "monitor-1",
+		NodeID:    "node-1",
+		TS:        1700000120,
+		LatencyMs: &latency,
+		Success:   true,
+	}); err != nil {
+		t.Fatalf("InsertLatencyResult: %v", err)
+	}
+
+	router := api.NewRouterWithAuth(
+		s,
+		h,
+		api.AuthConfig{AdminToken: "admin-token", Username: "admin", Password: "secret-pass"},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("frontend"))
+		}),
+	)
+
+	guestReq := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
+	guestResp := httptest.NewRecorder()
+	router.ServeHTTP(guestResp, guestReq)
+	if guestResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for guest login, got %d: %s", guestResp.Code, guestResp.Body.String())
+	}
+	var guestCookie *http.Cookie
+	for _, cookie := range guestResp.Result().Cookies() {
+		if cookie.Name == "thism_guest" {
+			guestCookie = cookie
+			break
+		}
+	}
+	if guestCookie == nil {
+		t.Fatal("expected thism_guest cookie to be set")
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/metrics?from=1700000000&to=1700000200", nil)
+	metricsReq.AddCookie(guestCookie)
+	metricsResp := httptest.NewRecorder()
+	router.ServeHTTP(metricsResp, metricsReq)
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for guest metrics, got %d: %s", metricsResp.Code, metricsResp.Body.String())
+	}
+	var metricsBody struct {
+		Metrics []store.MetricsRow `json:"metrics"`
+	}
+	if err := json.Unmarshal(metricsResp.Body.Bytes(), &metricsBody); err != nil {
+		t.Fatalf("decode guest metrics response: %v", err)
+	}
+	if len(metricsBody.Metrics) != 1 || metricsBody.Metrics[0].CPU != 42.5 {
+		t.Fatalf("unexpected guest metrics payload: %#v", metricsBody.Metrics)
+	}
+
+	latencyReq := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1700000000&to=1700000200", nil)
+	latencyReq.AddCookie(guestCookie)
+	latencyResp := httptest.NewRecorder()
+	router.ServeHTTP(latencyResp, latencyReq)
+	if latencyResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for guest latency results, got %d: %s", latencyResp.Code, latencyResp.Body.String())
+	}
+	var latencyBody struct {
+		Monitors []models.LatencyMonitor       `json:"monitors"`
+		Results  []models.LatencyMonitorResult `json:"results"`
+	}
+	if err := json.Unmarshal(latencyResp.Body.Bytes(), &latencyBody); err != nil {
+		t.Fatalf("decode guest latency response: %v", err)
+	}
+	if len(latencyBody.Monitors) != 1 || latencyBody.Monitors[0].Name != "Public latency" {
+		t.Fatalf("unexpected guest monitor payload: %#v", latencyBody.Monitors)
+	}
+	if latencyBody.Monitors[0].Target != "" || len(latencyBody.Monitors[0].AssignedNodeIDs) != 0 || latencyBody.Monitors[0].AssignedNodeCount != 0 {
+		t.Fatalf("expected guest monitor internals to be redacted, got %#v", latencyBody.Monitors[0])
+	}
+	if len(latencyBody.Results) != 1 || latencyBody.Results[0].LatencyMs == nil || *latencyBody.Results[0].LatencyMs != latency {
+		t.Fatalf("unexpected guest latency results: %#v", latencyBody.Results)
 	}
 }
 

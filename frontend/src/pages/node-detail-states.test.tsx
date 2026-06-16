@@ -361,7 +361,7 @@ describe("node detail page states", () => {
     expect(await screen.findByRole("button", { name: "30d" })).toBeInTheDocument()
   })
 
-  it("limits guest users to basic node information", async () => {
+  it("shows guest users resource and latency charts without operational details", async () => {
     nodeMock.mockResolvedValue({
       node: {
           id: "node-1",
@@ -383,7 +383,47 @@ describe("node detail page states", () => {
           },
         },
     })
-    metricsMock.mockResolvedValue({ metrics: [] })
+    metricsMock.mockResolvedValue({
+      metrics: [
+        {
+          ts: 1700000000,
+          cpu: 37.5,
+          mem_used: 512,
+          mem_total: 1024,
+          disk_used: 2048,
+          disk_total: 4096,
+          net_rx: 1000,
+          net_tx: 2000,
+        },
+      ],
+    })
+    latencyResultsMock.mockResolvedValue({
+      monitors: [
+        {
+          id: "monitor-1",
+          name: "Guangdong IPv4",
+          type: "tcp",
+          target: "",
+          interval_seconds: 60,
+          auto_assign_new_nodes: false,
+          assigned_node_count: 0,
+          assigned_node_ids: [],
+          created_at: 0,
+          updated_at: 0,
+        },
+      ],
+      results: [
+        {
+          monitor_id: "monitor-1",
+          node_id: "node-1",
+          ts: 1700000000,
+          latency_ms: 88.1,
+          loss_percent: 0,
+          jitter_ms: 1.7,
+          success: true,
+        },
+      ],
+    })
     processesMock.mockResolvedValue([{ pid: 10, name: "sshd", cpu: 0.1, mem: 1024 }])
     servicesMock.mockResolvedValue({ services: [{ name: "nginx", status: "ok", last_checked: 0 }] })
     dockerMock.mockResolvedValue({
@@ -396,10 +436,13 @@ describe("node detail page states", () => {
     expect(await screen.findByText("alpha")).toBeInTheDocument()
     expect(screen.queryByText("1.1.1.1")).not.toBeInTheDocument()
     expect(screen.getByText("Hardware")).toBeInTheDocument()
-    expect(screen.queryByText("CPU Usage")).not.toBeInTheDocument()
+    expect(screen.getAllByText("CPU Usage").length).toBeGreaterThan(0)
+    expect(screen.getByText("Latency Monitors")).toBeInTheDocument()
+    expect(screen.getByText("Guangdong IPv4")).toBeInTheDocument()
     expect(screen.queryByText("Top Processes")).not.toBeInTheDocument()
     expect(nodeMock).toHaveBeenCalledWith("node-1")
-    expect(metricsMock).not.toHaveBeenCalled()
+    expect(metricsMock).toHaveBeenCalled()
+    expect(latencyResultsMock).toHaveBeenCalled()
     expect(processesMock).not.toHaveBeenCalled()
     expect(servicesMock).not.toHaveBeenCalled()
     expect(dockerMock).not.toHaveBeenCalled()

@@ -156,10 +156,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   }, [])
 
   useEffect(() => {
-    if (accessMode === "guest") {
-      return
-    }
-
     let cancelled = false
 
     const loadMetricsRetention = async () => {
@@ -180,7 +176,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     return () => {
       cancelled = true
     }
-  }, [accessMode, refreshNonce])
+  }, [refreshNonce])
 
   useEffect(() => {
     if (range > maxRange) {
@@ -196,30 +192,31 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
       const nodeResponse = await api.node(nodeId)
       setNode(nodeResponse.node ?? null)
 
+      const to = Math.floor(Date.now() / 1000)
+      const from = to - effectiveRange
+      const latencyResultsRequest = (api as { latencyResults?: typeof api.latencyResults }).latencyResults
+      const [metricsResponse, latencyResponse] = await Promise.all([
+        api.metrics(nodeId, from, to),
+        latencyResultsRequest ? latencyResultsRequest(nodeId, from, to) : Promise.resolve({ monitors: [], results: [] }),
+      ])
+
+      setMetrics(metricsResponse.metrics ?? [])
+      setLatencyMonitors(latencyResponse.monitors ?? [])
+      setLatencyResults(latencyResponse.results ?? [])
+
       if (accessMode === "guest") {
-        setMetrics([])
-        setLatencyMonitors([])
-        setLatencyResults([])
         setProcesses([])
         setServices([])
         setDockerSnapshot(null)
         return
       }
 
-      const to = Math.floor(Date.now() / 1000)
-      const from = to - effectiveRange
-      const latencyResultsRequest = (api as { latencyResults?: typeof api.latencyResults }).latencyResults
-      const [metricsResponse, latencyResponse, processesResponse, servicesResponse, dockerResponse] = await Promise.all([
-        api.metrics(nodeId, from, to),
-        latencyResultsRequest ? latencyResultsRequest(nodeId, from, to) : Promise.resolve({ monitors: [], results: [] }),
+      const [processesResponse, servicesResponse, dockerResponse] = await Promise.all([
         api.processes(nodeId),
         api.services(nodeId),
         api.docker(nodeId).catch(() => ({ docker_available: false, containers: [] })),
       ])
 
-      setMetrics(metricsResponse.metrics ?? [])
-      setLatencyMonitors(latencyResponse.monitors ?? [])
-      setLatencyResults(latencyResponse.results ?? [])
       setProcesses(Array.isArray(processesResponse) ? processesResponse : [])
       setServices(servicesResponse.services ?? [])
       setDockerSnapshot(dockerResponse)
@@ -240,10 +237,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   }, [loadNodeDetail, refreshNonce])
 
   useEffect(() => {
-    if (accessMode === "guest") {
-      return
-    }
-
     const ws = getDashboardWS()
     const handler = (msg: WSMessage) => {
       if (msg.type === "metrics") {
@@ -287,7 +280,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     }
     ws.on(handler)
     return () => ws.off(handler)
-  }, [accessMode, effectiveRange, latencyMonitors, nodeId])
+  }, [effectiveRange, latencyMonitors, nodeId])
 
   const { cpuData, memData, netRxData, netTxData, netRxSpeedData, netTxSpeedData, diskData } = useMemo(
     () => buildNodeDetailMetricSeries(metrics, effectiveRange),
@@ -313,7 +306,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const hasProcessSection = processes.length > 0
   const hasServiceSection = services.length > 0
   const hasDockerSection = dockerSnapshot?.docker_available === true
-  const showMetrics = accessMode !== "guest"
   const showDetailSections = accessMode !== "guest" && (hasProcessSection || hasServiceSection || hasDockerSection)
   const detailSectionCount = Number(hasProcessSection) + Number(hasServiceSection) + Number(hasDockerSection)
   const detailSectionGridClass =
@@ -360,50 +352,48 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         <>
           <NodeHero node={node} showIP={accessMode !== "guest"} uptimeSeconds={heroUptimeSeconds} />
           <HardwarePassport hardware={node?.hardware} os={node?.os} arch={node?.arch} />
-          {showMetrics && (
-            <>
-              <section className="panel-card enterprise-surface rounded-[24px] p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">{t("nodeDetail.rangeLabel")}</p>
-                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{t("nodeDetail.rangeDescription")}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {ranges.map((item) => (
-                      <button
-                        key={item.label}
-                        type="button"
-                        onClick={() => setRange(item.seconds)}
-                        className={`h-10 rounded-lg border px-3 py-1.5 text-xs font-medium ${
-                          range === item.seconds
-                            ? "border-slate-300 bg-slate-100 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:shadow-none"
-                            : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:bg-slate-900"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
+          <>
+            <section className="panel-card enterprise-surface rounded-[24px] p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">{t("nodeDetail.rangeLabel")}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{t("nodeDetail.rangeDescription")}</p>
                 </div>
-              </section>
-              <MetricTabs
-                range={range}
-                cpuData={cpuData}
-                memData={memData}
-                netRxData={netRxData}
-                netTxData={netTxData}
-                netRxSpeedData={netRxSpeedData}
-                netTxSpeedData={netTxSpeedData}
-                netValueFormatter={formatBytes}
-                netAxisTickFormatter={formatBytes}
-                netSpeedFormatter={formatBytesPerSecond}
-                netSpeedAxisTickFormatter={formatBytesPerSecond}
-                networkSummary={networkSummary}
-                diskData={diskData}
-              />
-              <LatencyMonitorChart monitors={latencyMonitors} results={latencyResults} range={range} />
-            </>
-          )}
+                <div className="flex flex-wrap gap-1.5">
+                  {ranges.map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => setRange(item.seconds)}
+                      className={`h-10 rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                        range === item.seconds
+                          ? "border-slate-300 bg-slate-100 text-slate-900 shadow-sm dark:border-white/10 dark:bg-slate-900 dark:text-slate-50 dark:shadow-none"
+                          : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 dark:border-white/8 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:bg-slate-900"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+            <MetricTabs
+              range={range}
+              cpuData={cpuData}
+              memData={memData}
+              netRxData={netRxData}
+              netTxData={netTxData}
+              netRxSpeedData={netRxSpeedData}
+              netTxSpeedData={netTxSpeedData}
+              netValueFormatter={formatBytes}
+              netAxisTickFormatter={formatBytes}
+              netSpeedFormatter={formatBytesPerSecond}
+              netSpeedAxisTickFormatter={formatBytesPerSecond}
+              networkSummary={networkSummary}
+              diskData={diskData}
+            />
+            <LatencyMonitorChart monitors={latencyMonitors} results={latencyResults} range={range} />
+          </>
           {showDetailSections && (
             <div className={`grid grid-cols-1 gap-4 ${detailSectionGridClass}`}>
               {hasProcessSection && <ProcessTable processes={processes} defaultOpen={desktopSectionsOpen} />}
