@@ -334,6 +334,14 @@ body {
   animation-name: metric-value-flash-dark;
 }
 
+.dashboard-net-speed-value {
+  min-width: 7rem;
+  flex-shrink: 0;
+  font-family: var(--app-mono-font-family, "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .motion-dialog-overlay[data-state="open"] {
   animation: motion-overlay-in var(--motion-medium) var(--motion-ease);
 }

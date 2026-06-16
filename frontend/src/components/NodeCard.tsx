@@ -74,8 +74,8 @@ function useValueFlash(value: string | number | null | undefined) {
   return flash
 }
 
-function metricValueClass(flash: boolean) {
-  return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${flash ? "metric-value--flash" : ""}`
+function metricValueClass(flash: boolean, className = "") {
+  return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${flash ? "metric-value--flash" : ""} ${className}`.trim()
 }
 
 function RelativeLastSeenLabel({ lastSeen }: { lastSeen: number }) {
@@ -117,8 +117,6 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
   const memLabel = memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`
   const cpuFlash = useValueFlash(hasCpu ? Number(cpu.toFixed(1)) : null)
   const memFlash = useValueFlash(memPct === null ? null : Number(memPct.toFixed(1)))
-  const netRxFlash = useValueFlash(hasNetRxSpeed ? netRxLabel : null)
-  const netTxFlash = useValueFlash(hasNetTxSpeed ? netTxLabel : null)
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
   const tags = node.tags ?? []
@@ -183,11 +181,11 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
             <div className={`space-y-1 ${showNetSpeed ? "" : "opacity-60"}`}>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.inboundSpeed")}</span>
-                <span className={metricValueClass(netRxFlash)}>↓ {netRxLabel}</span>
+                <span className={metricValueClass(false, "dashboard-net-speed-value")}>↓ {netRxLabel}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.outboundSpeed")}</span>
-                <span className={metricValueClass(netTxFlash)}>↑ {netTxLabel}</span>
+                <span className={metricValueClass(false, "dashboard-net-speed-value")}>↑ {netTxLabel}</span>
               </div>
             </div>
           </div>

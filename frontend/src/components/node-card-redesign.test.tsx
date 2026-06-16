@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { act } from "react"
 import type { Node } from "../lib/api"
 import { NodeCard } from "./NodeCard"
 
@@ -96,6 +97,30 @@ describe("node card redesign", () => {
 
     expect(screen.getByText(/1\.0 KB\/s/)).toBeInTheDocument()
     expect(screen.getByText(/2\.0 KB\/s/)).toBeInTheDocument()
+  })
+
+  it("keeps network speed updates visually stable without flash animation", () => {
+    vi.useFakeTimers()
+
+    try {
+      const { rerender } = render(<NodeCard node={createNode()} cpu={12.3} memUsed={512} memTotal={1024} netRxSpeed={1024} netTxSpeed={2048} />)
+
+      rerender(<NodeCard node={createNode()} cpu={12.3} memUsed={512} memTotal={1024} netRxSpeed={1536} netTxSpeed={3072} />)
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+
+      const inboundValue = screen.getByText(/1\.5 KB\/s/)
+      const outboundValue = screen.getByText(/3\.0 KB\/s/)
+
+      expect(inboundValue).toHaveClass("dashboard-net-speed-value")
+      expect(outboundValue).toHaveClass("dashboard-net-speed-value")
+      expect(inboundValue).not.toHaveClass("metric-value--flash")
+      expect(outboundValue).not.toHaveClass("metric-value--flash")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("can hide node IP for restricted views", () => {
