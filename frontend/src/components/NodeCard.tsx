@@ -78,7 +78,7 @@ function metricValueClass(flash: boolean, className = "") {
   return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${flash ? "metric-value--flash" : ""} ${className}`.trim()
 }
 
-function RelativeLastSeenLabel({ lastSeen }: { lastSeen: number }) {
+function RelativeLastSeenLabel({ lastSeen, offline = false }: { lastSeen: number; offline?: boolean }) {
   const { t, formatRelativeLastSeen } = useLanguage()
   const [nowMs, setNowMs] = useState(() => Date.now())
 
@@ -97,7 +97,11 @@ function RelativeLastSeenLabel({ lastSeen }: { lastSeen: number }) {
   }, [lastSeen])
 
   return (
-    <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+    <p
+      className={`mt-3 text-[11px] font-medium uppercase tracking-[0.16em] ${
+        offline ? "font-semibold text-[hsl(var(--destructive))]" : "text-slate-500 dark:text-slate-400"
+      }`}
+    >
       {t("dashboard.nodeCard.lastSeen", { value: formatRelativeLastSeen(lastSeen, nowMs) })}
     </p>
   )
@@ -127,11 +131,15 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
       type="button"
       onClick={handleClick}
       aria-label={node.name}
-      className={`group/card h-full w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-[opacity,transform] duration-200 ease-out hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white active:translate-y-0 dark:focus-visible:ring-offset-slate-950 ${
-        !node.online ? "opacity-80" : ""
-      }`}
+      className={`group/card h-full w-full rounded-2xl border-0 bg-transparent p-0 text-left transition-[opacity,transform] duration-200 ease-out hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white active:translate-y-0 dark:focus-visible:ring-offset-slate-950`}
     >
-      <Card className="node-card-shell theme-dashboard-card panel-card panel-card-hover enterprise-surface h-full rounded-[24px]">
+      <Card
+        className={`node-card-shell theme-dashboard-card panel-card panel-card-hover enterprise-surface h-full rounded-[24px] ${
+          !node.online
+            ? "border-l-4 border-l-[hsl(var(--destructive))] bg-[hsl(var(--destructive)/0.04)] dark:bg-[hsl(var(--destructive)/0.08)]"
+            : ""
+        }`}
+      >
         <CardContent className="relative z-[1] p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -149,10 +157,16 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
               className={
                 node.online
                   ? "gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
-                  : "gap-1.5 border-slate-300 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300"
+                  : "gap-1.5 border-[hsl(var(--destructive)/0.35)] bg-[hsl(var(--destructive)/0.12)] font-semibold text-[hsl(var(--destructive))]"
               }
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${node.online ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]" : "bg-slate-400 dark:bg-slate-500"}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  node.online
+                    ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]"
+                    : "bg-[hsl(var(--destructive))] shadow-[0_0_0_3px_hsl(var(--destructive)/0.18)]"
+                }`}
+              />
               {node.online ? t("common.online") : t("common.offline")}
             </Badge>
           </div>
@@ -190,7 +204,7 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
             </div>
           </div>
 
-          <RelativeLastSeenLabel lastSeen={node.last_seen} />
+          <RelativeLastSeenLabel lastSeen={node.last_seen} offline={!node.online} />
         </CardContent>
       </Card>
     </button>

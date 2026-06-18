@@ -38,6 +38,25 @@ function SortButton({
   )
 }
 
+function StatusPill({ online, label }: { online: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+        online
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "border-[hsl(var(--destructive)/0.35)] bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))]"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          online ? "bg-emerald-500" : "bg-[hsl(var(--destructive))]"
+        }`}
+      />
+      {label}
+    </span>
+  )
+}
+
 export function NodeTable({ nodes, onSelectNode }: Props) {
   const { t } = useLanguage()
   const [sortKey, setSortKey] = useState<SortKey>("status")
@@ -91,7 +110,9 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
           {sorted.map((node) => (
             <tr
               key={node.id}
-              className="motion-table-row border-b border-slate-100 dark:border-slate-800"
+              className={`motion-table-row border-b border-slate-100 dark:border-slate-800 ${
+                !node.online ? "bg-[hsl(var(--destructive)/0.05)]" : ""
+              }`}
             >
               <td className="py-2.5 pr-3 text-slate-900 dark:text-slate-100">
                 <button
@@ -109,7 +130,9 @@ export function NodeTable({ nodes, onSelectNode }: Props) {
                 <NodeTagChips tags={node.tags} />
               </td>
               <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.ip || t("common.unavailable")}</td>
-              <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{node.online ? t("common.online") : t("common.offline")}</td>
+              <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">
+                <StatusPill online={node.online} label={node.online ? t("common.online") : t("common.offline")} />
+              </td>
             </tr>
           ))}
         </tbody>
