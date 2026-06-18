@@ -193,6 +193,10 @@ func pruneMetrics(s *store.Store) {
 	}
 	if err := s.PruneOldMetrics(days); err != nil {
 		log.Printf("metrics retention: failed to prune old metrics: %v", err)
+		return
+	}
+	if err := s.ReclaimSpace(); err != nil {
+		log.Printf("metrics retention: failed to reclaim freed space: %v", err)
 	}
 }
 
