@@ -328,7 +328,7 @@ export function Reports() {
       </section>
 
       <section className="motion-filter-panel panel-card enterprise-surface rounded-[24px] p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start">
           <div className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
             <span>{t("reportsPage.rangeLabel")}</span>
             <div role="group" aria-label={t("reportsPage.rangeLabel")} className="enterprise-inner-surface inline-flex w-full gap-1 rounded-2xl p-1.5 shadow-none md:w-auto md:p-1">
@@ -412,7 +412,7 @@ export function Reports() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.node")}</th>
+                      <th className="pb-2 pl-3 pr-3 font-medium">{t("reportsPage.node")}</th>
                       <th className="pb-2 pr-3 font-medium">{t("reportsPage.tags")}</th>
                       <th className="pb-2 pr-3 font-medium">{t("reportsPage.availability")}</th>
                       <th className="pb-2 pr-3 font-medium">{t("reportsPage.offline")}</th>
@@ -424,7 +424,7 @@ export function Reports() {
                   <tbody className="motion-table-body">
                     {rows.map((row) => (
                       <tr key={row.node_id} className="motion-table-row border-b border-slate-100 dark:border-slate-800">
-                        <td className="py-2.5 pr-3 text-slate-900 dark:text-slate-100">
+                        <td className="py-2.5 pl-3 pr-3 text-slate-900 dark:text-slate-100">
                           <div className="font-medium">{row.name}</div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">
                             {t("reportsPage.samples", { observed: row.observed_samples, expected: row.expected_samples })}
