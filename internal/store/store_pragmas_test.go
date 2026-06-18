@@ -37,4 +37,12 @@ func TestNewConfiguresSQLitePragmas(t *testing.T) {
 	if synchronous != 1 {
 		t.Fatalf("expected synchronous=NORMAL (1), got %d", synchronous)
 	}
+
+	var autoVacuum int
+	if err := s.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&autoVacuum); err != nil {
+		t.Fatalf("query auto_vacuum: %v", err)
+	}
+	if autoVacuum != 2 {
+		t.Fatalf("expected auto_vacuum=INCREMENTAL (2), got %d", autoVacuum)
+	}
 }

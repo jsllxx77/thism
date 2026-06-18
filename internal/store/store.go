@@ -28,6 +28,15 @@ type sqlExecer interface {
 
 const DefaultMetricsRetentionDays = 30
 
+// RawMetricsRetentionDays bounds how long high-resolution (per-sample) metrics
+// are kept. Raw rows in `metrics` and `monitor_results` are only ever queried
+// for spans up to 6 hours; longer ranges are served from the 1-minute rollup
+// tables. Keeping raw data only a couple of days (instead of the full
+// configured retention) is the single biggest lever on database size, while
+// the 2-day floor leaves ample margin for delayed sample arrivals and clock
+// skew above the 6-hour query window.
+const RawMetricsRetentionDays = 2
+
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
@@ -123,6 +132,13 @@ func restrictSQLiteFilePermissions(path string) {
 
 func (s *Store) configureConnectionPragmas() error {
 	pragmas := []string{
+		// auto_vacuum must be set before any write touches the database header
+		// (e.g. journal_mode=WAL); otherwise it is locked at the default NONE.
+		// INCREMENTAL lets ReclaimSpace() return freed pages to the OS via
+		// `PRAGMA incremental_vacuum` without a full rebuild. Legacy databases
+		// created in NONE mode are converted by the one-time VACUUM in
+		// ReclaimSpace().
+		`PRAGMA auto_vacuum = INCREMENTAL`,
 		`PRAGMA journal_mode = WAL`,
 		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteBusyTimeout),
 		`PRAGMA synchronous = NORMAL`,
@@ -2781,28 +2797,70 @@ func (s *Store) ListNodesWithLatestMetrics() ([]*models.Node, error) {
 }
 
 // PruneOldMetrics deletes historical raw and rolled-up monitoring rows older than retentionDays days.
+// PruneOldMetrics enforces retention. Raw, high-resolution rows (`metrics`,
+// `monitor_results`) are pruned to RawMetricsRetentionDays, capped so they are
+// never kept longer than the configured retention. The 1-minute rollup tables
+// (`metrics_1m`, `latency_1m`), which back every query beyond a 6-hour span,
+// are pruned to the full configured retention.
 func (s *Store) PruneOldMetrics(retentionDays int) error {
-	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
+	rawRetentionDays := RawMetricsRetentionDays
+	if retentionDays < rawRetentionDays {
+		rawRetentionDays = retentionDays
+	}
+	rollupCutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
+	rawCutoff := time.Now().AddDate(0, 0, -rawRetentionDays).Unix()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM metrics WHERE ts < ?`, cutoff); err != nil {
+	if _, err := tx.Exec(`DELETE FROM metrics WHERE ts < ?`, rawCutoff); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM metrics_1m WHERE ts < ?`, cutoff); err != nil {
+	if _, err := tx.Exec(`DELETE FROM metrics_1m WHERE ts < ?`, rollupCutoff); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM monitor_results WHERE ts < ?`, cutoff); err != nil {
+	if _, err := tx.Exec(`DELETE FROM monitor_results WHERE ts < ?`, rawCutoff); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM latency_1m WHERE ts < ?`, cutoff); err != nil {
+	if _, err := tx.Exec(`DELETE FROM latency_1m WHERE ts < ?`, rollupCutoff); err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+// ReclaimSpace returns disk space freed by pruning back to the operating
+// system. SQLite's DELETE only marks pages free; without this the database file
+// grows monotonically to its historical peak. On databases already in
+// INCREMENTAL auto-vacuum mode this runs the cheap `incremental_vacuum`. Legacy
+// databases still in `NONE` mode are converted once with a full `VACUUM` (which
+// also reclaims all previously-freed pages); subsequent calls then take the
+// cheap incremental path.
+func (s *Store) ReclaimSpace() error {
+	var autoVacuum int
+	if err := s.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&autoVacuum); err != nil {
+		return err
+	}
+
+	// auto_vacuum: 0=NONE, 1=FULL, 2=INCREMENTAL. A full VACUUM is required to
+	// switch an existing database into INCREMENTAL mode and to reclaim pages
+	// that were freed before incremental mode took effect.
+	if autoVacuum != 2 {
+		if _, err := s.db.Exec(`VACUUM`); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if _, err := s.db.Exec(`PRAGMA incremental_vacuum`); err != nil {
+		return err
+	}
+	// Keep the WAL from holding space indefinitely after large deletes.
+	_, _ = s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return nil
 }
 
 // -------------------------------------------------------------------------

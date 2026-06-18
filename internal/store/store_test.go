@@ -3,6 +3,7 @@ package store_test
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1734,4 +1735,102 @@ func TestDeleteLatencyMonitorCascades(t *testing.T) {
 	if len(aggregated) != 0 {
 		t.Fatalf("expected aggregated results to be deleted, got %#v", aggregated)
 	}
+}
+
+func TestPruneOldMetricsKeepsRollupButDropsRawWithinRetention(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	// A raw sample 5 days old: older than the 2-day raw window but well within
+	// the 30-day configured retention. Its 1-minute rollup must survive.
+	rawTS := time.Now().AddDate(0, 0, -5).Unix()
+	bucketTS := (rawTS / 60) * 60
+	if err := s.InsertMetrics("n1", &models.MetricsPayload{
+		TS:  rawTS,
+		CPU: 40,
+		Mem: models.MemStats{Used: 512, Total: 4096},
+	}); err != nil {
+		t.Fatalf("InsertMetrics: %v", err)
+	}
+	if err := s.RollupMetrics1m(rawTS, rawTS+59); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	if err := s.PruneOldMetrics(30); err != nil {
+		t.Fatalf("PruneOldMetrics: %v", err)
+	}
+
+	raw, err := s.QueryMetrics("n1", rawTS-60, rawTS+60)
+	if err != nil {
+		t.Fatalf("QueryMetrics: %v", err)
+	}
+	if len(raw) != 0 {
+		t.Fatalf("expected raw samples older than the raw window to be pruned, got %d", len(raw))
+	}
+
+	rollup, err := s.QueryMetrics1m("n1", bucketTS, bucketTS)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m: %v", err)
+	}
+	if len(rollup) != 1 {
+		t.Fatalf("expected rollup within configured retention to be kept, got %d", len(rollup))
+	}
+}
+
+func TestReclaimSpaceShrinksDatabaseFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thism.db")
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	// Insert a large batch of old raw samples, then prune them.
+	oldBase := time.Now().AddDate(0, 0, -10).Unix()
+	for i := int64(0); i < 5000; i++ {
+		if err := s.InsertMetrics("n1", &models.MetricsPayload{
+			TS:  oldBase + i,
+			CPU: 50,
+			Mem: models.MemStats{Used: 1024, Total: 8192},
+		}); err != nil {
+			t.Fatalf("InsertMetrics %d: %v", i, err)
+		}
+	}
+	if err := s.ReclaimSpace(); err != nil {
+		t.Fatalf("ReclaimSpace (initial): %v", err)
+	}
+
+	beforeSize := dbFileSize(t, dbPath)
+
+	if err := s.PruneOldMetrics(30); err != nil {
+		t.Fatalf("PruneOldMetrics: %v", err)
+	}
+	if err := s.ReclaimSpace(); err != nil {
+		t.Fatalf("ReclaimSpace: %v", err)
+	}
+
+	afterSize := dbFileSize(t, dbPath)
+	if afterSize >= beforeSize {
+		t.Fatalf("expected database file to shrink after prune+reclaim, before=%d after=%d", beforeSize, afterSize)
+	}
+}
+
+func dbFileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat db: %v", err)
+	}
+	return info.Size()
 }
