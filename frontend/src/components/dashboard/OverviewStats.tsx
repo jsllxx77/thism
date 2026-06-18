@@ -13,7 +13,7 @@ type Props = {
 type StatItem = {
   label: string
   value: string
-  accent?: "neutral" | "green" | "amber"
+  accent?: "neutral" | "green" | "amber" | "red"
 }
 
 export function OverviewStats({
@@ -31,12 +31,13 @@ export function OverviewStats({
     { label: t("dashboard.stats.onlineNodes"), value: t("dashboard.stats.onlineValue", { online: onlineNodes, total: totalNodes }), accent: "green" },
     { label: t("dashboard.stats.avgCpu"), value: avgCpu === null ? t("common.unavailable") : `${avgCpu.toFixed(1)}%`, accent: "neutral" },
     { label: t("dashboard.stats.avgMemory"), value: avgMemory === null ? t("common.unavailable") : `${avgMemory.toFixed(1)}%`, accent: "neutral" },
-    { label: t("dashboard.stats.offlineAlerts"), value: `${offlineAlerts}`, accent: offlineAlerts > 0 ? "amber" : "neutral" },
+    { label: t("dashboard.stats.offlineAlerts"), value: `${offlineAlerts}`, accent: offlineAlerts > 0 ? "red" : "neutral" },
   ]
 
   const accentClass = (accent: StatItem["accent"]) => {
     if (accent === "green") return "text-emerald-700 dark:text-emerald-300"
     if (accent === "amber") return "text-amber-700 dark:text-amber-300"
+    if (accent === "red") return "text-[hsl(var(--destructive))]"
     return "text-slate-900 dark:text-slate-50"
   }
 

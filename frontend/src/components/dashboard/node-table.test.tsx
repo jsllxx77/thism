@@ -75,7 +75,7 @@ describe("node table", () => {
     expect(sortByName.className).toContain("dark:hover:text-slate-200")
     expect(rowNameButton.className).toContain("dark:text-slate-100")
     expect(rowNameCell.tagName).toBe("SPAN")
-    expect(statusCell.className).toContain("dark:text-slate-300")
+    expect(statusCell.className).toContain("dark:text-emerald-300")
   })
 
   it("supports keyboard activation on rows", async () => {
