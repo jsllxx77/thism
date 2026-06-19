@@ -225,6 +225,7 @@ export type AgentReleaseManifest = {
   target_version: string
   download_url: string
   sha256: string
+  signature: string
   check_interval_seconds: number
 }
 
@@ -235,6 +236,10 @@ export type MetricsRetentionSettings = {
 
 export type DashboardSettings = {
   show_dashboard_card_ip: boolean
+}
+
+export type PublicURLSettings = {
+  public_url: string
 }
 
 export type TelegramTarget = {
@@ -412,7 +417,7 @@ export const api = {
     req<{ ok: boolean }>("/api/auth/logout", {
       method: "POST",
     }),
-  createAgentUpdateJob: (nodeIDs: string[], targetVersion: string, downloadURL: string, sha256: string) =>
+  createAgentUpdateJob: (nodeIDs: string[], targetVersion: string, downloadURL: string, sha256: string, signature: string) =>
     req<UpdateJobResponse>("/api/agent-updates", {
       method: "POST",
       body: JSON.stringify({
@@ -420,6 +425,7 @@ export const api = {
         target_version: targetVersion,
         download_url: downloadURL,
         sha256: sha256,
+        signature: signature,
       }),
     }),
   getAgentUpdateJob: (id: string) => req<UpdateJobResponse>(`/api/agent-updates/${id}`),
@@ -447,6 +453,12 @@ export const api = {
   dashboardSettings: () => req<DashboardSettings>("/api/settings/dashboard"),
   updateDashboardSettings: (settings: DashboardSettings) =>
     req<DashboardSettings>("/api/settings/dashboard", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+  publicURLSettings: () => req<PublicURLSettings>("/api/settings/public-url"),
+  updatePublicURLSettings: (settings: PublicURLSettings) =>
+    req<PublicURLSettings>("/api/settings/public-url", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),

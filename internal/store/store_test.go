@@ -870,6 +870,45 @@ func TestStoreDashboardSettingsDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStorePublicURLDefaultsRoundTripAndValidation(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	defaultValue, err := s.GetPublicURL()
+	if err != nil {
+		t.Fatalf("GetPublicURL default: %v", err)
+	}
+	if defaultValue != "" {
+		t.Fatalf("expected empty default public URL, got %q", defaultValue)
+	}
+
+	stored, err := s.SetPublicURL(" https://thism.example.com/ ")
+	if err != nil {
+		t.Fatalf("SetPublicURL: %v", err)
+	}
+	if stored != "https://thism.example.com" {
+		t.Fatalf("expected normalized public URL, got %q", stored)
+	}
+
+	roundTrip, err := s.GetPublicURL()
+	if err != nil {
+		t.Fatalf("GetPublicURL stored: %v", err)
+	}
+	if roundTrip != "https://thism.example.com" {
+		t.Fatalf("expected stored public URL to round-trip, got %q", roundTrip)
+	}
+
+	if _, err := s.SetPublicURL("https://thism.example.com/base"); err == nil {
+		t.Fatal("expected public URL with path to be rejected")
+	}
+	if _, err := s.SetPublicURL("ftp://thism.example.com"); err == nil {
+		t.Fatal("expected non-http public URL to be rejected")
+	}
+}
+
 func TestStoreListNodesWithLatestMetrics(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {

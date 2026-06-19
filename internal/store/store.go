@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -41,6 +42,7 @@ const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
 const frontendSkinSettingKey = "frontend_skin_id"
+const publicURLSettingKey = "public_url"
 const DefaultFrontendSkinID = "classic"
 const adminSessionTTL = 30 * 24 * time.Hour
 const sqliteBusyTimeout = 5000
@@ -475,6 +477,79 @@ ON CONFLICT(key) DO UPDATE SET
 	updated_at = excluded.updated_at
 `, frontendSkinSettingKey, id, time.Now().Unix())
 	return err
+}
+
+func NormalizePublicURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("public url is invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("public url must start with http:// or https://")
+	}
+	if parsed.Host == "" || parsed.Hostname() == "" {
+		return "", fmt.Errorf("public url must include a host")
+	}
+	if parsed.User != nil || parsed.Opaque != "" {
+		return "", fmt.Errorf("public url must be a site root URL")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", fmt.Errorf("public url must not include a path")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("public url must not include query parameters or a fragment")
+	}
+	if strings.ContainsAny(parsed.Host, " \t\r\n") {
+		return "", fmt.Errorf("public url host is invalid")
+	}
+	if strings.Contains(parsed.Host, ":") && parsed.Port() == "" && !(strings.HasPrefix(parsed.Host, "[") && strings.HasSuffix(parsed.Host, "]")) {
+		return "", fmt.Errorf("public url port is invalid")
+	}
+
+	parsed.Path = ""
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func (s *Store) GetPublicURL() (string, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, publicURLSettingKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	value, err := NormalizePublicURL(raw)
+	if err != nil {
+		return "", nil
+	}
+	return value, nil
+}
+
+func (s *Store) SetPublicURL(raw string) (string, error) {
+	value, err := NormalizePublicURL(raw)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, publicURLSettingKey, value, time.Now().Unix())
+	if err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func defaultNotificationSettings() models.NotificationSettings {

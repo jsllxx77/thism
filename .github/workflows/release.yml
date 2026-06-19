@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -66,6 +68,7 @@ jobs:
 
           {
             echo "version=${VERSION}"
+            echo "release_name=${VERSION} — release / 发布"
             echo "short_sha=${SHORT_SHA}"
             echo "build_time=${BUILD_TIME}"
             echo "tags<<EOF"
@@ -74,6 +77,58 @@ jobs:
             echo "${IMAGE}:latest"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare bilingual release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-12)"
+          PREVIOUS_TAG="$(git tag --sort=-v:refname | grep -v "^${VERSION}$" | head -n 1 || true)"
+
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            COMMIT_RANGE="${PREVIOUS_TAG}..HEAD"
+            RANGE_LABEL="since ${PREVIOUS_TAG}"
+            RANGE_LABEL_ZH="自 ${PREVIOUS_TAG} 以来"
+          else
+            COMMIT_RANGE="HEAD"
+            RANGE_LABEL="included in this release"
+            RANGE_LABEL_ZH="本次发布包含"
+          fi
+
+          {
+            echo "## English"
+            echo
+            echo "Release ${VERSION}."
+            echo
+            echo "### Changes"
+            echo
+            git log --pretty=format:'- %s (%h)' "${COMMIT_RANGE}"
+            echo
+            echo
+            echo "### Assets"
+            echo
+            echo "- Signed linux/amd64 and linux/arm64 agent binaries are attached."
+            echo "- Signature and version sidecar files are attached for each agent binary."
+            echo "- Container images are published to GHCR as ${VERSION}, sha-${SHORT_SHA}, and latest."
+            echo
+            echo "## 中文"
+            echo
+            echo "发布 ${VERSION}。"
+            echo
+            echo "### 更新内容"
+            echo
+            echo "${RANGE_LABEL_ZH}的提交摘要："
+            echo
+            git log --pretty=format:'- %s (%h)' "${COMMIT_RANGE}"
+            echo
+            echo
+            echo "### 发布产物"
+            echo
+            echo "- 已附带签名的 linux/amd64 和 linux/arm64 agent 二进制文件。"
+            echo "- 每个 agent 二进制文件都附带对应的签名和版本 sidecar 文件。"
+            echo "- 容器镜像已发布到 GHCR，标签包括 ${VERSION}、sha-${SHORT_SHA} 和 latest。"
+          } > release-notes.md
+
+          echo "Prepared bilingual release notes ${RANGE_LABEL}."
 
       - name: Build and push image
         uses: docker/build-push-action@v7
@@ -91,6 +146,8 @@ jobs:
       - name: Attach signed agents to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          name: ${{ steps.meta.outputs.release_name }}
+          body_path: release-notes.md
           files: |
             dist/thism-agent-linux-amd64
             dist/thism-agent-linux-arm64
