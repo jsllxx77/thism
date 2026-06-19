@@ -449,6 +449,86 @@ func TestInstallScriptPrefersArtifactVersionFiles(t *testing.T) {
 	}
 }
 
+func TestInstallScriptUsesConfiguredPublicURL(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	if _, err := s.SetPublicURL("https://thism.example.com/"); err != nil {
+		t.Fatalf("SetPublicURL: %v", err)
+	}
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/install.sh?token=node-token-1&name=Bitsflow", nil)
+	req.Host = "internal.example:12026"
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	script := w.Body.String()
+	if !strings.Contains(script, `BASE="https://thism.example.com"`) {
+		t.Fatalf("expected install script to use configured public URL, got: %s", script)
+	}
+	if strings.Contains(script, "internal.example:12026") {
+		t.Fatalf("expected install script to avoid request host when public URL is configured, got: %s", script)
+	}
+}
+
+func TestAgentReleaseUsesConfiguredPublicURL(t *testing.T) {
+	tempDir := t.TempDir()
+	distDir := filepath.Join(tempDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("create dist dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "thism-agent-linux-amd64"), []byte("agent binary"), 0o644); err != nil {
+		t.Fatalf("write agent binary: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	if _, err := s.SetPublicURL("https://thism.example.com/"); err != nil {
+		t.Fatalf("SetPublicURL: %v", err)
+	}
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-release?os=linux&arch=amd64", nil)
+	req.Host = "internal.example:12026"
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var manifest struct {
+		DownloadURL string `json:"download_url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if manifest.DownloadURL != "https://thism.example.com/dl/thism-agent-linux-amd64" {
+		t.Fatalf("expected configured public URL in manifest, got %q", manifest.DownloadURL)
+	}
+}
+
 func TestFrontendQueryTokenCreatesSessionCookie(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -1696,6 +1776,40 @@ func TestRegisterNode(t *testing.T) {
 	}
 }
 
+func TestRegisterNodeUsesConfiguredPublicURL(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	if _, err := s.SetPublicURL("https://thism.example.com/"); err != nil {
+		t.Fatalf("SetPublicURL: %v", err)
+	}
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	body := strings.NewReader(`{"name":"web-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/nodes/register", body)
+	req.Host = "internal.example:12026"
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	command := resp["command"]
+	if !strings.Contains(command, `https://thism.example.com/install.sh?name=web-1`) {
+		t.Fatalf("expected install command to use configured public URL, got: %s", command)
+	}
+	if strings.Contains(command, "internal.example:12026") {
+		t.Fatalf("expected install command to avoid request host when public URL is configured, got: %s", command)
+	}
+}
+
 func TestLatencyMonitorCRUD(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -2877,6 +2991,79 @@ func TestDashboardSettingsRoundTripEndpoints(t *testing.T) {
 	}
 	if body.ShowDashboardCardIP {
 		t.Fatal("expected dashboard card IP visibility to persist as false")
+	}
+}
+
+func TestPublicURLSettingsRoundTripEndpoints(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	getDefaultReq := httptest.NewRequest(http.MethodGet, "/api/settings/public-url", nil)
+	getDefaultReq.Header.Set("Authorization", "Bearer test-admin-token")
+	getDefaultResp := httptest.NewRecorder()
+	router.ServeHTTP(getDefaultResp, getDefaultReq)
+
+	if getDefaultResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getDefaultResp.Code, getDefaultResp.Body.String())
+	}
+	var defaultBody struct {
+		PublicURL string `json:"public_url"`
+	}
+	if err := json.Unmarshal(getDefaultResp.Body.Bytes(), &defaultBody); err != nil {
+		t.Fatalf("unmarshal default response: %v", err)
+	}
+	if defaultBody.PublicURL != "" {
+		t.Fatalf("expected empty default public URL, got %q", defaultBody.PublicURL)
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/public-url", bytes.NewBufferString(`{"public_url":" https://thism.example.com/ "}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", putResp.Code, putResp.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/public-url", nil)
+	getReq.Header.Set("Authorization", "Bearer test-admin-token")
+	getResp := httptest.NewRecorder()
+	router.ServeHTTP(getResp, getReq)
+
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getResp.Code, getResp.Body.String())
+	}
+
+	var body struct {
+		PublicURL string `json:"public_url"`
+	}
+	if err := json.Unmarshal(getResp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.PublicURL != "https://thism.example.com" {
+		t.Fatalf("expected normalized public URL, got %q", body.PublicURL)
+	}
+}
+
+func TestPublicURLSettingsRejectsInvalidURL(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/public-url", bytes.NewBufferString(`{"public_url":"https://thism.example.com/base"}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", putResp.Code, putResp.Body.String())
 	}
 }
 

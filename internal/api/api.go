@@ -503,6 +503,10 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 			handleGetDashboardSettings(w, req, s)
 		})
 
+		r.Get("/api/settings/public-url", func(w http.ResponseWriter, req *http.Request) {
+			handleGetPublicURL(w, req, s)
+		})
+
 		r.Get("/api/reports/availability", func(w http.ResponseWriter, req *http.Request) {
 			handleGetAvailabilityReport(w, req, s)
 		})
@@ -532,6 +536,10 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 
 		r.Put("/api/settings/dashboard", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdateDashboardSettings(w, req, s)
+		})
+
+		r.Put("/api/settings/public-url", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdatePublicURL(w, req, s)
 		})
 
 		r.Get("/api/settings/latency-monitors", func(w http.ResponseWriter, req *http.Request) {
@@ -608,13 +616,13 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 	// Unauthenticated endpoints for agent installation
 	// ---------------------------------------------------------------
 	r.Get("/install.sh", func(w http.ResponseWriter, req *http.Request) {
-		handleInstallScript(w, req)
+		handleInstallScript(w, req, s)
 	})
 	r.Get("/dl/{filename}", func(w http.ResponseWriter, req *http.Request) {
 		handleDownload(w, req)
 	})
 	r.Get("/api/agent-release", func(w http.ResponseWriter, req *http.Request) {
-		handleAgentRelease(w, req)
+		handleAgentRelease(w, req, s)
 	})
 	r.Get("/login", func(w http.ResponseWriter, req *http.Request) {
 		handleLoginPage(w, req, authState)
@@ -1795,6 +1803,40 @@ func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *st
 	writeJSON(w, http.StatusOK, settings)
 }
 
+func handleGetPublicURL(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	publicURL, err := s.GetPublicURL()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"public_url": publicURL})
+}
+
+func handleUpdatePublicURL(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+
+	var reqBody struct {
+		PublicURL string `json:"public_url"`
+	}
+	if !decodeJSONBody(w, r, &reqBody) {
+		return
+	}
+
+	publicURL, err := s.SetPublicURL(reqBody.PublicURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"public_url": publicURL})
+}
+
 func handleListFrontendSkins(w http.ResponseWriter, _ *http.Request, s *store.Store, skinService frontendSkinService) {
 	skins := []frontendSkins.Skin{frontendSkins.BuiltInSkin()}
 	if skinService != nil {
@@ -2323,7 +2365,7 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"id":      id,
 		"token":   token,
-		"command": buildInstallCommand(r, token, req.Name),
+		"command": buildInstallCommand(r, s, token, req.Name),
 	})
 }
 
@@ -2454,7 +2496,7 @@ func handleGetInstallCommand(w http.ResponseWriter, r *http.Request, s *store.St
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"command": buildInstallCommand(r, node.Token, node.Name),
+		"command": buildInstallCommand(r, s, node.Token, node.Name),
 	})
 }
 
@@ -2887,8 +2929,8 @@ func handleGetServices(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": checks})
 }
 
-func buildInstallCommand(r *http.Request, token, name string) string {
-	baseURL := buildBaseURL(r)
+func buildInstallCommand(r *http.Request, s *store.Store, token, name string) string {
+	baseURL := publicBaseURL(r, s)
 
 	query := url.Values{}
 	query.Set("name", name)
@@ -2901,7 +2943,7 @@ func buildInstallCommand(r *http.Request, token, name string) string {
 // Agent installation handlers
 // -----------------------------------------------------------------------
 
-func handleInstallScript(w http.ResponseWriter, r *http.Request) {
+func handleInstallScript(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	token := bearerToken(r)
 	if token == "" {
 		token = r.URL.Query().Get("token")
@@ -2912,8 +2954,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := r.Host
-	baseURL := requestScheme(r) + "://" + host
+	baseURL := publicBaseURL(r, s)
 	amd64TargetVersion := resolveAgentTargetVersion("linux", "amd64")
 	arm64TargetVersion := resolveAgentTargetVersion("linux", "arm64")
 
@@ -2978,7 +3019,7 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(script))
 }
 
-func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
+func handleAgentRelease(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	osName := strings.TrimSpace(r.URL.Query().Get("os"))
 	arch := strings.TrimSpace(r.URL.Query().Get("arch"))
 	filename, ok := resolveAgentBinaryFilename(osName, arch)
@@ -3002,7 +3043,7 @@ func handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	signature := readAgentBinarySignature(filePath)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"target_version":         targetVersion,
-		"download_url":           buildDownloadURL(r, filename),
+		"download_url":           buildDownloadURL(r, s, filename),
 		"sha256":                 checksum,
 		"signature":              signature,
 		"check_interval_seconds": int((30 * time.Minute).Seconds()),
@@ -3095,8 +3136,17 @@ func buildBaseURL(r *http.Request) string {
 	return requestScheme(r) + "://" + r.Host
 }
 
-func buildDownloadURL(r *http.Request, filename string) string {
-	return buildBaseURL(r) + "/dl/" + filename
+func publicBaseURL(r *http.Request, s *store.Store) string {
+	if s != nil {
+		if publicURL, err := s.GetPublicURL(); err == nil && publicURL != "" {
+			return publicURL
+		}
+	}
+	return buildBaseURL(r)
+}
+
+func buildDownloadURL(r *http.Request, s *store.Store, filename string) string {
+	return publicBaseURL(r, s) + "/dl/" + filename
 }
 
 func handleDownload(w http.ResponseWriter, r *http.Request) {

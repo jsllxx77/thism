@@ -123,7 +123,7 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
     try {
       const results = await Promise.allSettled(
         eligibleGroups.map(({ nodeIDs, manifest }) =>
-          api.createAgentUpdateJob(nodeIDs, manifest.target_version, manifest.download_url, manifest.sha256),
+          api.createAgentUpdateJob(nodeIDs, manifest.target_version, manifest.download_url, manifest.sha256, manifest.signature),
         ),
       )
 

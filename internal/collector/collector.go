@@ -1175,7 +1175,7 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 		}
 	}
 	if err := report(models.UpdateJobTargetStatusRestarting, "restarting agent", cmd.TargetVersion); err != nil {
-		return err
+		log.Printf("collector: failed to report self-update restart status: %v", err)
 	}
 	return syscall.Exec(exePath, os.Args, os.Environ())
 }

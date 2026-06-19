@@ -7,6 +7,7 @@ import { LatencyMonitorsCard } from "../components/settings/LatencyMonitorsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
+import { PublicURLCard } from "../components/settings/PublicURLCard"
 import { ThemeSystemCard } from "../components/settings/ThemeSystemCard"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -342,6 +343,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
         </TabsContent>
 
         <TabsContent value="agent" {...getTabsContentProps("agent")} hidden={activeSection !== "agent"} className="space-y-6">
+          <PublicURLCard />
           <AgentAutoUpdateCard nodes={effectiveNodes} />
         </TabsContent>
 

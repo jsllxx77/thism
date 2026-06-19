@@ -221,6 +221,14 @@ const apiErrorKeyMap: Record<string, string> = {
   "token generation failed": "errors.tokenGenerationFailed",
   "node not found": "errors.nodeNotFound",
   unauthorized: "errors.unauthorized",
+  "public url is invalid": "errors.publicURLInvalid",
+  "public url must start with http:// or https://": "errors.publicURLScheme",
+  "public url must include a host": "errors.publicURLHost",
+  "public url must be a site root URL": "errors.publicURLRoot",
+  "public url must not include a path": "errors.publicURLPath",
+  "public url must not include query parameters or a fragment": "errors.publicURLQuery",
+  "public url host is invalid": "errors.publicURLHostInvalid",
+  "public url port is invalid": "errors.publicURLPortInvalid",
 }
 
 export function translateApiErrorMessage(language: AppLanguage, message: string) {

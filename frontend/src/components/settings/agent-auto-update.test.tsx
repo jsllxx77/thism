@@ -9,6 +9,8 @@ const agentReleaseMock = vi.fn()
 const createAgentUpdateJobMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const publicURLSettingsMock = vi.fn()
+const updatePublicURLSettingsMock = vi.fn()
 
 vi.mock("../../lib/api", () => ({
   api: {
@@ -18,6 +20,8 @@ vi.mock("../../lib/api", () => ({
     createAgentUpdateJob: (...args: unknown[]) => createAgentUpdateJobMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    publicURLSettings: (...args: unknown[]) => publicURLSettingsMock(...args),
+    updatePublicURLSettings: (...args: unknown[]) => updatePublicURLSettingsMock(...args),
   },
 }))
 
@@ -34,9 +38,13 @@ describe("agent auto update status card", () => {
     createAgentUpdateJobMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    publicURLSettingsMock.mockReset()
+    updatePublicURLSettingsMock.mockReset()
     nodesMock.mockResolvedValue({ nodes: [] })
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    publicURLSettingsMock.mockResolvedValue({ public_url: "" })
+    updatePublicURLSettingsMock.mockResolvedValue({ public_url: "" })
     createAgentUpdateJobMock.mockResolvedValue({
       job: { id: "job-1", kind: "self_update", target_version: "v-next", download_url: "https://example.com", sha256: "sha", created_at: 0, updated_at: 0, created_by: "admin", status: "pending" },
       targets: [],
@@ -46,6 +54,7 @@ describe("agent auto update status card", () => {
         target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd",
         download_url: `https://example.com/${arch}`,
         sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64",
+        signature: arch === "amd64" ? "sig-amd64" : "sig-arm64",
         check_interval_seconds: 1800,
       }),
     )
@@ -91,8 +100,8 @@ describe("agent auto update status card", () => {
       expect(createAgentUpdateJobMock).toHaveBeenCalledTimes(2)
     })
 
-    expect(createAgentUpdateJobMock).toHaveBeenNthCalledWith(1, ["node-1"], "aaaa1111bbbb", "https://example.com/amd64", "sha-amd64")
-    expect(createAgentUpdateJobMock).toHaveBeenNthCalledWith(2, ["node-2"], "cccc2222dddd", "https://example.com/arm64", "sha-arm64")
+    expect(createAgentUpdateJobMock).toHaveBeenNthCalledWith(1, ["node-1"], "aaaa1111bbbb", "https://example.com/amd64", "sha-amd64", "sig-amd64")
+    expect(createAgentUpdateJobMock).toHaveBeenNthCalledWith(2, ["node-2"], "cccc2222dddd", "https://example.com/arm64", "sha-arm64", "sig-arm64")
     expect(screen.getByText("Queued updates for 2 nodes.")).toBeInTheDocument()
   })
 

@@ -10,6 +10,8 @@ const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
 const dashboardSettingsMock = vi.fn()
 const updateDashboardSettingsMock = vi.fn()
+const publicURLSettingsMock = vi.fn()
+const updatePublicURLSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
@@ -24,6 +26,8 @@ vi.mock("../lib/api", () => ({
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
     dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
     updateDashboardSettings: (...args: unknown[]) => updateDashboardSettingsMock(...args),
+    publicURLSettings: (...args: unknown[]) => publicURLSettingsMock(...args),
+    updatePublicURLSettings: (...args: unknown[]) => updatePublicURLSettingsMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
@@ -45,6 +49,8 @@ describe("settings section tabs", () => {
     updateMetricsRetentionMock.mockReset()
     dashboardSettingsMock.mockReset()
     updateDashboardSettingsMock.mockReset()
+    publicURLSettingsMock.mockReset()
+    updatePublicURLSettingsMock.mockReset()
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
@@ -76,6 +82,8 @@ describe("settings section tabs", () => {
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    publicURLSettingsMock.mockResolvedValue({ public_url: "" })
+    updatePublicURLSettingsMock.mockResolvedValue({ public_url: "" })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
@@ -154,6 +162,7 @@ describe("settings section tabs", () => {
     await screen.findByRole("button", { name: /add node/i })
 
     expect(agentReleaseMock).not.toHaveBeenCalled()
+    expect(publicURLSettingsMock).not.toHaveBeenCalled()
     expect(metricsRetentionMock).not.toHaveBeenCalled()
     expect(dashboardSettingsMock).not.toHaveBeenCalled()
     expect(notificationSettingsMock).not.toHaveBeenCalled()
@@ -167,6 +176,7 @@ describe("settings section tabs", () => {
     expect(await screen.findByRole("heading", { name: "Automatic Updates", level: 3 })).toBeInTheDocument()
     await waitFor(() => {
       expect(agentReleaseMock).toHaveBeenCalledTimes(2)
+      expect(publicURLSettingsMock).toHaveBeenCalledTimes(1)
     })
 
     await user.click(screen.getByRole("tab", { name: "Monitoring" }))
