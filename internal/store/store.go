@@ -68,15 +68,17 @@ func IsValidMetricsRetentionDays(days int) bool {
 
 // MetricsRow is a flat struct representing a single metrics sample for API use.
 type MetricsRow struct {
-	TS            int64   `json:"ts"`
-	CPU           float64 `json:"cpu"`
-	MemUsed       uint64  `json:"mem_used"`
-	MemTotal      uint64  `json:"mem_total"`
-	DiskUsed      uint64  `json:"disk_used"`
-	DiskTotal     uint64  `json:"disk_total"`
-	NetRx         uint64  `json:"net_rx"`
-	NetTx         uint64  `json:"net_tx"`
-	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
+	TS             int64   `json:"ts"`
+	CPU            float64 `json:"cpu"`
+	MemUsed        uint64  `json:"mem_used"`
+	MemTotal       uint64  `json:"mem_total"`
+	DiskUsed       uint64  `json:"disk_used"`
+	DiskTotal      uint64  `json:"disk_total"`
+	DiskReadBytes  uint64  `json:"disk_read_bytes"`
+	DiskWriteBytes uint64  `json:"disk_write_bytes"`
+	NetRx          uint64  `json:"net_rx"`
+	NetTx          uint64  `json:"net_tx"`
+	UptimeSeconds  uint64  `json:"uptime_seconds,omitempty"`
 }
 
 type Metrics1mRow struct {
@@ -91,6 +93,8 @@ type Metrics1mRow struct {
 	DiskUsedAvg  int64
 	DiskUsedMax  int64
 	DiskTotalMax int64
+	DiskReadMax  int64
+	DiskWriteMax int64
 	NetRxMax     int64
 	NetTxMax     int64
 	UptimeMax    int64
@@ -192,6 +196,8 @@ CREATE TABLE IF NOT EXISTS metrics (
     mem_total   INTEGER DEFAULT 0,
     disk_used   INTEGER DEFAULT 0,
     disk_total  INTEGER DEFAULT 0,
+    disk_read_bytes  INTEGER DEFAULT 0,
+    disk_write_bytes INTEGER DEFAULT 0,
     net_rx         INTEGER DEFAULT 0,
     net_tx         INTEGER DEFAULT 0,
     uptime_seconds INTEGER DEFAULT 0
@@ -211,6 +217,8 @@ CREATE TABLE IF NOT EXISTS metrics_1m (
     disk_used_avg      INTEGER DEFAULT 0,
     disk_used_max      INTEGER DEFAULT 0,
     disk_total_max     INTEGER DEFAULT 0,
+    disk_read_max      INTEGER DEFAULT 0,
+    disk_write_max     INTEGER DEFAULT 0,
     net_rx_max         INTEGER DEFAULT 0,
     net_tx_max         INTEGER DEFAULT 0,
     uptime_seconds_max INTEGER DEFAULT 0,
@@ -375,6 +383,18 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 		return err
 	}
 	if err := s.ensureColumn("metrics", "uptime_seconds", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics", "disk_read_bytes", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics", "disk_write_bytes", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics_1m", "disk_read_max", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("metrics_1m", "disk_write_max", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("monitor_results", "loss_percent", "REAL"); err != nil {
@@ -735,6 +755,22 @@ func latencyMonitorAppliesToNodeFamilies(monitor *models.LatencyMonitor, familie
 	return false
 }
 
+func latencyMonitorAppliesToNode(monitor *models.LatencyMonitor, families []string, nodeIP string) bool {
+	monitorFamily := latencyMonitorFamily(monitor)
+	if monitorFamily == ipFamilyUnknown {
+		return true
+	}
+	normalized := normalizeIPFamilies(families)
+	if len(normalized) > 0 {
+		return latencyMonitorAppliesToNodeFamilies(monitor, normalized)
+	}
+	nodeFamily := resolveIPFamily(nodeIP)
+	if nodeFamily == ipFamilyUnknown {
+		return false
+	}
+	return monitorFamily == nodeFamily
+}
+
 func normalizeLatencyMonitor(monitor *models.LatencyMonitor) (*models.LatencyMonitor, error) {
 	if monitor == nil {
 		return nil, fmt.Errorf("latency monitor is nil")
@@ -780,14 +816,15 @@ func filterLatencyMonitorNodeIDsByFamily(db queryRower, monitor *models.LatencyM
 	filtered := make([]string, 0, len(normalized))
 	for _, nodeID := range normalized {
 		var rawFamilies string
-		err := db.QueryRow(`SELECT ip_families FROM nodes WHERE id = ?`, nodeID).Scan(&rawFamilies)
+		var nodeIP string
+		err := db.QueryRow(`SELECT ip_families, ip FROM nodes WHERE id = ?`, nodeID).Scan(&rawFamilies, &nodeIP)
 		if err == sql.ErrNoRows {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if latencyMonitorAppliesToNodeFamilies(monitor, decodeIPFamilies(rawFamilies)) {
+		if latencyMonitorAppliesToNode(monitor, decodeIPFamilies(rawFamilies), nodeIP) {
 			filtered = append(filtered, nodeID)
 		}
 	}
@@ -1020,7 +1057,7 @@ func (s *Store) AssignAutoLatencyMonitorsToNode(nodeID string) error {
 	}
 	defer tx.Rollback()
 	for _, monitor := range monitors {
-		if monitor == nil || !monitor.AutoAssignNewNodes || !latencyMonitorAppliesToNodeFamilies(monitor, node.IPFamilies) {
+		if monitor == nil || !monitor.AutoAssignNewNodes || !latencyMonitorAppliesToNode(monitor, node.IPFamilies, node.IP) {
 			continue
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO monitor_item_nodes (monitor_id, node_id) VALUES (?, ?)`, monitor.ID, nodeID); err != nil {
@@ -1069,8 +1106,8 @@ WHERE auto_assign_new_nodes = 1
 	return changed, nil
 }
 
-func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID string, nodeFamilies []string) (bool, error) {
-	if strings.TrimSpace(nodeID) == "" || len(normalizeIPFamilies(nodeFamilies)) == 0 {
+func pruneLatencyMonitorAssignmentsForNodeWith(tx *sql.Tx, nodeID string, nodeFamilies []string, nodeIP string) (bool, error) {
+	if strings.TrimSpace(nodeID) == "" || (len(normalizeIPFamilies(nodeFamilies)) == 0 && resolveIPFamily(nodeIP) == ipFamilyUnknown) {
 		return false, nil
 	}
 	rows, err := tx.Query(`
@@ -1092,7 +1129,7 @@ WHERE n.node_id = ?
 			return false, err
 		}
 		monitor.AutoAssignNewNodes = autoAssign == 1
-		if !latencyMonitorAppliesToNodeFamilies(&monitor, nodeFamilies) {
+		if !latencyMonitorAppliesToNode(&monitor, nodeFamilies, nodeIP) {
 			pruneIDs = append(pruneIDs, monitor.ID)
 		}
 	}
@@ -1984,7 +2021,7 @@ func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
 // functions here quickly regresses page load time on real deployments.
 func latestMetricsLookupQuery() string {
 	return `
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
 FROM metrics
 WHERE node_id = ?
 ORDER BY ts DESC, id DESC
@@ -1997,7 +2034,7 @@ func latestMetricsBatchLookupQuery(nodeCount int) string {
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", nodeCount), ",")
 	return `
-SELECT n.id, m.ts, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.net_rx, m.net_tx, m.uptime_seconds
+SELECT n.id, m.ts, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.disk_read_bytes, m.disk_write_bytes, m.net_rx, m.net_tx, m.uptime_seconds
 FROM nodes n
 JOIN metrics m ON m.id = (
 	SELECT id
@@ -2612,11 +2649,12 @@ func insertMetricsWith(db sqlExecer, nodeID string, m *models.MetricsPayload) er
 
 	diskUsed, diskTotal := aggregateDiskTotals(m.Disk)
 	_, err := db.Exec(`
-INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nodeID, m.TS, m.CPU,
 		m.Mem.Used, m.Mem.Total,
 		diskUsed, diskTotal,
+		m.DiskIO.ReadBytes, m.DiskIO.WriteBytes,
 		m.Net.RxBytes, m.Net.TxBytes, m.UptimeSeconds,
 	)
 	return err
@@ -2626,7 +2664,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ordered by ascending timestamp.
 func (s *Store) QueryMetrics(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, uptime_seconds
+SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
 FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
@@ -2638,7 +2676,7 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 	var result []*MetricsRow
 	for rows.Next() {
 		var r MetricsRow
-		if err := rows.Scan(&r.TS, &r.CPU, &r.MemUsed, &r.MemTotal, &r.DiskUsed, &r.DiskTotal, &r.NetRx, &r.NetTx, &r.UptimeSeconds); err != nil {
+		if err := rows.Scan(&r.TS, &r.CPU, &r.MemUsed, &r.MemTotal, &r.DiskUsed, &r.DiskTotal, &r.DiskReadBytes, &r.DiskWriteBytes, &r.NetRx, &r.NetTx, &r.UptimeSeconds); err != nil {
 			return nil, err
 		}
 		result = append(result, &r)
@@ -2648,7 +2686,7 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 
 func (s *Store) QueryMetrics1m(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu_avg, mem_used_avg, mem_total_max, disk_used_avg, disk_total_max, net_rx_max, net_tx_max, uptime_seconds_max
+SELECT ts, cpu_avg, mem_used_avg, mem_total_max, disk_used_avg, disk_total_max, disk_read_max, disk_write_max, net_rx_max, net_tx_max, uptime_seconds_max
 FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
@@ -2664,10 +2702,12 @@ FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		var memTotalMax int64
 		var diskUsedAvg int64
 		var diskTotalMax int64
+		var diskReadMax int64
+		var diskWriteMax int64
 		var netRxMax int64
 		var netTxMax int64
 		var uptimeMax int64
-		if err := rows.Scan(&r.TS, &r.CPU, &memUsedAvg, &memTotalMax, &diskUsedAvg, &diskTotalMax, &netRxMax, &netTxMax, &uptimeMax); err != nil {
+		if err := rows.Scan(&r.TS, &r.CPU, &memUsedAvg, &memTotalMax, &diskUsedAvg, &diskTotalMax, &diskReadMax, &diskWriteMax, &netRxMax, &netTxMax, &uptimeMax); err != nil {
 			return nil, err
 		}
 		if memUsedAvg > 0 {
@@ -2681,6 +2721,12 @@ FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		}
 		if diskTotalMax > 0 {
 			r.DiskTotal = uint64(diskTotalMax)
+		}
+		if diskReadMax > 0 {
+			r.DiskReadBytes = uint64(diskReadMax)
+		}
+		if diskWriteMax > 0 {
+			r.DiskWriteBytes = uint64(diskWriteMax)
 		}
 		if netRxMax > 0 {
 			r.NetRx = uint64(netRxMax)
@@ -2711,6 +2757,7 @@ INSERT INTO metrics_1m (
   cpu_avg, cpu_max,
   mem_used_avg, mem_used_max, mem_total_max,
   disk_used_avg, disk_used_max, disk_total_max,
+  disk_read_max, disk_write_max,
   net_rx_max, net_tx_max,
   uptime_seconds_max
 )
@@ -2726,6 +2773,8 @@ SELECT
   CAST(AVG(disk_used) AS INTEGER) AS disk_used_avg,
   MAX(disk_used) AS disk_used_max,
   MAX(disk_total) AS disk_total_max,
+  MAX(disk_read_bytes) AS disk_read_max,
+  MAX(disk_write_bytes) AS disk_write_max,
   MAX(net_rx) AS net_rx_max,
   MAX(net_tx) AS net_tx_max,
   MAX(uptime_seconds) AS uptime_seconds_max
@@ -2742,6 +2791,8 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
   disk_used_avg      = excluded.disk_used_avg,
   disk_used_max      = excluded.disk_used_max,
   disk_total_max     = excluded.disk_total_max,
+  disk_read_max      = excluded.disk_read_max,
+  disk_write_max     = excluded.disk_write_max,
   net_rx_max         = excluded.net_rx_max,
   net_tx_max         = excluded.net_tx_max,
   uptime_seconds_max = excluded.uptime_seconds_max
@@ -2764,6 +2815,8 @@ func (s *Store) LatestMetricsByNodeID(nodeID string) (*models.NodeMetricsSnapsho
 		&snapshot.MemTotal,
 		&snapshot.DiskUsed,
 		&snapshot.DiskTotal,
+		&snapshot.DiskReadBytes,
+		&snapshot.DiskWriteBytes,
 		&snapshot.NetRx,
 		&snapshot.NetTx,
 		&snapshot.UptimeSeconds,
@@ -2818,6 +2871,8 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 			&snapshot.MemTotal,
 			&snapshot.DiskUsed,
 			&snapshot.DiskTotal,
+			&snapshot.DiskReadBytes,
+			&snapshot.DiskWriteBytes,
 			&snapshot.NetRx,
 			&snapshot.NetTx,
 			&snapshot.UptimeSeconds,
@@ -3054,7 +3109,7 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.IPFamilies, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
 		return false, err
 	}
-	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies)
+	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies, resolvedIP)
 	if err != nil {
 		return false, err
 	}

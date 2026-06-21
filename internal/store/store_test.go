@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -268,6 +269,7 @@ func TestStoreMetrics(t *testing.T) {
 		CPU:           55.0,
 		UptimeSeconds: 3723,
 		Mem:           models.MemStats{Used: 1024, Total: 4096},
+		DiskIO:        models.DiskIOStats{ReadBytes: 4096, WriteBytes: 8192},
 	}
 	if err := s.InsertMetrics("n1", m); err != nil {
 		t.Fatalf("InsertMetrics: %v", err)
@@ -282,6 +284,9 @@ func TestStoreMetrics(t *testing.T) {
 	}
 	if rows[0].UptimeSeconds != 3723 {
 		t.Fatalf("expected uptime 3723, got %d", rows[0].UptimeSeconds)
+	}
+	if rows[0].DiskReadBytes != 4096 || rows[0].DiskWriteBytes != 8192 {
+		t.Fatalf("expected disk IO counters to round-trip, got %#v", rows[0])
 	}
 }
 
@@ -937,6 +942,7 @@ func TestStoreListNodesWithLatestMetrics(t *testing.T) {
 		CPU:           23.5,
 		UptimeSeconds: 456,
 		Mem:           models.MemStats{Used: 768, Total: 1024},
+		DiskIO:        models.DiskIOStats{ReadBytes: 700, WriteBytes: 900},
 		Net:           models.NetStats{RxBytes: 300, TxBytes: 400},
 	}); err != nil {
 		t.Fatalf("InsertMetrics alpha latest: %v", err)
@@ -963,6 +969,9 @@ func TestStoreListNodesWithLatestMetrics(t *testing.T) {
 	}
 	if nodes[0].LatestMetrics == nil {
 		t.Fatal("expected alpha latest metrics to be populated")
+	}
+	if nodes[0].LatestMetrics.DiskReadBytes != 700 || nodes[0].LatestMetrics.DiskWriteBytes != 900 {
+		t.Fatalf("expected latest disk IO metrics to be populated, got %#v", nodes[0].LatestMetrics)
 	}
 	if nodes[0].LatestMetrics.CPU != 23.5 || nodes[0].LatestMetrics.UptimeSeconds != 456 {
 		t.Fatalf("unexpected alpha latest metrics: %#v", nodes[0].LatestMetrics)
@@ -1007,7 +1016,8 @@ func TestStoreApplyAgentSnapshot(t *testing.T) {
 		Disk: []models.DiskStats{
 			{Mount: "/", Used: 4096, Total: 16384},
 		},
-		Net: models.NetStats{RxBytes: 555, TxBytes: 777},
+		DiskIO: models.DiskIOStats{ReadBytes: 12345, WriteBytes: 67890},
+		Net:    models.NetStats{RxBytes: 555, TxBytes: 777},
 		Processes: []models.Process{
 			{PID: 10, Name: "nginx", CPUPercent: 1.2, MemRSS: 1234},
 		},
@@ -1036,7 +1046,7 @@ func TestStoreApplyAgentSnapshot(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 metrics row, got %d", len(rows))
 	}
-	if rows[0].CPU != 31.25 || rows[0].DiskTotal != 16384 || rows[0].NetTx != 777 {
+	if rows[0].CPU != 31.25 || rows[0].DiskTotal != 16384 || rows[0].DiskReadBytes != 12345 || rows[0].DiskWriteBytes != 67890 || rows[0].NetTx != 777 {
 		t.Fatalf("unexpected metrics row: %#v", rows[0])
 	}
 
@@ -1098,8 +1108,8 @@ func TestStoreLatencyMonitorsRoundTrip(t *testing.T) {
 	defer s.Close()
 
 	for _, node := range []*models.Node{
-		{ID: "node-1", Token: "token-1", Name: "alpha"},
-		{ID: "node-2", Token: "token-2", Name: "beta"},
+		{ID: "node-1", Token: "token-1", Name: "alpha", IP: "203.0.113.10"},
+		{ID: "node-2", Token: "token-2", Name: "beta", IP: "203.0.113.11"},
 	} {
 		if err := s.UpsertNode(node); err != nil {
 			t.Fatalf("UpsertNode %s: %v", node.ID, err)
@@ -1148,7 +1158,7 @@ func TestNewNodeAutoAssignedLatencyMonitors(t *testing.T) {
 	}
 	defer s.Close()
 
-	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha", IP: "203.0.113.10"}); err != nil {
 		t.Fatalf("UpsertNode node-1: %v", err)
 	}
 
@@ -1165,7 +1175,7 @@ func TestNewNodeAutoAssignedLatencyMonitors(t *testing.T) {
 		t.Fatalf("CreateLatencyMonitor: %v", err)
 	}
 
-	if err := s.UpsertNode(&models.Node{ID: "node-2", Token: "token-2", Name: "beta"}); err != nil {
+	if err := s.UpsertNode(&models.Node{ID: "node-2", Token: "token-2", Name: "beta", IP: "203.0.113.11"}); err != nil {
 		t.Fatalf("UpsertNode node-2: %v", err)
 	}
 	if err := s.AssignAutoLatencyMonitorsToNode("node-2"); err != nil {
@@ -1222,14 +1232,14 @@ func TestLatencyMonitorAssignmentsSkipMismatchedIPFamily(t *testing.T) {
 	}
 }
 
-func TestLatencyMonitorAssignmentsKeepNodesWithUnknownIPFamilyCapability(t *testing.T) {
+func TestLatencyMonitorAssignmentsUseNodeIPWhenIPFamilyCapabilityIsMissing(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer s.Close()
 
-	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "dual-stack-node", IP: "203.0.113.10"}); err != nil {
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "ipv4-node", IP: "203.0.113.10"}); err != nil {
 		t.Fatalf("UpsertNode: %v", err)
 	}
 
@@ -1253,8 +1263,44 @@ func TestLatencyMonitorAssignmentsKeepNodesWithUnknownIPFamilyCapability(t *test
 	if len(monitors) != 1 {
 		t.Fatalf("expected 1 monitor, got %d", len(monitors))
 	}
-	if got := strings.Join(monitors[0].AssignedNodeIDs, ","); got != "node-1" {
-		t.Fatalf("expected unknown capability node to remain assigned, got %q", got)
+	if got := strings.Join(monitors[0].AssignedNodeIDs, ","); got != "" {
+		t.Fatalf("expected IPv4 node without explicit capability to be filtered from IPv6 monitor, got %q", got)
+	}
+}
+
+func TestLatencyMonitorAssignmentsSkipUnknownNodeFamilyForExplicitTargetFamily(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "unknown-node"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-v6",
+		Name:               "IPv6 probe",
+		Type:               models.LatencyMonitorTypeTCP,
+		Target:             "[2606:4700:4700::1111]:443",
+		IntervalSeconds:    30,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	monitors, err := s.ListLatencyMonitors()
+	if err != nil {
+		t.Fatalf("ListLatencyMonitors: %v", err)
+	}
+	if len(monitors) != 1 {
+		t.Fatalf("expected 1 monitor, got %d", len(monitors))
+	}
+	if got := strings.Join(monitors[0].AssignedNodeIDs, ","); got != "" {
+		t.Fatalf("expected unknown node family to be filtered from IPv6 monitor, got %q", got)
 	}
 }
 
@@ -1315,20 +1361,20 @@ func TestAutoLatencyMonitorAssignmentSkipsMismatchedIPFamily(t *testing.T) {
 }
 
 func TestAgentSnapshotPrunesMismatchedLatencyMonitorAssignments(t *testing.T) {
-	s, err := store.New(":memory:")
+	dbPath := filepath.Join(t.TempDir(), "thism.db")
+	s, err := store.New(dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
 
 	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
 		t.Fatalf("UpsertNode: %v", err)
 	}
 	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
 		ID:                 "monitor-v6",
-		Name:               "IPv6 probe",
+		Name:               "probe",
 		Type:               models.LatencyMonitorTypeTCP,
-		Target:             "[2606:4700:4700::1111]:443",
+		Target:             "example.com:443",
 		IntervalSeconds:    30,
 		AutoAssignNewNodes: true,
 		CreatedAt:          1700000000,
@@ -1336,6 +1382,23 @@ func TestAgentSnapshotPrunesMismatchedLatencyMonitorAssignments(t *testing.T) {
 	}, []string{"node-1"}); err != nil {
 		t.Fatalf("CreateLatencyMonitor: %v", err)
 	}
+	s.Close()
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE monitor_items SET name = ?, target = ? WHERE id = ?`, "IPv6 probe", "[2606:4700:4700::1111]:443", "monitor-v6"); err != nil {
+		db.Close()
+		t.Fatalf("update monitor: %v", err)
+	}
+	db.Close()
+
+	s, err = store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New reopen: %v", err)
+	}
+	defer s.Close()
 
 	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", &models.MetricsPayload{
 		TS:         1700000100,
@@ -1359,21 +1422,21 @@ func TestAgentSnapshotPrunesMismatchedLatencyMonitorAssignments(t *testing.T) {
 	}
 }
 
-func TestAgentSnapshotKeepsLatencyAssignmentsWithoutExplicitIPFamilyCapability(t *testing.T) {
-	s, err := store.New(":memory:")
+func TestAgentSnapshotPrunesLatencyAssignmentsUsingResolvedIPWhenCapabilityIsMissing(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thism.db")
+	s, err := store.New(dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
 
 	if err := s.UpsertNode(&models.Node{ID: "node-1", Token: "token-1", Name: "alpha"}); err != nil {
 		t.Fatalf("UpsertNode: %v", err)
 	}
 	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
 		ID:                 "monitor-v6",
-		Name:               "IPv6 probe",
+		Name:               "probe",
 		Type:               models.LatencyMonitorTypeTCP,
-		Target:             "[2606:4700:4700::1111]:443",
+		Target:             "example.com:443",
 		IntervalSeconds:    30,
 		AutoAssignNewNodes: true,
 		CreatedAt:          1700000000,
@@ -1381,6 +1444,23 @@ func TestAgentSnapshotKeepsLatencyAssignmentsWithoutExplicitIPFamilyCapability(t
 	}, []string{"node-1"}); err != nil {
 		t.Fatalf("CreateLatencyMonitor: %v", err)
 	}
+	s.Close()
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE monitor_items SET name = ?, target = ? WHERE id = ?`, "IPv6 probe", "[2606:4700:4700::1111]:443", "monitor-v6"); err != nil {
+		db.Close()
+		t.Fatalf("update monitor: %v", err)
+	}
+	db.Close()
+
+	s, err = store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store.New reopen: %v", err)
+	}
+	defer s.Close()
 
 	assignmentsChanged, err := s.ApplyAgentSnapshot("node-1", &models.MetricsPayload{
 		TS:  1700000100,
@@ -1390,16 +1470,16 @@ func TestAgentSnapshotKeepsLatencyAssignmentsWithoutExplicitIPFamilyCapability(t
 	if err != nil {
 		t.Fatalf("ApplyAgentSnapshot: %v", err)
 	}
-	if assignmentsChanged {
-		t.Fatal("expected unknown IP family capability to keep latency monitor assignments")
+	if !assignmentsChanged {
+		t.Fatal("expected resolved IPv4 address to prune IPv6 monitor assignment")
 	}
 
 	nodeMonitors, err := s.ListLatencyMonitorsByNodeID("node-1")
 	if err != nil {
 		t.Fatalf("ListLatencyMonitorsByNodeID: %v", err)
 	}
-	if len(nodeMonitors) != 1 || nodeMonitors[0].ID != "monitor-v6" {
-		t.Fatalf("expected IPv6 monitor to remain assigned without explicit capability, got %#v", nodeMonitors)
+	if len(nodeMonitors) != 0 {
+		t.Fatalf("expected IPv6 monitor to be pruned without explicit capability when resolved IP is IPv4, got %#v", nodeMonitors)
 	}
 }
 
@@ -1795,6 +1875,10 @@ func TestPruneOldMetricsKeepsRollupButDropsRawWithinRetention(t *testing.T) {
 		TS:  rawTS,
 		CPU: 40,
 		Mem: models.MemStats{Used: 512, Total: 4096},
+		DiskIO: models.DiskIOStats{
+			ReadBytes:  10240,
+			WriteBytes: 20480,
+		},
 	}); err != nil {
 		t.Fatalf("InsertMetrics: %v", err)
 	}
@@ -1820,6 +1904,9 @@ func TestPruneOldMetricsKeepsRollupButDropsRawWithinRetention(t *testing.T) {
 	}
 	if len(rollup) != 1 {
 		t.Fatalf("expected rollup within configured retention to be kept, got %d", len(rollup))
+	}
+	if rollup[0].DiskReadBytes != 10240 || rollup[0].DiskWriteBytes != 20480 {
+		t.Fatalf("expected rollup disk IO counters to survive, got %#v", rollup[0])
 	}
 }
 

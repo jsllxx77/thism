@@ -151,12 +151,12 @@ describe("latency monitors card", () => {
     })
   })
 
-  it("keeps nodes selectable when their IP family capability is unknown", async () => {
+  it("uses node IP when IP family capability is unknown", async () => {
     const user = userEvent.setup()
     render(
       <LatencyMonitorsCard
         nodes={[
-          { id: "node-1", name: "Dual Stack Node", ip: "203.0.113.10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+          { id: "node-1", name: "IPv4 Node", ip: "203.0.113.10", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
         ]}
       />
     )
@@ -171,9 +171,34 @@ describe("latency monitors card", () => {
     await user.click(within(dialog).getByLabelText("Target"))
     await user.paste("[2606:4700:4700::1111]:443")
 
-    expect(within(dialog).getByLabelText("Assign Dual Stack Node")).toBeChecked()
-    expect(within(dialog).getByLabelText("Assign Dual Stack Node")).not.toBeDisabled()
-    expect(within(dialog).queryByText("Not applicable for this target family")).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Assign IPv4 Node")).not.toBeChecked()
+    expect(within(dialog).getByLabelText("Assign IPv4 Node")).toBeDisabled()
+    expect(within(dialog).getByText("Not applicable for this target family")).toBeInTheDocument()
+  })
+
+  it("treats nodes with unknown IP family and unknown IP as not applicable for explicit target families", async () => {
+    const user = userEvent.setup()
+    render(
+      <LatencyMonitorsCard
+        nodes={[
+          { id: "node-1", name: "Oracle", ip: "", os: "linux", arch: "amd64", created_at: 1, last_seen: 1, online: true },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText("Guangdong Telecom IPv4")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "New monitor" }))
+
+    const dialog = await screen.findByRole("dialog")
+    await user.clear(within(dialog).getByLabelText("Monitor name"))
+    await user.type(within(dialog).getByLabelText("Monitor name"), "IPv6 probe")
+    await user.clear(within(dialog).getByLabelText("Target"))
+    await user.click(within(dialog).getByLabelText("Target"))
+    await user.paste("[2606:4700:4700::1111]:443")
+
+    expect(within(dialog).getByLabelText("Assign Oracle")).not.toBeChecked()
+    expect(within(dialog).getByLabelText("Assign Oracle")).toBeDisabled()
+    expect(within(dialog).getByText("Not applicable for this target family")).toBeInTheDocument()
   })
 
   it("requires confirmation before deleting a monitor", async () => {

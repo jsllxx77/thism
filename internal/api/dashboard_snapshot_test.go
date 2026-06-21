@@ -33,6 +33,10 @@ func TestDashboardInitialMessagesIncludeLatestSnapshot(t *testing.T) {
 		TS:  1733011200,
 		CPU: 37.5,
 		Mem: models.MemStats{Used: 2048, Total: 4096},
+		DiskIO: models.DiskIOStats{
+			ReadBytes:  2048,
+			WriteBytes: 4096,
+		},
 		Net: models.NetStats{RxBytes: 1234, TxBytes: 5678},
 	}); err != nil {
 		t.Fatalf("InsertMetrics: %v", err)
@@ -82,6 +86,13 @@ func TestDashboardInitialMessagesIncludeLatestSnapshot(t *testing.T) {
 			}
 			if mem["used"] != uint64(2048) || mem["total"] != uint64(4096) {
 				t.Fatalf("unexpected mem snapshot: %#v", mem)
+			}
+			diskIO, ok := data["disk_io"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected disk_io map, got %#v", data["disk_io"])
+			}
+			if diskIO["read_bytes"] != uint64(2048) || diskIO["write_bytes"] != uint64(4096) {
+				t.Fatalf("unexpected disk_io snapshot: %#v", diskIO)
 			}
 		}
 	}

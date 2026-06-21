@@ -33,6 +33,8 @@ describe("metric tabs date labels", () => {
         netRxSpeedData={points}
         netTxSpeedData={points}
         diskData={points}
+        diskReadSpeedData={points}
+        diskWriteSpeedData={points}
       />,
     )
 

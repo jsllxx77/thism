@@ -91,6 +91,8 @@ export type MetricsRow = {
   mem_total: number
   disk_used: number
   disk_total: number
+  disk_read_bytes?: number
+  disk_write_bytes?: number
   net_rx: number
   net_tx: number
   uptime_seconds?: number

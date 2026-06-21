@@ -42,7 +42,7 @@ func TestDetectedIPFamiliesReportsNonLoopbackIPv4AndIPv6(t *testing.T) {
 		return []net.Addr{
 			&net.IPNet{IP: net.ParseIP("127.0.0.1")},
 			&net.IPNet{IP: net.ParseIP("192.0.2.10")},
-			&net.IPNet{IP: net.ParseIP("2001:db8::10")},
+			&net.IPNet{IP: net.ParseIP("2606:4700:4700::1111")},
 			&net.IPNet{IP: net.ParseIP("fe80::1")},
 		}, nil
 	}
@@ -50,6 +50,28 @@ func TestDetectedIPFamiliesReportsNonLoopbackIPv4AndIPv6(t *testing.T) {
 	families := detectedIPFamilies()
 	if len(families) != 2 || families[0] != "ipv4" || families[1] != "ipv6" {
 		t.Fatalf("expected IPv4 and IPv6 families, got %#v", families)
+	}
+}
+
+func TestDetectedIPFamiliesIgnoresNonRoutableIPv6ForExternalProbes(t *testing.T) {
+	originalInterfaceAddrsFunc := interfaceAddrsFunc
+	defer func() {
+		interfaceAddrsFunc = originalInterfaceAddrsFunc
+	}()
+
+	interfaceAddrsFunc = func() ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("10.0.0.10")},
+			&net.IPNet{IP: net.ParseIP("::1")},
+			&net.IPNet{IP: net.ParseIP("fe80::1")},
+			&net.IPNet{IP: net.ParseIP("fd00::10")},
+			&net.IPNet{IP: net.ParseIP("2001:db8::10")},
+		}, nil
+	}
+
+	families := detectedIPFamilies()
+	if len(families) != 1 || families[0] != "ipv4" {
+		t.Fatalf("expected only IPv4 family for non-routable IPv6 addresses, got %#v", families)
 	}
 }
 

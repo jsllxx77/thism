@@ -7,6 +7,7 @@ const nodesMock = vi.fn()
 const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
 const createAgentUpdateJobMock = vi.fn()
+const getAgentUpdateJobMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
 const publicURLSettingsMock = vi.fn()
@@ -18,6 +19,7 @@ vi.mock("../../lib/api", () => ({
     changePassword: (...args: unknown[]) => changePasswordMock(...args),
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
     createAgentUpdateJob: (...args: unknown[]) => createAgentUpdateJobMock(...args),
+    getAgentUpdateJob: (...args: unknown[]) => getAgentUpdateJobMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
     publicURLSettings: (...args: unknown[]) => publicURLSettingsMock(...args),
@@ -36,6 +38,7 @@ describe("agent auto update status card", () => {
     changePasswordMock.mockReset()
     agentReleaseMock.mockReset()
     createAgentUpdateJobMock.mockReset()
+    getAgentUpdateJobMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
     publicURLSettingsMock.mockReset()
@@ -47,6 +50,10 @@ describe("agent auto update status card", () => {
     updatePublicURLSettingsMock.mockResolvedValue({ public_url: "" })
     createAgentUpdateJobMock.mockResolvedValue({
       job: { id: "job-1", kind: "self_update", target_version: "v-next", download_url: "https://example.com", sha256: "sha", created_at: 0, updated_at: 0, created_by: "admin", status: "pending" },
+      targets: [],
+    })
+    getAgentUpdateJobMock.mockResolvedValue({
+      job: { id: "job-1", kind: "self_update", target_version: "v-next", download_url: "https://example.com", sha256: "sha", created_at: 0, updated_at: 0, created_by: "admin", status: "completed" },
       targets: [],
     })
     agentReleaseMock.mockImplementation((_os: string, arch: string) =>
@@ -123,5 +130,32 @@ describe("agent auto update status card", () => {
     await user.click(button)
 
     expect(createAgentUpdateJobMock).not.toHaveBeenCalled()
+  })
+
+  it("polls dispatched update jobs and shows node level failures", async () => {
+    const user = userEvent.setup()
+    nodesMock.mockResolvedValue({
+      nodes: [
+        { id: "node-1", name: "Oracle", ip: "1.1.1.1", os: "linux", arch: "amd64", agent_version: "v0.6.4-dirty", created_at: 0, last_seen: 0, online: true },
+      ],
+    })
+    createAgentUpdateJobMock.mockResolvedValueOnce({
+      job: { id: "job-1", kind: "self_update", target_version: "aaaa1111bbbb", download_url: "https://example.com/amd64", sha256: "sha-amd64", created_at: 0, updated_at: 0, created_by: "admin", status: "running" },
+      targets: [{ job_id: "job-1", node_id: "node-1", status: "dispatched", message: "command dispatched", updated_at: 0 }],
+    })
+    getAgentUpdateJobMock.mockResolvedValueOnce({
+      job: { id: "job-1", kind: "self_update", target_version: "aaaa1111bbbb", download_url: "https://example.com/amd64", sha256: "sha-amd64", created_at: 0, updated_at: 0, created_by: "admin", status: "failed" },
+      targets: [{ job_id: "job-1", node_id: "node-1", status: "failed", message: "permission denied", updated_at: 0 }],
+    })
+
+    renderSettings()
+
+    await screen.findByRole("button", { name: "Update now" })
+    await user.click(screen.getByRole("button", { name: "Update now" }))
+
+    await waitFor(() => {
+      expect(getAgentUpdateJobMock).toHaveBeenCalledWith("job-1")
+    }, { timeout: 3000 })
+    expect(await screen.findByText("Oracle: permission denied")).toBeInTheDocument()
   })
 })

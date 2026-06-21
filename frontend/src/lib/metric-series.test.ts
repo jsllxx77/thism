@@ -10,6 +10,8 @@ function metric(overrides: Partial<MetricsRow>): MetricsRow {
     mem_total: 1,
     disk_used: 0,
     disk_total: 1,
+    disk_read_bytes: 0,
+    disk_write_bytes: 0,
     net_rx: 0,
     net_tx: 0,
     uptime_seconds: 0,
@@ -52,11 +54,11 @@ describe("metric-series", () => {
 
   it("builds node detail series with the same chart outputs as the individual builders", () => {
     const metrics = [
-      metric({ ts: 100, cpu: 10, mem_used: 512, mem_total: 1024, disk_used: 1024, disk_total: 4096, net_rx: 1000, net_tx: 2000, uptime_seconds: 1000 }),
-      metric({ ts: 105, cpu: 20, mem_used: 768, mem_total: 1024, disk_used: 1536, disk_total: 4096, net_rx: 1500, net_tx: 2600, uptime_seconds: 1005 }),
-      metric({ ts: 110, cpu: 30, mem_used: 896, mem_total: 1024, disk_used: 2048, disk_total: 4096, net_rx: 2200, net_tx: 3400, uptime_seconds: 1010 }),
-      metric({ ts: 500, cpu: 40, mem_used: 256, mem_total: 1024, disk_used: 3072, disk_total: 4096, net_rx: 300, net_tx: 600, uptime_seconds: 5 }),
-      metric({ ts: 505, cpu: 45, mem_used: 384, mem_total: 1024, disk_used: 3200, disk_total: 4096, net_rx: 900, net_tx: 900, uptime_seconds: 10 }),
+      metric({ ts: 100, cpu: 10, mem_used: 512, mem_total: 1024, disk_used: 1024, disk_total: 4096, disk_read_bytes: 4000, disk_write_bytes: 8000, net_rx: 1000, net_tx: 2000, uptime_seconds: 1000 }),
+      metric({ ts: 105, cpu: 20, mem_used: 768, mem_total: 1024, disk_used: 1536, disk_total: 4096, disk_read_bytes: 5000, disk_write_bytes: 9500, net_rx: 1500, net_tx: 2600, uptime_seconds: 1005 }),
+      metric({ ts: 110, cpu: 30, mem_used: 896, mem_total: 1024, disk_used: 2048, disk_total: 4096, disk_read_bytes: 6500, disk_write_bytes: 11000, net_rx: 2200, net_tx: 3400, uptime_seconds: 1010 }),
+      metric({ ts: 500, cpu: 40, mem_used: 256, mem_total: 1024, disk_used: 3072, disk_total: 4096, disk_read_bytes: 500, disk_write_bytes: 900, net_rx: 300, net_tx: 600, uptime_seconds: 5 }),
+      metric({ ts: 505, cpu: 45, mem_used: 384, mem_total: 1024, disk_used: 3200, disk_total: 4096, disk_read_bytes: 2000, disk_write_bytes: 1900, net_rx: 900, net_tx: 900, uptime_seconds: 10 }),
     ]
 
     const bundled = buildNodeDetailMetricSeries(metrics, 604800)
@@ -68,5 +70,7 @@ describe("metric-series", () => {
     expect(bundled.netRxSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.net_rx))
     expect(bundled.netTxSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.net_tx))
     expect(bundled.diskData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0), "average"))
+    expect(bundled.diskReadSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_read_bytes ?? 0))
+    expect(bundled.diskWriteSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_write_bytes ?? 0))
   })
 })

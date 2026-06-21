@@ -1,7 +1,7 @@
 .PHONY: \
 	build build-server build-agent build-agent-all build-frontend test clean \
 	dev-ui dev-server dev-rebuild dev-restart \
-	build-sign-tool release-keygen sign-dist
+	build-sign-tool release-keygen sign-dist validate-release-public-key
 
 GO ?= go
 GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/frontend/node_modules/')
@@ -32,7 +32,19 @@ build-agent:
 	GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o bin/thism-agent ./cmd/agent
 	printf "%s\n" "$(VERSION)" > bin/thism-agent.version
 
-build-agent-all:
+validate-release-public-key:
+	@if [ -z "$(strip $(RELEASE_PUBLIC_KEY))" ]; then \
+		echo "RELEASE_PUBLIC_KEY is required for agent release builds."; \
+		echo "Use: make build-agent-all RELEASE_PUBLIC_KEY=\"\$$(cat $(RELEASE_PUB_FILE))\""; \
+		exit 1; \
+	fi
+	@decoded_len=$$(printf '%s' '$(RELEASE_PUBLIC_KEY)' | base64 -d 2>/dev/null | wc -c | tr -d '[:space:]'); \
+	if [ "$$decoded_len" != "32" ]; then \
+		echo "invalid RELEASE_PUBLIC_KEY: expected base64-encoded 32-byte Ed25519 public key, got $$decoded_len bytes"; \
+		exit 1; \
+	fi
+
+build-agent-all: validate-release-public-key
 	GOOS=linux GOARCH=amd64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o dist/thism-agent-linux-amd64 ./cmd/agent
 	printf "%s\n" "$(VERSION)" > dist/thism-agent-linux-amd64.version
 	GOOS=linux GOARCH=arm64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o dist/thism-agent-linux-arm64 ./cmd/agent

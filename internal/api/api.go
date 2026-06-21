@@ -3677,6 +3677,10 @@ func dashboardMetricsDataFromSnapshot(snapshot *models.NodeMetricsSnapshot) map[
 			"rx_bytes": snapshot.NetRx,
 			"tx_bytes": snapshot.NetTx,
 		},
+		"disk_io": map[string]any{
+			"read_bytes":  snapshot.DiskReadBytes,
+			"write_bytes": snapshot.DiskWriteBytes,
+		},
 		"disk_used":      snapshot.DiskUsed,
 		"disk_total":     snapshot.DiskTotal,
 		"uptime_seconds": snapshot.UptimeSeconds,
@@ -3694,6 +3698,7 @@ func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]
 		"cpu":            payload.CPU,
 		"mem":            payload.Mem,
 		"net":            payload.Net,
+		"disk_io":        payload.DiskIO,
 		"disk_used":      diskUsed,
 		"disk_total":     diskTotal,
 		"uptime_seconds": payload.UptimeSeconds,

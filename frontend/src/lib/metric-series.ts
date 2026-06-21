@@ -12,6 +12,8 @@ export type NodeDetailMetricSeries = {
   netRxSpeedData: ChartPoint[]
   netTxSpeedData: ChartPoint[]
   diskData: ChartPoint[]
+  diskReadSpeedData: ChartPoint[]
+  diskWriteSpeedData: ChartPoint[]
 }
 
 type MetricsValueSelector = (row: MetricsRow) => number
@@ -102,6 +104,8 @@ export function buildNodeDetailMetricSeries(
     const netRxSpeed: SeriesPoint[] = []
     const netTxSpeed: SeriesPoint[] = []
     const disk: SeriesPoint[] = []
+    const diskReadSpeed: SeriesPoint[] = []
+    const diskWriteSpeed: SeriesPoint[] = []
     let previous: MetricsRow | null = null
 
     segment.forEach((row) => {
@@ -115,6 +119,8 @@ export function buildNodeDetailMetricSeries(
         const deltaTs = row.ts - previous.ts
         const rxDelta = row.net_rx - previous.net_rx
         const txDelta = row.net_tx - previous.net_tx
+        const diskReadDelta = (row.disk_read_bytes ?? 0) - (previous.disk_read_bytes ?? 0)
+        const diskWriteDelta = (row.disk_write_bytes ?? 0) - (previous.disk_write_bytes ?? 0)
 
         if (deltaTs > 0 && rxDelta >= 0) {
           netRxSpeed.push({ ts: row.ts, value: rxDelta / deltaTs })
@@ -122,12 +128,18 @@ export function buildNodeDetailMetricSeries(
         if (deltaTs > 0 && txDelta >= 0) {
           netTxSpeed.push({ ts: row.ts, value: txDelta / deltaTs })
         }
+        if (deltaTs > 0 && diskReadDelta >= 0) {
+          diskReadSpeed.push({ ts: row.ts, value: diskReadDelta / deltaTs })
+        }
+        if (deltaTs > 0 && diskWriteDelta >= 0) {
+          diskWriteSpeed.push({ ts: row.ts, value: diskWriteDelta / deltaTs })
+        }
       }
 
       previous = row
     })
 
-    return { cpu, memory, netRx, netTx, netRxSpeed, netTxSpeed, disk }
+    return { cpu, memory, netRx, netTx, netRxSpeed, netTxSpeed, disk, diskReadSpeed, diskWriteSpeed }
   })
 
   return {
@@ -138,6 +150,8 @@ export function buildNodeDetailMetricSeries(
     netRxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netRxSpeed), targetPoints, "average"),
     netTxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netTxSpeed), targetPoints, "average"),
     diskData: mergeSegmentedSeries(segments.map((segment) => segment.disk), targetPoints, "average"),
+    diskReadSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.diskReadSpeed), targetPoints, "average"),
+    diskWriteSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.diskWriteSpeed), targetPoints, "average"),
   }
 }
 

@@ -344,7 +344,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
         <TabsContent value="agent" {...getTabsContentProps("agent")} hidden={activeSection !== "agent"} className="space-y-6">
           <PublicURLCard />
-          <AgentAutoUpdateCard nodes={effectiveNodes} />
+          <AgentAutoUpdateCard nodes={effectiveNodes} onUpdated={fetchNodes} />
         </TabsContent>
 
         <TabsContent value="monitoring" {...getTabsContentProps("monitoring")} hidden={activeSection !== "monitoring"} className="space-y-6">

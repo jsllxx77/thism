@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import type { Node } from "../../lib/api"
 import { NodeHero } from "./NodeHero"
 import { MetricTabs } from "./MetricTabs"
@@ -57,9 +56,7 @@ describe("node detail metrics", () => {
     expect(heroCard?.className).toContain("enterprise-hero")
   })
 
-  it("switches metric tabs", async () => {
-    const user = userEvent.setup()
-
+  it("renders grouped metric charts", () => {
     const points = [
       { ts: 1700000000, value: 30 },
       { ts: 1700000300, value: 44 },
@@ -75,23 +72,23 @@ describe("node detail metrics", () => {
         netRxSpeedData={points}
         netTxSpeedData={points}
         diskData={points}
+        diskReadSpeedData={points}
+        diskWriteSpeedData={points}
       />
     )
 
-    expect(screen.getByRole("tab", { name: "CPU Usage" })).toBeInTheDocument()
-    expect(screen.getByTestId("metric-tabs-scroll")).toHaveClass("overflow-x-auto")
-    const controlsPanel = container.querySelector("section > div") as HTMLElement | null
-    expect(controlsPanel?.className).toContain("enterprise-surface")
-    expect(screen.getByRole("tab", { name: "CPU Usage" }).className).toContain("dark:data-[state=active]:shadow-none")
-    expect(screen.getByRole("tab", { name: "Memory Usage" }).className).toContain("dark:data-[state=active]:shadow-none")
-    expect(screen.getByRole("tab", { name: "Network Traffic" }).className).toContain("dark:data-[state=active]:shadow-none")
-    expect(screen.getByRole("tab", { name: "Disk Usage" }).className).toContain("dark:data-[state=active]:shadow-none")
-    expect(screen.getByRole("tab", { name: "CPU Usage" }).className).toContain("dark:data-[state=active]:border-white/10")
-    expect(screen.getByRole("tab", { name: "CPU Usage" }).className).toContain("dark:data-[state=active]:ring-white/10")
-    expect(screen.getByRole("tab", { name: "CPU Usage" }).className).toContain("data-[state=active]:bg-slate-50/90")
-    await user.click(screen.getByRole("tab", { name: "Network Traffic" }))
-    expect(screen.getByRole("tab", { name: "Network Traffic" }).className).toContain("data-[state=active]:bg-slate-50/90")
+    expect(screen.getByRole("heading", { name: "Resource Usage" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Throughput / Traffic" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument()
+    expect(screen.getByText("CPU Usage")).toBeInTheDocument()
+    expect(screen.getByText("Memory Usage")).toBeInTheDocument()
+    expect(screen.getByText("Disk Usage")).toBeInTheDocument()
     expect(screen.getByText("Inbound Traffic")).toBeInTheDocument()
     expect(screen.getByText("Inbound Speed")).toBeInTheDocument()
+    expect(screen.getByLabelText("Disk IO")).toBeInTheDocument()
+    expect(screen.getByText("Disk Read Speed")).toBeInTheDocument()
+    expect(screen.getByText("Disk Write Speed")).toBeInTheDocument()
+    const resourceSection = container.querySelector("section[aria-labelledby='resource-usage-heading'] .grid") as HTMLElement | null
+    expect(resourceSection?.className).toContain("lg:grid-cols-3")
   })
 })

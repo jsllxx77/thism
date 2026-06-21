@@ -77,6 +77,7 @@ var (
 	hostInfoFunc                = host.Info
 	diskPartitionsFunc          = disk.Partitions
 	diskUsageFunc               = disk.Usage
+	diskIOCountersFunc          = disk.IOCounters
 	ioCountersFunc              = psnet.IOCounters
 	netInterfacesFunc           = net.Interfaces
 	interfaceAddrsFunc          = net.InterfaceAddrs
@@ -593,6 +594,22 @@ func collectNetworkStats() models.NetStats {
 	return collectNetworkStatsForInterfaces(nonLoopbackInterfaceNames())
 }
 
+func collectDiskIOStats() models.DiskIOStats {
+	counters, err := diskIOCountersFunc()
+	if err != nil || len(counters) == 0 {
+		return models.DiskIOStats{}
+	}
+
+	var readBytes uint64
+	var writeBytes uint64
+	for _, counter := range counters {
+		readBytes += counter.ReadBytes
+		writeBytes += counter.WriteBytes
+	}
+
+	return models.DiskIOStats{ReadBytes: readBytes, WriteBytes: writeBytes}
+}
+
 func (c *Collector) cachedNonLoopbackInterfaceNames(currentTime time.Time) map[string]struct{} {
 	c.networkCacheMu.Lock()
 	if !c.cachedInterfacesAt.IsZero() && currentTime.Sub(c.cachedInterfacesAt) < networkTopologyCacheTTL && len(c.cachedInterfaces) > 0 {
@@ -663,14 +680,18 @@ func detectedIPFamiliesFromAddrs(addrs []net.Addr) []string {
 	hasIPv6 := false
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
-		if !ok || ipNet.IP == nil || ipNet.IP.IsLoopback() || ipNet.IP.IsLinkLocalUnicast() || ipNet.IP.IsLinkLocalMulticast() {
+		if !ok || ipNet.IP == nil {
 			continue
 		}
 		if ipNet.IP.To4() != nil {
-			hasIPv4 = true
+			if isUsableIPv4ForExternalProbes(ipNet.IP) {
+				hasIPv4 = true
+			}
 			continue
 		}
-		hasIPv6 = true
+		if isUsableIPv6ForExternalProbes(ipNet.IP) {
+			hasIPv6 = true
+		}
 	}
 	families := make([]string, 0, 2)
 	if hasIPv4 {
@@ -680,6 +701,28 @@ func detectedIPFamiliesFromAddrs(addrs []net.Addr) []string {
 		families = append(families, "ipv6")
 	}
 	return families
+}
+
+func isUsableIPv4ForExternalProbes(ip net.IP) bool {
+	if ip == nil || ip.To4() == nil {
+		return false
+	}
+	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast()
+}
+
+func isUsableIPv6ForExternalProbes(ip net.IP) bool {
+	if ip == nil || ip.To4() != nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !isDocumentationIPv6(ip) && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast()
+}
+
+func isDocumentationIPv6(ip net.IP) bool {
+	parsed := ip.To16()
+	if parsed == nil || ip.To4() != nil {
+		return false
+	}
+	return parsed[0] == 0x20 && parsed[1] == 0x01 && parsed[2] == 0x0d && parsed[3] == 0xb8
 }
 
 func (c *Collector) collectNetworkStats(currentTime time.Time) models.NetStats {
@@ -738,6 +781,7 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 			})
 		}
 	}
+	payload.DiskIO = collectDiskIOStats()
 
 	// Network — aggregate across active non-loopback interfaces with cached topology selection.
 	payload.Net = c.collectNetworkStats(currentTime)

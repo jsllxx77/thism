@@ -48,7 +48,8 @@ function monitorFamily(name: string, target: string): IPFamily {
 function monitorAppliesToNode(name: string, target: string, node: Node) {
   const requiredFamily = monitorFamily(name, target)
   const nodeFamilies = node.ip_families ?? []
-  return requiredFamily === "unknown" || nodeFamilies.length === 0 || nodeFamilies.includes(requiredFamily)
+  const fallbackFamily = nodeFamilies.length === 0 ? ipFamily(node.ip) : "unknown"
+  return requiredFamily === "unknown" || nodeFamilies.includes(requiredFamily) || (nodeFamilies.length === 0 && fallbackFamily === requiredFamily)
 }
 
 function defaultForm(nodes: Node[]): FormState {

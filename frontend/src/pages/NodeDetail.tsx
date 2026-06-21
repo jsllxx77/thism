@@ -30,6 +30,7 @@ type LiveMetricsMessage = Partial<MetricsRow> & {
   cpu: number
   mem?: { used?: number; total?: number }
   net?: { rx_bytes?: number; tx_bytes?: number }
+  disk_io?: { read_bytes?: number; write_bytes?: number }
   disk?: LiveDiskStats[]
 }
 
@@ -255,6 +256,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
             mem_total: data.mem?.total ?? 0,
             disk_used: diskUsed,
             disk_total: diskTotal,
+            disk_read_bytes: data.disk_io?.read_bytes ?? data.disk_read_bytes ?? previousPoint?.disk_read_bytes ?? 0,
+            disk_write_bytes: data.disk_io?.write_bytes ?? data.disk_write_bytes ?? previousPoint?.disk_write_bytes ?? 0,
             net_rx: data.net?.rx_bytes ?? 0,
             net_tx: data.net?.tx_bytes ?? 0,
             uptime_seconds: data.uptime_seconds ?? 0,
@@ -282,7 +285,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     return () => ws.off(handler)
   }, [effectiveRange, latencyMonitors, nodeId])
 
-  const { cpuData, memData, netRxData, netTxData, netRxSpeedData, netTxSpeedData, diskData } = useMemo(
+  const { cpuData, memData, netRxData, netTxData, netRxSpeedData, netTxSpeedData, diskData, diskReadSpeedData, diskWriteSpeedData } = useMemo(
     () => buildNodeDetailMetricSeries(metrics, effectiveRange),
     [effectiveRange, metrics],
   )
@@ -391,6 +394,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
               netSpeedAxisTickFormatter={formatBytesPerSecond}
               networkSummary={networkSummary}
               diskData={diskData}
+              diskReadSpeedData={diskReadSpeedData}
+              diskWriteSpeedData={diskWriteSpeedData}
             />
             <LatencyMonitorChart monitors={latencyMonitors} results={latencyResults} range={range} />
           </>

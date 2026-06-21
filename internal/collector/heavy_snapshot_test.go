@@ -17,6 +17,7 @@ func TestCollectHeavySnapshotsOnlyKeepTop10Processes(t *testing.T) {
 	originalVirtualMemoryFunc := virtualMemoryFunc
 	originalHostInfoFunc := hostInfoFunc
 	originalDiskPartitionsFunc := diskPartitionsFunc
+	originalDiskIOCountersFunc := diskIOCountersFunc
 	originalIOCountersFunc := ioCountersFunc
 	originalReadFileFunc := readFileFunc
 	originalCollectProcessSamplesFunc := collectProcessSamplesFunc
@@ -26,6 +27,7 @@ func TestCollectHeavySnapshotsOnlyKeepTop10Processes(t *testing.T) {
 		virtualMemoryFunc = originalVirtualMemoryFunc
 		hostInfoFunc = originalHostInfoFunc
 		diskPartitionsFunc = originalDiskPartitionsFunc
+		diskIOCountersFunc = originalDiskIOCountersFunc
 		ioCountersFunc = originalIOCountersFunc
 		readFileFunc = originalReadFileFunc
 		collectProcessSamplesFunc = originalCollectProcessSamplesFunc
@@ -43,6 +45,12 @@ func TestCollectHeavySnapshotsOnlyKeepTop10Processes(t *testing.T) {
 	}
 	diskPartitionsFunc = func(bool) ([]disk.PartitionStat, error) {
 		return nil, nil
+	}
+	diskIOCountersFunc = func(...string) (map[string]disk.IOCountersStat, error) {
+		return map[string]disk.IOCountersStat{
+			"sda": {ReadBytes: 4096, WriteBytes: 8192},
+			"sdb": {ReadBytes: 1024, WriteBytes: 2048},
+		}, nil
 	}
 	ioCountersFunc = func(bool) ([]psnet.IOCountersStat, error) {
 		return nil, nil
@@ -76,6 +84,9 @@ func TestCollectHeavySnapshotsOnlyKeepTop10Processes(t *testing.T) {
 	}
 	if payload.Processes[0].PID != 1 || payload.Processes[9].PID != 10 {
 		t.Fatalf("expected highest-ranked processes to be preserved in order, got first=%d tenth=%d", payload.Processes[0].PID, payload.Processes[9].PID)
+	}
+	if payload.DiskIO.ReadBytes != 5120 || payload.DiskIO.WriteBytes != 10240 {
+		t.Fatalf("expected disk IO counters to be aggregated, got %#v", payload.DiskIO)
 	}
 }
 

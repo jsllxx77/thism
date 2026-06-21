@@ -214,6 +214,7 @@ func TestAgentMetricsBroadcastIncludesAggregatedDiskTotals(t *testing.T) {
 			{Mount: "/", Used: 300, Total: 500},
 			{Mount: "/data", Used: 50, Total: 100},
 		},
+		DiskIO: models.DiskIOStats{ReadBytes: 4096, WriteBytes: 8192},
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -247,6 +248,13 @@ func TestAgentMetricsBroadcastIncludesAggregatedDiskTotals(t *testing.T) {
 		}
 		if data["disk_total"] != float64(600) {
 			t.Fatalf("expected disk_total 600, got %#v", data["disk_total"])
+		}
+		diskIO, ok := data["disk_io"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected disk_io map, got %#v", data["disk_io"])
+		}
+		if diskIO["read_bytes"] != float64(4096) || diskIO["write_bytes"] != float64(8192) {
+			t.Fatalf("unexpected disk_io payload: %#v", diskIO)
 		}
 		break
 	}

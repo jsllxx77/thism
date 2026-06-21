@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLanguage } from "../../i18n/language"
-import { api, type AgentReleaseManifest, type Node } from "../../lib/api"
+import { api, type AgentReleaseManifest, type Node, type UpdateJobResponse, type UpdateJobTarget } from "../../lib/api"
 import { Button } from "../ui/button"
 
 type ReleaseState = {
@@ -12,6 +12,12 @@ type SupportedArch = keyof ReleaseState
 
 type Props = {
   nodes: Node[]
+  onUpdated?: () => void | Promise<void>
+}
+
+type TrackedUpdateJob = {
+  id: string
+  response: UpdateJobResponse
 }
 
 const supportedArchOrder: SupportedArch[] = ["amd64", "arm64"]
@@ -43,7 +49,15 @@ function needsUpdate(node: Node, manifest: AgentReleaseManifest): boolean {
   return reportedVersion !== targetVersion
 }
 
-export function AgentAutoUpdateCard({ nodes }: Props) {
+function updateJobFinished(job: UpdateJobResponse) {
+  return job.job.status === "completed" || job.job.status === "failed" || job.job.status === "partial_failed"
+}
+
+function targetIsFailed(target: UpdateJobTarget) {
+  return target.status === "failed" || target.status === "timeout" || target.status === "offline_skipped"
+}
+
+export function AgentAutoUpdateCard({ nodes, onUpdated }: Props) {
   const { t, translateApiError } = useLanguage()
   const [releaseState, setReleaseState] = useState<ReleaseState>({ amd64: null, arm64: null })
   const [loading, setLoading] = useState(true)
@@ -51,6 +65,7 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [trackedJobs, setTrackedJobs] = useState<TrackedUpdateJob[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +125,50 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
     [eligibleGroups],
   )
 
+  const nodeNameByID = useMemo(() => new Map(nodes.map((node) => [node.id, node.name])), [nodes])
+
+  useEffect(() => {
+    if (trackedJobs.length === 0) {
+      return
+    }
+    const allFinished = trackedJobs.every((job) => updateJobFinished(job.response))
+    if (allFinished) {
+      void onUpdated?.()
+      return
+    }
+
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void Promise.all(
+        trackedJobs.map(async (tracked) => {
+          if (updateJobFinished(tracked.response)) {
+            return tracked
+          }
+          try {
+            const response = await api.getAgentUpdateJob(tracked.id)
+            return { id: tracked.id, response }
+          } catch {
+            return tracked
+          }
+        }),
+      ).then((nextJobs) => {
+        if (!cancelled) {
+          setTrackedJobs(nextJobs)
+        }
+      })
+    }, 2000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [onUpdated, trackedJobs])
+
+  const failedUpdateTargets = useMemo(
+    () => trackedJobs.flatMap((tracked) => tracked.response.targets.filter(targetIsFailed)),
+    [trackedJobs],
+  )
+
   const handleUpdateNow = async () => {
     setActionError(null)
     setActionMessage(null)
@@ -130,10 +189,12 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
       let succeededNodes = 0
       let failedGroups = 0
       let firstFailureMessage: string | null = null
+      const nextTrackedJobs: TrackedUpdateJob[] = []
 
       results.forEach((result, index) => {
         if (result.status === "fulfilled") {
           succeededNodes += eligibleGroups[index].nodeIDs.length
+          nextTrackedJobs.push({ id: result.value.job.id, response: result.value })
           return
         }
 
@@ -148,6 +209,8 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
         setActionError(firstFailureMessage ?? t("settingsPage.autoUpdateDispatchFailed"))
         return
       }
+
+      setTrackedJobs(nextTrackedJobs)
 
       if (failedGroups === 0) {
         setActionMessage(t("settingsPage.autoUpdateDispatchSuccess", { count: succeededNodes }))
@@ -218,6 +281,22 @@ export function AgentAutoUpdateCard({ nodes }: Props) {
           )}
           {actionMessage && (
             <p role="status" className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{actionMessage}</p>
+          )}
+          {trackedJobs.length > 0 && (
+            <div className="enterprise-inner-surface rounded-2xl px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+              <p className="font-medium text-slate-800 dark:text-slate-100">
+                {trackedJobs.map((job) => `${job.response.job.status} ${job.response.targets.length}`).join(" · ")}
+              </p>
+              {failedUpdateTargets.length > 0 && (
+                <ul className="mt-2 space-y-1 text-red-600 dark:text-red-300">
+                  {failedUpdateTargets.map((target) => (
+                    <li key={`${target.job_id}-${target.node_id}`}>
+                      {(nodeNameByID.get(target.node_id) ?? target.node_id)}: {target.message || target.status}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
       )}

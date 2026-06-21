@@ -1818,8 +1818,8 @@ func TestLatencyMonitorCRUD(t *testing.T) {
 	router := api.NewRouter(s, h, "admin-token", nil)
 
 	for _, node := range []*models.Node{
-		{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()},
-		{ID: "node-2", Name: "beta", Token: "token-2", CreatedAt: time.Now().Unix()},
+		{ID: "node-1", Name: "alpha", Token: "token-1", IP: "203.0.113.10", CreatedAt: time.Now().Unix()},
+		{ID: "node-2", Name: "beta", Token: "token-2", IP: "203.0.113.11", CreatedAt: time.Now().Unix()},
 	} {
 		if err := s.UpsertNode(node); err != nil {
 			t.Fatalf("UpsertNode %s: %v", node.ID, err)
@@ -2128,7 +2128,7 @@ func TestRegisterNodeAutoAssignsLatencyMonitors(t *testing.T) {
 		ID:                 "monitor-1",
 		Name:               "Default monitor",
 		Type:               models.LatencyMonitorTypeICMP,
-		Target:             "1.1.1.1",
+		Target:             "example.com",
 		IntervalSeconds:    30,
 		AutoAssignNewNodes: true,
 		CreatedAt:          1700000000,

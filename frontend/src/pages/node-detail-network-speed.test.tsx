@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { NodeDetail } from "./NodeDetail"
 
 const nodeMock = vi.fn()
@@ -79,8 +78,6 @@ describe("node detail network speed", () => {
   })
 
   it("shows a network summary plus traffic and speed charts", async () => {
-    const user = userEvent.setup()
-
     metricsMock.mockResolvedValue({
       metrics: [
         {
@@ -112,8 +109,8 @@ describe("node detail network speed", () => {
       expect(screen.getByText("alpha")).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole("tab", { name: "Network Traffic" }))
-
+    expect(screen.getByRole("heading", { name: "Throughput / Traffic" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Network Traffic" })).toBeInTheDocument()
     const summary = screen.getByRole("region", { name: "Network summary" })
     expect(within(summary).getByText("Inbound Total")).toBeInTheDocument()
     expect(within(summary).getByText("Outbound Total")).toBeInTheDocument()
@@ -131,8 +128,6 @@ describe("node detail network speed", () => {
   })
 
   it("shows totals but keeps speed as placeholder until a second sample exists", async () => {
-    const user = userEvent.setup()
-
     metricsMock.mockResolvedValue({
       metrics: [
         {
@@ -154,8 +149,6 @@ describe("node detail network speed", () => {
       expect(screen.getByText("alpha")).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole("tab", { name: "Network Traffic" }))
-
     const summary = screen.getByRole("region", { name: "Network summary" })
     expect(within(summary).getByText("Inbound Total")).toBeInTheDocument()
     expect(within(summary).getByText("Outbound Total")).toBeInTheDocument()
@@ -165,8 +158,6 @@ describe("node detail network speed", () => {
   })
 
   it("updates the network summary when a live websocket metric arrives", async () => {
-    const user = userEvent.setup()
-
     metricsMock.mockResolvedValue({
       metrics: [
         {
@@ -212,8 +203,6 @@ describe("node detail network speed", () => {
         },
       })
     })
-
-    await user.click(screen.getByRole("tab", { name: "Network Traffic" }))
 
     const summary = screen.getByRole("region", { name: "Network summary" })
     expect(within(summary).getByText("7.0 MB")).toBeInTheDocument()

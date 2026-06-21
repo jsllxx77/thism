@@ -44,15 +44,17 @@ func (h *NodeHardware) IsEmpty() bool {
 }
 
 type NodeMetricsSnapshot struct {
-	TS            int64   `json:"ts"`
-	CPU           float64 `json:"cpu"`
-	MemUsed       uint64  `json:"mem_used"`
-	MemTotal      uint64  `json:"mem_total"`
-	DiskUsed      uint64  `json:"disk_used"`
-	DiskTotal     uint64  `json:"disk_total"`
-	NetRx         uint64  `json:"net_rx"`
-	NetTx         uint64  `json:"net_tx"`
-	UptimeSeconds uint64  `json:"uptime_seconds,omitempty"`
+	TS             int64   `json:"ts"`
+	CPU            float64 `json:"cpu"`
+	MemUsed        uint64  `json:"mem_used"`
+	MemTotal       uint64  `json:"mem_total"`
+	DiskUsed       uint64  `json:"disk_used"`
+	DiskTotal      uint64  `json:"disk_total"`
+	DiskReadBytes  uint64  `json:"disk_read_bytes"`
+	DiskWriteBytes uint64  `json:"disk_write_bytes"`
+	NetRx          uint64  `json:"net_rx"`
+	NetTx          uint64  `json:"net_tx"`
+	UptimeSeconds  uint64  `json:"uptime_seconds,omitempty"`
 }
 
 type AvailabilityReportRange struct {
@@ -110,6 +112,7 @@ type MetricsPayload struct {
 	Hardware        *NodeHardware     `json:"hardware,omitempty"`
 	Mem             MemStats          `json:"mem"`
 	Disk            []DiskStats       `json:"disk"`
+	DiskIO          DiskIOStats       `json:"disk_io"`
 	Net             NetStats          `json:"net"`
 	Processes       []Process         `json:"processes"`
 	Services        []Service         `json:"services"`
@@ -126,6 +129,11 @@ type DiskStats struct {
 	Mount string `json:"mount"`
 	Used  uint64 `json:"used"`
 	Total uint64 `json:"total"`
+}
+
+type DiskIOStats struct {
+	ReadBytes  uint64 `json:"read_bytes"`
+	WriteBytes uint64 `json:"write_bytes"`
 }
 
 type NetStats struct {
