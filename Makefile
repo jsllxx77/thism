@@ -4,6 +4,7 @@
 	build-sign-tool release-keygen sign-dist validate-release-public-key
 
 GO ?= go
+SUDO ?= sudo
 GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/frontend/node_modules/')
 GOCACHE_DIR ?= /tmp/go-build
 PORT ?= 12026
@@ -18,7 +19,8 @@ SERVER_TLS_SPKI_SHA256 ?=
 AGENT_LDFLAGS := $(LDFLAGS)$(if $(RELEASE_PUBLIC_KEY), -X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64=$(RELEASE_PUBLIC_KEY),)$(if $(SERVER_TLS_SPKI_SHA256), -X github.com/thism-dev/thism/internal/collector.ServerTLSSPKISHA256Base64=$(SERVER_TLS_SPKI_SHA256),)
 ADMIN_AUTH_ARGS := $(strip $(if $(ADMIN_USER),--admin-user $(ADMIN_USER),) $(if $(ADMIN_PASS),--admin-pass $(ADMIN_PASS),))
 DEV_SYSTEMD_SERVICE ?= thism-server.service
-DEV_SYSTEMD_ENV_FILE ?= /etc/default/thism-dev-server
+DEV_SYSTEMD_ENV_FILE ?= /etc/default/thism-server
+DEV_ROOT_CMD := $(if $(filter 0,$(shell id -u 2>/dev/null)),,$(SUDO))
 
 build: build-frontend build-server build-agent build-agent-all
 
@@ -63,28 +65,27 @@ dev-rebuild:
 
 dev-restart: dev-rebuild
 	@if [ -z "$(TOKEN)" ]; then echo "TOKEN is required (e.g. TOKEN=\"\$$(openssl rand -hex 32)\" make dev-restart)"; exit 1; fi
-	@if command -v systemctl >/dev/null 2>&1 && [ "$$(id -u)" -eq 0 ] && systemctl cat $(DEV_SYSTEMD_SERVICE) >/dev/null 2>&1; then \
+	@if command -v systemctl >/dev/null 2>&1 && systemctl cat $(DEV_SYSTEMD_SERVICE) >/dev/null 2>&1; then \
 		tmp_file=$$(mktemp); \
+		env_copy=$$(mktemp); \
 		resolved_admin_user="$(ADMIN_USER)"; \
 		resolved_admin_pass="$(ADMIN_PASS)"; \
-		if [ -f $(DEV_SYSTEMD_ENV_FILE) ]; then \
+		if $(DEV_ROOT_CMD) test -f $(DEV_SYSTEMD_ENV_FILE); then \
+			$(DEV_ROOT_CMD) cat $(DEV_SYSTEMD_ENV_FILE) > "$$env_copy"; \
 			set -a; \
-			. $(DEV_SYSTEMD_ENV_FILE); \
+			. "$$env_copy"; \
 			set +a; \
-			if [ -z "$$resolved_admin_user" ] && [ -n "$$ADMIN_USER" ]; then resolved_admin_user="$$ADMIN_USER"; fi; \
-			if [ -z "$$resolved_admin_pass" ] && [ -n "$$ADMIN_PASS" ]; then resolved_admin_pass="$$ADMIN_PASS"; fi; \
+			if [ -z "$$resolved_admin_user" ] && [ -n "$$THISM_ADMIN_USER" ]; then resolved_admin_user="$$THISM_ADMIN_USER"; fi; \
+			if [ -z "$$resolved_admin_pass" ] && [ -n "$$THISM_ADMIN_PASS" ]; then resolved_admin_pass="$$THISM_ADMIN_PASS"; fi; \
 		fi; \
-		printf "TOKEN=%s\nPORT=%s\n" "$(TOKEN)" "$(PORT)" > "$$tmp_file"; \
-		if [ -n "$$resolved_admin_user" ]; then printf "ADMIN_USER=%s\n" "$$resolved_admin_user" >> "$$tmp_file"; fi; \
-		if [ -n "$$resolved_admin_pass" ]; then printf "ADMIN_PASS=%s\n" "$$resolved_admin_pass" >> "$$tmp_file"; fi; \
-		install -m 600 "$$tmp_file" $(DEV_SYSTEMD_ENV_FILE); \
+		rm -f "$$env_copy"; \
+		printf "THISM_TOKEN=%s\nTHISM_PORT=%s\n" "$(TOKEN)" "$(PORT)" > "$$tmp_file"; \
+		if [ -n "$$resolved_admin_user" ]; then printf "THISM_ADMIN_USER=%s\n" "$$resolved_admin_user" >> "$$tmp_file"; fi; \
+		if [ -n "$$resolved_admin_pass" ]; then printf "THISM_ADMIN_PASS=%s\n" "$$resolved_admin_pass" >> "$$tmp_file"; fi; \
+		$(DEV_ROOT_CMD) install -m 600 "$$tmp_file" $(DEV_SYSTEMD_ENV_FILE); \
 		rm -f "$$tmp_file"; \
-		systemctl stop $(DEV_SYSTEMD_SERVICE) || true; \
-		pkill -x thism-server || true; \
-		sleep 1; \
-		systemctl reset-failed $(DEV_SYSTEMD_SERVICE) || true; \
-		systemctl start $(DEV_SYSTEMD_SERVICE); \
-		systemctl --no-pager --lines=8 status $(DEV_SYSTEMD_SERVICE); \
+		$(DEV_ROOT_CMD) systemctl restart $(DEV_SYSTEMD_SERVICE); \
+		$(DEV_ROOT_CMD) systemctl --no-pager --lines=8 status $(DEV_SYSTEMD_SERVICE); \
 	else \
 		pkill -x thism-server || true; \
 		nohup ./bin/thism-server --token $(TOKEN) --port $(PORT) $(ADMIN_AUTH_ARGS) >/tmp/thism-server.log 2>&1 & echo $$!; \

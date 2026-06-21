@@ -211,8 +211,8 @@ export function NodesTable({ nodes, onUpdated }: Props) {
   const statusLabel = (online: boolean) => online ? t("Online") : t("Offline")
   const formatCreatedDate = (createdAt: number) => createdAt ? new Date(createdAt * 1000).toLocaleDateString(language) : "—"
   const renderNodeName = (node: Node) => {
-    return <span className="inline-flex max-w-full items-center">
-      <CountryFlag countryCode={node.country_code} className="mr-1" />
+    return <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+      <CountryFlag countryCode={node.country_code} className="flex-none" />
       <span className="truncate">{node.name}</span>
     </span>
   }
@@ -319,10 +319,10 @@ export function NodesTable({ nodes, onUpdated }: Props) {
         </div>
       ) : (
         <div className="enterprise-inner-surface overflow-x-auto rounded-2xl px-2 py-2">
-          <table className="w-full text-sm">
+          <table className="min-w-[1040px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                <th className="py-2 pr-3 font-medium">
+                <th className="py-2 pl-4 pr-3 font-medium">
                   <button type="button" onClick={() => setNameAsc((current) => !current)} className="hover:text-slate-900 dark:hover:text-slate-200">
                     {t("Name")}
                   </button>
@@ -339,7 +339,7 @@ export function NodesTable({ nodes, onUpdated }: Props) {
             <tbody>
               {rows.map((node) => (
                 <tr key={node.id} className="motion-table-row border-b border-slate-100 dark:border-slate-800">
-                  <td className="py-2 pr-3 text-slate-900 dark:text-slate-100">{renderNodeName(node)}</td>
+                  <td className="py-2 pl-4 pr-3 text-slate-900 dark:text-slate-100">{renderNodeName(node)}</td>
                   <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{node.agent_version || "—"}</td>
                   <td className="py-2 pr-3 text-slate-600 dark:text-slate-300">
                     <NodeTagChips tags={node.tags} />

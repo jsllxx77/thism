@@ -92,6 +92,7 @@ describe("settings nodes table", () => {
     expect(removeButtons.length).toBeGreaterThan(0)
     expect(statusGroup.className).toContain("enterprise-inner-surface")
     expect(statusGroup.className).toContain("shadow-none")
+    expect(screen.getByRole("columnheader", { name: "Name" })).toHaveClass("pl-4")
     expect(allButton).toHaveClass("h-10")
     expect(onlineButton).toHaveClass("h-10")
     expect(offlineButton).toHaveClass("h-10")
@@ -212,6 +213,7 @@ describe("settings nodes table", () => {
     )
 
     expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
-    expect(screen.getByText("alpha")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("flex-none")
+    expect(screen.getByText("alpha").parentElement).toHaveClass("gap-2")
   })
 })
