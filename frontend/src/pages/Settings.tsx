@@ -269,7 +269,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" delay={0.03}>
       <section className="panel-card enterprise-hero rounded-[28px] px-5 py-5 sm:px-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-4">
           <div>
             <p className="enterprise-kicker text-[11px] font-semibold uppercase tracking-[0.24em]">{t("Control Plane")}</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-[2rem]">{t("Settings")}</h2>
@@ -277,18 +277,13 @@ export function Settings({ refreshNonce = 0 }: Props) {
               {t("Manage node enrollment, registry actions, and administrator credentials from the same engineering-passport shell used across the dashboard.")}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Node registry")}</span>
-            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Provisioning")}</span>
-            <span className="enterprise-chip rounded-full px-3 py-1.5">{t("Security")}</span>
-          </div>
         </div>
       </section>
 
       <Tabs value={activeSection} onValueChange={handleSectionChange} className="space-y-6">
         <TabsList
           aria-label={t("settingsPage.sectionTabsAriaLabel")}
-          className="motion-segmented-shell flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-[24px] border border-slate-200/80 bg-white/75 p-2 dark:border-white/10 dark:bg-slate-950/70"
+          className="motion-segmented-shell flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-[28px] border border-slate-200/80 bg-white/75 p-2 dark:border-white/10 dark:bg-slate-950/70"
         >
           {sectionTabs.map((section) => (
             <TabsTrigger
@@ -304,7 +299,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
         <TabsContent value="nodes" {...getTabsContentProps("nodes")} hidden={activeSection !== "nodes"} className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Node Management")}</h3>
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("Node Management")}</h3>
               <Button
                 onClick={() => setShowModal(true)}
                 className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium"
@@ -315,13 +310,13 @@ export function Settings({ refreshNonce = 0 }: Props) {
             </div>
 
             {loadingNodes ? (
-              <div className="panel-card rounded-2xl border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              <div className="panel-card rounded-[28px] border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
                 {t("Loading node registry...")}
               </div>
             ) : nodesError ? (
               <div
                 role="alert"
-                className="panel-card rounded-2xl border border-red-200 bg-red-50/80 px-4 py-5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+                className="panel-card rounded-[28px] border border-red-200 bg-red-50/80 px-4 py-5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
               >
                 <p>{nodesError}</p>
                 <button
@@ -333,7 +328,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
                 </button>
               </div>
             ) : nodes.length === 0 ? (
-              <div className="panel-card rounded-2xl border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              <div className="panel-card rounded-[28px] border border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
                 {t("No nodes registered yet")}
               </div>
             ) : (
@@ -364,7 +359,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
         <TabsContent value="security" {...getTabsContentProps("security")} hidden={activeSection !== "security"} className="space-y-6">
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Version")}</h3>
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("Version")}</h3>
             <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
               {versionError ? (
                 <p role="status" className="text-xs text-slate-500 dark:text-slate-400">{versionError}</p>
@@ -390,7 +385,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("Security")}</h3>
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("Security")}</h3>
             <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
               <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("Change Password")}</h4>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -464,7 +459,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
       {showModal && (
         <Suspense
           fallback={
-            <div className="panel-card rounded-2xl border border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            <div className="panel-card rounded-[28px] border border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
               {t("Loading")}...
             </div>
           }

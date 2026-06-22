@@ -376,7 +376,9 @@ export function Reports() {
         <section className="panel-card rounded-2xl border border-slate-200 p-6 dark:border-slate-700">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("reportsPage.loading")}</p>
           <div className="mt-4 space-y-3">
-            <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/70" />
+            <div className="content-skeleton h-4 w-1/3">
+              <div className="content-skeleton__line h-full w-full" />
+            </div>
             <ChartLoadingSkeleton />
           </div>
         </section>

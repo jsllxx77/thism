@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react"
-import { CheckCircle2, DownloadCloud, Github, Layers3, RefreshCcw, ShieldCheck, Trash2, UploadCloud } from "lucide-react"
+import { CheckCircle2, Github, Layers3, Loader2, RefreshCcw, ShieldCheck, Trash2, UploadCloud } from "lucide-react"
 
 import { Badge } from "../ui/badge"
 import { Button, buttonVariants } from "../ui/button"
@@ -147,7 +147,7 @@ export function FrontendSkinSystemCard() {
     <div className="space-y-3">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("settingsPage.frontendSkinsTitle")}</h3>
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t("settingsPage.frontendSkinsTitle")}</h3>
           <p className="mt-1 max-w-3xl text-xs text-slate-500 dark:text-slate-400">{t("settingsPage.frontendSkinsDescription")}</p>
         </div>
         <Badge variant="outline" className="w-fit border-border bg-card text-muted-foreground">
@@ -178,7 +178,7 @@ export function FrontendSkinSystemCard() {
                     className="enterprise-outline-control h-11 rounded-xl px-4"
                     disabled={busy === "github" || repositoryUrl.trim() === ""}
                   >
-                    {busy === "github" ? <DownloadCloud className="h-4 w-4 animate-pulse" aria-hidden /> : <Github className="h-4 w-4" aria-hidden />}
+                    {busy === "github" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Github className="h-4 w-4" aria-hidden />}
                     {busy === "github" ? t("settingsPage.frontendSkinInstalling") : t("settingsPage.frontendSkinGitHubInstall")}
                   </Button>
                 </div>
