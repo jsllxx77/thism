@@ -117,6 +117,32 @@ export function getLatestMetricRate(
   return deltaValue / deltaTs
 }
 
+export function getMetricRangeDelta(
+  metrics: ReadonlyArray<MetricsRow>,
+  selectValue: MetricsValueSelector,
+): number | undefined {
+  let total = 0
+  let hasDelta = false
+
+  for (const segment of splitMetricSegments(metrics)) {
+    for (let index = 1; index < segment.length; index += 1) {
+      const previous = segment[index - 1]
+      const current = segment[index]
+      const deltaTs = current.ts - previous.ts
+      const deltaValue = selectValue(current) - selectValue(previous)
+
+      if (deltaTs <= 0 || deltaValue < 0) {
+        continue
+      }
+
+      total += deltaValue
+      hasDelta = true
+    }
+  }
+
+  return hasDelta ? total : undefined
+}
+
 export function buildNodeDetailMetricSeries(
   metrics: ReadonlyArray<MetricsRow>,
   rangeSeconds: number,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond } from "../lib/units"
-import { appendLiveMetricPoint, buildNodeDetailMetricSeries, getLatestMetricRate } from "../lib/metric-series"
+import { appendLiveMetricPoint, buildNodeDetailMetricSeries, getLatestMetricRate, getMetricRangeDelta } from "../lib/metric-series"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
@@ -283,8 +283,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     typeof latestMetricPoint?.uptime_seconds === "number" && latestMetricPoint.uptime_seconds > 0
       ? latestMetricPoint.uptime_seconds
       : node?.latest_metrics?.uptime_seconds
-  const latestInboundTotal = formatOptionalBytes(latestMetricPoint?.net_rx)
-  const latestOutboundTotal = formatOptionalBytes(latestMetricPoint?.net_tx)
+  const latestInboundTotal = formatOptionalBytes(getMetricRangeDelta(metrics, (row) => row.net_rx))
+  const latestOutboundTotal = formatOptionalBytes(getMetricRangeDelta(metrics, (row) => row.net_tx))
   const latestInboundSpeed = formatOptionalBytesPerSecond(getLatestMetricRate(metrics, (row) => row.net_rx))
   const latestOutboundSpeed = formatOptionalBytesPerSecond(getLatestMetricRate(metrics, (row) => row.net_tx))
   const networkSummary = (

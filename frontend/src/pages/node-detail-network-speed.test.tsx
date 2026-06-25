@@ -127,7 +127,7 @@ describe("node detail network speed", () => {
     expect(screen.getAllByText("Outbound Speed").length).toBeGreaterThanOrEqual(2)
   })
 
-  it("shows totals but keeps speed as placeholder until a second sample exists", async () => {
+  it("keeps traffic totals and speeds as placeholders until a second sample exists", async () => {
     metricsMock.mockResolvedValue({
       metrics: [
         {
@@ -152,9 +152,7 @@ describe("node detail network speed", () => {
     const summary = screen.getByRole("region", { name: "Network summary" })
     expect(within(summary).getByText("Inbound Total")).toBeInTheDocument()
     expect(within(summary).getByText("Outbound Total")).toBeInTheDocument()
-    expect(within(summary).getByText("1.0 KB")).toBeInTheDocument()
-    expect(within(summary).getByText("2.0 KB")).toBeInTheDocument()
-    expect(within(summary).getAllByText("—")).toHaveLength(2)
+    expect(within(summary).getAllByText("—")).toHaveLength(4)
   })
 
   it("updates the network summary when a live websocket metric arrives", async () => {
@@ -257,8 +255,8 @@ describe("node detail network speed", () => {
     })
 
     const summary = screen.getByRole("region", { name: "Network summary" })
-    expect(within(summary).getByText("512.0 B")).toBeInTheDocument()
-    expect(within(summary).getByText("1.0 KB")).toBeInTheDocument()
+    expect(within(summary).getByText("5.0 MB")).toBeInTheDocument()
+    expect(within(summary).getByText("2.0 MB")).toBeInTheDocument()
     expect(within(summary).getAllByText("—")).toHaveLength(2)
     expect(within(summary).queryByText("512.0 KB/s")).not.toBeInTheDocument()
     expect(within(summary).queryByText("204.8 KB/s")).not.toBeInTheDocument()

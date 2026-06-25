@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildMetricChartSeries, buildMetricRateChartSeries, buildNodeDetailMetricSeries, getLatestMetricRate } from "./metric-series"
+import { buildMetricChartSeries, buildMetricRateChartSeries, buildNodeDetailMetricSeries, getLatestMetricRate, getMetricRangeDelta } from "./metric-series"
 import type { MetricsRow } from "./api"
 
 function metric(overrides: Partial<MetricsRow>): MetricsRow {
@@ -89,5 +89,17 @@ describe("metric-series", () => {
     ]
 
     expect(getLatestMetricRate(recoveredMetrics, (row) => row.net_rx)).toBe(100)
+  })
+
+  it("sums range deltas without crossing reboot segments", () => {
+    const metrics = [
+      metric({ ts: 100, net_rx: 1000, uptime_seconds: 1000 }),
+      metric({ ts: 105, net_rx: 1500, uptime_seconds: 1005 }),
+      metric({ ts: 110, net_rx: 200, uptime_seconds: 5 }),
+      metric({ ts: 115, net_rx: 700, uptime_seconds: 10 }),
+    ]
+
+    expect(getMetricRangeDelta(metrics, (row) => row.net_rx)).toBe(1000)
+    expect(getMetricRangeDelta([metrics[0]], (row) => row.net_rx)).toBeUndefined()
   })
 })
