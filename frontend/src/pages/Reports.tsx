@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useReducedMotion } from "framer-motion"
+import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { api, type AvailabilityReport, type NodeAvailabilityReport } from "../lib/api"
 import { useLanguage } from "../i18n/language"
@@ -13,6 +14,12 @@ const RANGE_OPTIONS = [
 ] as const
 
 type RangeKey = (typeof RANGE_OPTIONS)[number]["key"]
+type SortKey = "name" | "availability" | "offline" | "outages" | "p95Latency" | "recentOutage" | "lastSeen"
+type SortDirection = "asc" | "desc"
+type SortState = {
+  key: SortKey
+  direction: SortDirection
+}
 
 const SLA_DISTRIBUTION_COLORS = {
   excellent: "#0f766e",
@@ -38,10 +45,59 @@ function formatLatency(value?: number | null) {
   return typeof value === "number" ? `${value.toFixed(1)} ms` : "—"
 }
 
+function getRecentOutageTimestamp(row: NodeAvailabilityReport) {
+  return row.last_outage_end ?? row.last_outage_start ?? null
+}
+
+function getRecentOutageDuration(row: NodeAvailabilityReport) {
+  if (typeof row.last_outage_start !== "number" || typeof row.last_outage_end !== "number") {
+    return null
+  }
+  return Math.max(0, row.last_outage_end - row.last_outage_start)
+}
+
 function availabilityColor(value: number) {
   if (value >= 99.9) return "#0f766e"
   if (value >= 99) return "#2563eb"
   return "#d97706"
+}
+
+function compareNullableValues(left: string | number | null, right: string | number | null, direction: SortDirection) {
+  if (left == null && right == null) return 0
+  if (left == null) return 1
+  if (right == null) return -1
+
+  const result = typeof left === "string" && typeof right === "string"
+    ? left.localeCompare(right)
+    : Number(left) - Number(right)
+
+  return direction === "asc" ? result : -result
+}
+
+function sortValue(row: NodeAvailabilityReport, key: SortKey): string | number | null {
+  switch (key) {
+    case "name":
+      return row.name
+    case "availability":
+      return row.availability_percent
+    case "offline":
+      return row.offline_duration_seconds
+    case "outages":
+      return row.outage_count
+    case "p95Latency":
+      return row.latency_p95_ms ?? null
+    case "recentOutage":
+      return getRecentOutageTimestamp(row)
+    case "lastSeen":
+      return row.last_seen > 0 ? row.last_seen : null
+  }
+}
+
+function sortRows(rows: NodeAvailabilityReport[], sort: SortState) {
+  return [...rows].sort((left, right) => {
+    const result = compareNullableValues(sortValue(left, sort.key), sortValue(right, sort.key), sort.direction)
+    return result || left.name.localeCompare(right.name)
+  })
 }
 
 function chartTooltipStyle() {
@@ -81,6 +137,36 @@ function ChartLoadingSkeleton() {
       <div className="chart-skeleton__bar chart-skeleton__bar--two" />
       <div className="chart-skeleton__bar chart-skeleton__bar--three" />
     </div>
+  )
+}
+
+function SortableTableHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className = "",
+}: {
+  label: string
+  sortKey: SortKey
+  sort: SortState
+  onSort: (key: SortKey) => void
+  className?: string
+}) {
+  const active = sort.key === sortKey
+  const Icon = active ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown
+
+  return (
+    <th aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`pb-2 pr-3 font-medium ${className}`.trim()}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1.5 rounded-md text-left transition-colors hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-slate-100"
+      >
+        <span>{label}</span>
+        <Icon className={`h-3.5 w-3.5 ${active ? "text-slate-700 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`} aria-hidden="true" />
+      </button>
+    </th>
   )
 }
 
@@ -284,6 +370,7 @@ export function Reports() {
   const { language, t, formatRelativeLastSeen } = useLanguage()
   const [rangeKey, setRangeKey] = useState<RangeKey>("24h")
   const [tagFilter, setTagFilter] = useState("all")
+  const [sort, setSort] = useState<SortState>({ key: "availability", direction: "asc" })
   const [report, setReport] = useState<AvailabilityReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -314,11 +401,20 @@ export function Reports() {
   const nowMs = Date.now()
 
   const rows = useMemo(() => report?.nodes ?? [], [report])
+  const sortedRows = useMemo(() => sortRows(rows, sort), [rows, sort])
   const reportMotionKey = [
     rangeKey,
     tagFilter,
     rows.map((row) => row.node_id).join("|"),
   ].join(":")
+  const handleSort = useCallback((key: SortKey) => {
+    setSort((current) => {
+      if (current.key !== key) {
+        return { key, direction: key === "name" ? "asc" : "desc" }
+      }
+      return { key, direction: current.direction === "asc" ? "desc" : "asc" }
+    })
+  }, [])
 
   return (
     <MotionSection className="mx-auto max-w-[1440px] space-y-6" testId="motion-reports-root" variant="page">
@@ -414,34 +510,50 @@ export function Reports() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                      <th className="pb-2 pl-3 pr-3 font-medium">{t("reportsPage.node")}</th>
+                      <SortableTableHeader className="pl-3" label={t("reportsPage.node")} sortKey="name" sort={sort} onSort={handleSort} />
                       <th className="pb-2 pr-3 font-medium">{t("reportsPage.tags")}</th>
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.availability")}</th>
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.offline")}</th>
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.outages")}</th>
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.p95Latency")}</th>
-                      <th className="pb-2 pr-3 font-medium">{t("reportsPage.lastSeen")}</th>
+                      <SortableTableHeader label={t("reportsPage.availability")} sortKey="availability" sort={sort} onSort={handleSort} />
+                      <SortableTableHeader label={t("reportsPage.offline")} sortKey="offline" sort={sort} onSort={handleSort} />
+                      <SortableTableHeader label={t("reportsPage.outages")} sortKey="outages" sort={sort} onSort={handleSort} />
+                      <SortableTableHeader label={t("reportsPage.p95Latency")} sortKey="p95Latency" sort={sort} onSort={handleSort} />
+                      <SortableTableHeader label={t("reportsPage.recentOutage")} sortKey="recentOutage" sort={sort} onSort={handleSort} />
+                      <SortableTableHeader label={t("reportsPage.lastSeen")} sortKey="lastSeen" sort={sort} onSort={handleSort} />
                     </tr>
                   </thead>
                   <tbody className="motion-table-body">
-                    {rows.map((row) => (
-                      <tr key={row.node_id} className="motion-table-row border-b border-slate-100 dark:border-slate-800">
-                        <td className="py-2.5 pl-3 pr-3 text-slate-900 dark:text-slate-100">
-                          <div className="font-medium">{row.name}</div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            {t("reportsPage.samples", { observed: row.observed_samples, expected: row.expected_samples })}
-                          </div>
-                        </td>
-                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">
-                          <NodeTagChips tags={row.tags} emptyLabel="—" />
-                        </td>
-                        <td className="py-2.5 pr-3 font-medium text-slate-700 dark:text-slate-200">{formatPercent(row.availability_percent)}</td>
-                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{formatSeconds(row.offline_duration_seconds)}</td>
-                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{row.outage_count.toLocaleString(language)}</td>
-                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{formatLatency(row.latency_p95_ms)}</td>
-                        <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{row.last_seen > 0 ? formatRelativeLastSeen(row.last_seen, nowMs) : "—"}</td>
-                      </tr>
-                    ))}
+                    {sortedRows.map((row) => {
+                      const recentOutageTimestamp = getRecentOutageTimestamp(row)
+                      const recentOutageDuration = getRecentOutageDuration(row)
+
+                      return (
+                        <tr key={row.node_id} className="motion-table-row border-b border-slate-100 dark:border-slate-800">
+                          <td className="py-2.5 pl-3 pr-3 text-slate-900 dark:text-slate-100">
+                            <div className="font-medium">{row.name}</div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {t("reportsPage.samples", { observed: row.observed_samples, expected: row.expected_samples })}
+                            </div>
+                          </td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">
+                            <NodeTagChips tags={row.tags} emptyLabel="—" />
+                          </td>
+                          <td className="py-2.5 pr-3 font-medium text-slate-700 dark:text-slate-200">{formatPercent(row.availability_percent)}</td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{formatSeconds(row.offline_duration_seconds)}</td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{row.outage_count.toLocaleString(language)}</td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{formatLatency(row.latency_p95_ms)}</td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">
+                            {recentOutageTimestamp ? (
+                              <>
+                                <div>{formatRelativeLastSeen(recentOutageTimestamp, nowMs)}</div>
+                                {recentOutageDuration != null ? (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400">{formatSeconds(recentOutageDuration)}</div>
+                                ) : null}
+                              </>
+                            ) : "—"}
+                          </td>
+                          <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{row.last_seen > 0 ? formatRelativeLastSeen(row.last_seen, nowMs) : "—"}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </section>

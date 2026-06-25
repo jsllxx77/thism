@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { api } from "../lib/api"
 import { Reports } from "./Reports"
@@ -58,6 +58,8 @@ function report(overrides = {}) {
         observed_samples: 19,
         offline_duration_seconds: 60,
         outage_count: 1,
+        last_outage_start: Math.floor(Date.now() / 1000) - 120,
+        last_outage_end: Math.floor(Date.now() / 1000) - 60,
         latency_p95_ms: 42.5,
       },
     ],
@@ -66,6 +68,15 @@ function report(overrides = {}) {
 }
 
 describe("reports page", () => {
+  function tableNodeNames() {
+    const table = screen.getByRole("table")
+    return within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent ?? "")
+      .map((text) => text.replace(/\d+ \/ \d+ samples/, "").trim())
+  }
+
   it("loads availability data and refetches when filters change", async () => {
     const user = userEvent.setup()
     const availabilityReportMock = vi.mocked(api.availabilityReport)
@@ -145,6 +156,70 @@ describe("reports page", () => {
     expect(rankingRows.map((row) => row.textContent)).toEqual(["bravo", "charlie", "alpha"])
   })
 
+  it("sorts the SLA table and shows recent outage timing", async () => {
+    const user = userEvent.setup()
+    const now = Math.floor(Date.now() / 1000)
+    vi.mocked(api.availabilityReport).mockResolvedValue(report({
+      nodes: [
+        {
+          node_id: "node-a",
+          name: "alpha",
+          tags: ["prod"],
+          last_seen: now,
+          availability_percent: 99.5,
+          expected_samples: 20,
+          observed_samples: 19,
+          offline_duration_seconds: 60,
+          outage_count: 1,
+          last_outage_start: now - 180,
+          last_outage_end: now - 120,
+          latency_p95_ms: 42.5,
+        },
+        {
+          node_id: "node-b",
+          name: "bravo",
+          tags: ["prod"],
+          last_seen: now,
+          availability_percent: 99.99,
+          expected_samples: 20,
+          observed_samples: 20,
+          offline_duration_seconds: 0,
+          outage_count: 0,
+          latency_p95_ms: 24.1,
+        },
+        {
+          node_id: "node-c",
+          name: "charlie",
+          tags: ["dev"],
+          last_seen: now,
+          availability_percent: 98.2,
+          expected_samples: 20,
+          observed_samples: 18,
+          offline_duration_seconds: 180,
+          outage_count: 2,
+          last_outage_start: now - 360,
+          last_outage_end: now - 240,
+          latency_p95_ms: 31.2,
+        },
+      ],
+    }))
+
+    render(<Reports />)
+
+    await screen.findByRole("columnheader", { name: /Recent outage/i })
+
+    expect(tableNodeNames()).toEqual(["charlie", "alpha", "bravo"])
+    expect(screen.getByText("Recent outage")).toBeInTheDocument()
+    expect(screen.getAllByText("1m").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("2m").length).toBeGreaterThanOrEqual(1)
+
+    await user.click(screen.getByRole("button", { name: /Node/i }))
+    expect(tableNodeNames()).toEqual(["alpha", "bravo", "charlie"])
+
+    await user.click(screen.getByRole("button", { name: /Node/i }))
+    expect(tableNodeNames()).toEqual(["charlie", "bravo", "alpha"])
+  })
+
   it("renders nodes when an older report payload has null tags", async () => {
     vi.mocked(api.availabilityReport).mockResolvedValue(report({
       available_tags: [],
@@ -167,6 +242,6 @@ describe("reports page", () => {
     render(<Reports />)
 
     expect((await screen.findAllByText("alpha")).length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText("—")).toBeInTheDocument()
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1)
   })
 })

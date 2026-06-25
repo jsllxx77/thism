@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildMetricChartSeries, buildMetricRateChartSeries, buildNodeDetailMetricSeries } from "./metric-series"
+import { buildMetricChartSeries, buildMetricRateChartSeries, buildNodeDetailMetricSeries, getLatestMetricRate } from "./metric-series"
 import type { MetricsRow } from "./api"
 
 function metric(overrides: Partial<MetricsRow>): MetricsRow {
@@ -72,5 +72,22 @@ describe("metric-series", () => {
     expect(bundled.diskData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0), "average"))
     expect(bundled.diskReadSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_read_bytes ?? 0))
     expect(bundled.diskWriteSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_write_bytes ?? 0))
+  })
+
+  it("only returns a latest rate when the newest samples are in the same segment", () => {
+    const metrics = [
+      metric({ ts: 100, net_rx: 1000, uptime_seconds: 1000 }),
+      metric({ ts: 105, net_rx: 1500, uptime_seconds: 1005 }),
+      metric({ ts: 110, net_rx: 200, uptime_seconds: 5 }),
+    ]
+
+    expect(getLatestMetricRate(metrics, (row) => row.net_rx)).toBeUndefined()
+
+    const recoveredMetrics = [
+      ...metrics,
+      metric({ ts: 115, net_rx: 700, uptime_seconds: 10 }),
+    ]
+
+    expect(getLatestMetricRate(recoveredMetrics, (row) => row.net_rx)).toBe(100)
   })
 })

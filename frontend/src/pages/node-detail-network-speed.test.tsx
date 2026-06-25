@@ -210,4 +210,57 @@ describe("node detail network speed", () => {
     expect(within(summary).getByText("204.8 KB/s")).toBeInTheDocument()
     expect(within(summary).getByText("102.4 KB/s")).toBeInTheDocument()
   })
+
+  it("does not reuse stale speeds after a reboot until the new segment has two samples", async () => {
+    metricsMock.mockResolvedValue({
+      metrics: [
+        {
+          ts: 100,
+          cpu: 10,
+          mem_used: 100,
+          mem_total: 200,
+          disk_used: 300,
+          disk_total: 600,
+          net_rx: 1024,
+          net_tx: 2048,
+          uptime_seconds: 1000,
+        },
+        {
+          ts: 110,
+          cpu: 15,
+          mem_used: 110,
+          mem_total: 200,
+          disk_used: 310,
+          disk_total: 600,
+          net_rx: 1024 + 5 * 1024 * 1024,
+          net_tx: 2048 + 2 * 1024 * 1024,
+          uptime_seconds: 1010,
+        },
+        {
+          ts: 120,
+          cpu: 12,
+          mem_used: 90,
+          mem_total: 200,
+          disk_used: 250,
+          disk_total: 600,
+          net_rx: 512,
+          net_tx: 1024,
+          uptime_seconds: 5,
+        },
+      ],
+    })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText("alpha")).toBeInTheDocument()
+    })
+
+    const summary = screen.getByRole("region", { name: "Network summary" })
+    expect(within(summary).getByText("512.0 B")).toBeInTheDocument()
+    expect(within(summary).getByText("1.0 KB")).toBeInTheDocument()
+    expect(within(summary).getAllByText("—")).toHaveLength(2)
+    expect(within(summary).queryByText("512.0 KB/s")).not.toBeInTheDocument()
+    expect(within(summary).queryByText("204.8 KB/s")).not.toBeInTheDocument()
+  })
 })

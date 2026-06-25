@@ -151,6 +151,7 @@ export const messagesZhCN = {
       offline: "离线时长",
       outages: "中断次数",
       p95Latency: "P95 延迟",
+      recentOutage: "最近中断",
       lastSeen: "最后在线",
       samples: "{observed} / {expected} 个样本",
       chartAvailabilityRanking: "可用性排行",

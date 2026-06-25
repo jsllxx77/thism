@@ -151,6 +151,7 @@ export const messagesEn = {
       offline: "Offline",
       outages: "Outages",
       p95Latency: "P95 latency",
+      recentOutage: "Recent outage",
       lastSeen: "Last seen",
       samples: "{observed} / {expected} samples",
       chartAvailabilityRanking: "Availability ranking",

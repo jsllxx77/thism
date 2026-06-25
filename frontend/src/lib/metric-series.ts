@@ -91,6 +91,32 @@ export function buildMetricRateChartSeries(
   return mergeSegmentedSeries(segments, getChartPointBudget(rangeSeconds), "average")
 }
 
+export function getLatestMetricRate(
+  metrics: ReadonlyArray<MetricsRow>,
+  selectValue: MetricsValueSelector,
+): number | undefined {
+  if (metrics.length < 2) {
+    return undefined
+  }
+
+  const gapThreshold = getGapBreakThreshold(metrics)
+  const current = metrics[metrics.length - 1]
+  const previous = metrics[metrics.length - 2]
+
+  if (shouldBreakMetricSegment(previous, current, gapThreshold)) {
+    return undefined
+  }
+
+  const deltaTs = current.ts - previous.ts
+  const deltaValue = selectValue(current) - selectValue(previous)
+
+  if (deltaTs <= 0 || deltaValue < 0) {
+    return undefined
+  }
+
+  return deltaValue / deltaTs
+}
+
 export function buildNodeDetailMetricSeries(
   metrics: ReadonlyArray<MetricsRow>,
   rangeSeconds: number,

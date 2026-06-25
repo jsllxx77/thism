@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond } from "../lib/units"
-import { appendLiveMetricPoint, buildNodeDetailMetricSeries } from "../lib/metric-series"
+import { appendLiveMetricPoint, buildNodeDetailMetricSeries, getLatestMetricRate } from "../lib/metric-series"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
@@ -45,17 +45,6 @@ function isDesktopViewport() {
   }
 
   return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches
-}
-
-function getLatestValidValue(points: ReadonlyArray<{ value: number | null }>): number | undefined {
-  for (let index = points.length - 1; index >= 0; index -= 1) {
-    const value = points[index]?.value
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value
-    }
-  }
-
-  return undefined
 }
 
 function formatOptionalBytes(value: number | undefined): string {
@@ -296,8 +285,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
       : node?.latest_metrics?.uptime_seconds
   const latestInboundTotal = formatOptionalBytes(latestMetricPoint?.net_rx)
   const latestOutboundTotal = formatOptionalBytes(latestMetricPoint?.net_tx)
-  const latestInboundSpeed = formatOptionalBytesPerSecond(getLatestValidValue(netRxSpeedData))
-  const latestOutboundSpeed = formatOptionalBytesPerSecond(getLatestValidValue(netTxSpeedData))
+  const latestInboundSpeed = formatOptionalBytesPerSecond(getLatestMetricRate(metrics, (row) => row.net_rx))
+  const latestOutboundSpeed = formatOptionalBytesPerSecond(getLatestMetricRate(metrics, (row) => row.net_tx))
   const networkSummary = (
     <NetworkSummary
       inboundTotal={latestInboundTotal}
