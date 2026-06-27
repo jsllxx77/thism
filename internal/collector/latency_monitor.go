@@ -28,7 +28,7 @@ type latencyMonitorState struct {
 	lastRun time.Time
 }
 
-const latencyProbeSamplesPerCycle = 5
+const latencyProbeSamplesPerCycle = 10
 
 var pingLatencyPattern = regexp.MustCompile(`time[=<]([0-9.]+)\s*ms`)
 
@@ -137,9 +137,27 @@ func (c *Collector) probeLatencyMonitor(monitor models.LatencyMonitor) (float64,
 func (c *Collector) probeLatencyMonitorSummary(monitor models.LatencyMonitor) (float64, float64, *float64, error) {
 	latencies := make([]float64, 0, latencyProbeSamplesPerCycle)
 	failures := 0
+	attempts := 0
 	var lastErr error
 
+	// Bound the total time spent probing within a single cycle. Probes run
+	// serially and a dead target can stall on each probe's own timeout (HTTP
+	// up to 10s), so a full sample run could otherwise exceed the monitor's
+	// interval. We spend at most 3/4 of the interval, leaving headroom for the
+	// cycle to finish before the next tick, and always take at least one
+	// sample regardless of budget.
+	start := c.currentTime()
+	var deadline time.Time
+	if monitor.IntervalSeconds > 0 {
+		budget := time.Duration(monitor.IntervalSeconds) * time.Second * 3 / 4
+		deadline = start.Add(budget)
+	}
+
 	for attempt := 0; attempt < latencyProbeSamplesPerCycle; attempt++ {
+		if attempt > 0 && !deadline.IsZero() && !c.currentTime().Before(deadline) {
+			break
+		}
+		attempts++
 		latency, err := c.probeLatencyMonitor(monitor)
 		if err != nil {
 			failures++
@@ -149,7 +167,13 @@ func (c *Collector) probeLatencyMonitorSummary(monitor models.LatencyMonitor) (f
 		latencies = append(latencies, latency)
 	}
 
-	lossPercent := (float64(failures) / float64(latencyProbeSamplesPerCycle)) * 100
+	// Loss is measured against attempts actually made, not the configured
+	// sample count, so a budget-truncated cycle never reports unmeasured
+	// samples as lost.
+	lossPercent := 0.0
+	if attempts > 0 {
+		lossPercent = (float64(failures) / float64(attempts)) * 100
+	}
 	if len(latencies) == 0 {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("probe failed")
@@ -173,17 +197,20 @@ func averageLatency(latencies []float64) float64 {
 	return total / float64(len(latencies))
 }
 
+// jitterLatency returns packet delay variation following the RFC 3550 spirit:
+// the mean of the absolute differences between consecutive latency samples.
+// This reflects how much latency swings probe-to-probe, which is what network
+// "jitter" conventionally means (as opposed to the standard deviation around
+// the mean). Requires at least two samples to have a consecutive pair.
 func jitterLatency(latencies []float64) *float64 {
 	if len(latencies) < 2 {
 		return nil
 	}
-	mean := averageLatency(latencies)
-	totalVariance := 0.0
-	for _, latency := range latencies {
-		delta := latency - mean
-		totalVariance += delta * delta
+	totalDelta := 0.0
+	for i := 1; i < len(latencies); i++ {
+		totalDelta += math.Abs(latencies[i] - latencies[i-1])
 	}
-	value := math.Sqrt(totalVariance / float64(len(latencies)))
+	value := totalDelta / float64(len(latencies)-1)
 	return &value
 }
 

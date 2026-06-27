@@ -109,8 +109,8 @@ func TestCollectorLatencyProbeScheduling(t *testing.T) {
 	collector.runDueLatencyMonitors(conn, &writeMu, time.Unix(159, 0))
 	collector.runDueLatencyMonitors(conn, &writeMu, time.Unix(160, 0))
 
-	if callCount != 10 {
-		t.Fatalf("expected 10 probe attempts across 2 cycles, got %d", callCount)
+	if callCount != 20 {
+		t.Fatalf("expected 20 probe attempts across 2 cycles, got %d", callCount)
 	}
 
 	results := decodeLatencyResults(t, conn.writes)
@@ -144,7 +144,7 @@ func TestCollectorLatencyProbeResultPayloads(t *testing.T) {
 		}
 		return 15, nil
 	}
-	httpAttemptValues := []float64{20, 24, 22, 26, 28}
+	httpAttemptValues := []float64{20, 24, 22, 26, 28, 20, 24, 22, 26, 28}
 	collector.httpLatencyProbe = func(target string) (float64, error) {
 		if target != "https://example.com/healthz" {
 			t.Fatalf("unexpected http target %q", target)
@@ -182,7 +182,7 @@ func TestCollectorLatencyProbeResultPayloads(t *testing.T) {
 	if byID["tcp-1"].LatencyMs == nil || !byID["tcp-1"].Success || byID["tcp-1"].ErrorMessage != "" {
 		t.Fatalf("unexpected tcp result: %#v", byID["tcp-1"])
 	}
-	if byID["tcp-1"].LossPercent == nil || *byID["tcp-1"].LossPercent != 40 {
+	if byID["tcp-1"].LossPercent == nil || *byID["tcp-1"].LossPercent != 20 {
 		t.Fatalf("unexpected tcp loss: %#v", byID["tcp-1"])
 	}
 	if byID["tcp-1"].JitterMs == nil {
@@ -227,7 +227,7 @@ func TestCollectorLatencyProbeAggregationSkipsJitterWithSingleSuccess(t *testing
 	if results[0].LatencyMs == nil || *results[0].LatencyMs != 18 {
 		t.Fatalf("unexpected latency: %#v", results[0])
 	}
-	if results[0].LossPercent == nil || *results[0].LossPercent != 80 {
+	if results[0].LossPercent == nil || *results[0].LossPercent != 90 {
 		t.Fatalf("unexpected loss percent: %#v", results[0])
 	}
 	if results[0].JitterMs != nil {
@@ -252,5 +252,47 @@ func TestCollectorLatencyMonitorWriteErrorIsReturned(t *testing.T) {
 	err := collector.runDueLatencyMonitors(conn, &writeMu, time.Unix(100, 0))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected write error %v, got %v", wantErr, err)
+	}
+}
+
+func TestCollectorLatencyProbeBudgetTruncatesCycle(t *testing.T) {
+	collector := NewWithInterval("ws://localhost:12026", "token", "node", "", DefaultReportInterval)
+	collector.applyLatencyMonitorConfig([]models.LatencyMonitor{
+		{ID: "http-1", Name: "HTTP", Type: models.LatencyMonitorTypeHTTP, Target: "https://example.com/healthz", IntervalSeconds: 60},
+	})
+
+	// Simulated clock: each probe "spends" 20s. With a 60s interval the budget
+	// is 45s, so after the 1st (t=0), 2nd (t=20) and 3rd (t=40) probes the
+	// clock reaches 60s, which is past the deadline and stops further probing.
+	current := time.Unix(1000, 0)
+	collector.now = func() time.Time { return current }
+
+	attempts := 0
+	collector.httpLatencyProbe = func(_ string) (float64, error) {
+		attempts++
+		current = current.Add(20 * time.Second)
+		return 0, errors.New("dial timeout")
+	}
+
+	conn := &latencyTestConn{}
+	var writeMu sync.Mutex
+
+	collector.runDueLatencyMonitors(conn, &writeMu, current)
+
+	if attempts != 3 {
+		t.Fatalf("expected probing to stop at 3 attempts within budget, got %d", attempts)
+	}
+
+	results := decodeLatencyResults(t, conn.writes)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 latency result message, got %#v", results)
+	}
+	// All 3 attempts failed, so loss must be measured against attempts (3/3 =
+	// 100%), never against the configured sample count (which would give 30%).
+	if results[0].LossPercent == nil || *results[0].LossPercent != 100 {
+		t.Fatalf("expected loss measured against attempts (100%%), got %#v", results[0].LossPercent)
+	}
+	if results[0].Success {
+		t.Fatalf("expected failure result when all probes fail: %#v", results[0])
 	}
 }
