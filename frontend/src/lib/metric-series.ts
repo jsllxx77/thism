@@ -91,6 +91,53 @@ export function buildMetricRateChartSeries(
   return mergeSegmentedSeries(segments, getChartPointBudget(rangeSeconds), "average")
 }
 
+export function buildMetricDeltaChartSeries(
+  metrics: ReadonlyArray<MetricsRow>,
+  rangeSeconds: number,
+  selectValue: MetricsValueSelector,
+): ChartPoint[] {
+  let runningTotal = 0
+  let hasDelta = false
+  const chartSegments: SeriesPoint[][] = []
+
+  for (const segment of splitMetricSegments(metrics)) {
+    if (segment.length < 2) {
+      continue
+    }
+
+    let points: SeriesPoint[] = [{ ts: segment[0].ts, value: runningTotal }]
+
+    for (let index = 1; index < segment.length; index += 1) {
+      const previous = segment[index - 1]
+      const current = segment[index]
+      const deltaTs = current.ts - previous.ts
+      const deltaValue = selectValue(current) - selectValue(previous)
+
+      if (deltaTs <= 0 || deltaValue < 0) {
+        if (points.length > 1) {
+          chartSegments.push(points)
+        }
+        points = [{ ts: current.ts, value: runningTotal }]
+        continue
+      }
+
+      runningTotal += deltaValue
+      hasDelta = true
+      points.push({ ts: current.ts, value: runningTotal })
+    }
+
+    if (points.length > 1) {
+      chartSegments.push(points)
+    }
+  }
+
+  if (!hasDelta) {
+    return []
+  }
+
+  return mergeSegmentedSeries(chartSegments, getChartPointBudget(rangeSeconds), "last")
+}
+
 export function getLatestMetricRate(
   metrics: ReadonlyArray<MetricsRow>,
   selectValue: MetricsValueSelector,
@@ -197,8 +244,8 @@ export function buildNodeDetailMetricSeries(
   return {
     cpuData: mergeSegmentedSeries(segments.map((segment) => segment.cpu), targetPoints, "average"),
     memData: mergeSegmentedSeries(segments.map((segment) => segment.memory), targetPoints, "average"),
-    netRxData: mergeSegmentedSeries(segments.map((segment) => segment.netRx), targetPoints, "last"),
-    netTxData: mergeSegmentedSeries(segments.map((segment) => segment.netTx), targetPoints, "last"),
+    netRxData: buildMetricDeltaChartSeries(metrics, rangeSeconds, (row) => row.net_rx),
+    netTxData: buildMetricDeltaChartSeries(metrics, rangeSeconds, (row) => row.net_tx),
     netRxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netRxSpeed), targetPoints, "average"),
     netTxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netTxSpeed), targetPoints, "average"),
     diskData: mergeSegmentedSeries(segments.map((segment) => segment.disk), targetPoints, "average"),

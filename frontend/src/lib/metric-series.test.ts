@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { buildMetricChartSeries, buildMetricRateChartSeries, buildNodeDetailMetricSeries, getLatestMetricRate, getMetricRangeDelta } from "./metric-series"
+import {
+  buildMetricChartSeries,
+  buildMetricDeltaChartSeries,
+  buildMetricRateChartSeries,
+  buildNodeDetailMetricSeries,
+  getLatestMetricRate,
+  getMetricRangeDelta,
+} from "./metric-series"
 import type { MetricsRow } from "./api"
 
 function metric(overrides: Partial<MetricsRow>): MetricsRow {
@@ -65,8 +72,8 @@ describe("metric-series", () => {
 
     expect(bundled.cpuData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => row.cpu, "average"))
     expect(bundled.memData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => (row.mem_total > 0 ? (row.mem_used / row.mem_total) * 100 : 0), "average"))
-    expect(bundled.netRxData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => row.net_rx, "last"))
-    expect(bundled.netTxData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => row.net_tx, "last"))
+    expect(bundled.netRxData).toEqual(buildMetricDeltaChartSeries(metrics, 604800, (row) => row.net_rx))
+    expect(bundled.netTxData).toEqual(buildMetricDeltaChartSeries(metrics, 604800, (row) => row.net_tx))
     expect(bundled.netRxSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.net_rx))
     expect(bundled.netTxSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.net_tx))
     expect(bundled.diskData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0), "average"))
@@ -101,5 +108,22 @@ describe("metric-series", () => {
 
     expect(getMetricRangeDelta(metrics, (row) => row.net_rx)).toBe(1000)
     expect(getMetricRangeDelta([metrics[0]], (row) => row.net_rx)).toBeUndefined()
+  })
+
+  it("builds range traffic charts from cumulative counter deltas", () => {
+    const metrics = [
+      metric({ ts: 100, net_rx: 1000, uptime_seconds: 1000 }),
+      metric({ ts: 105, net_rx: 1500, uptime_seconds: 1005 }),
+      metric({ ts: 110, net_rx: 200, uptime_seconds: 5 }),
+      metric({ ts: 115, net_rx: 700, uptime_seconds: 10 }),
+    ]
+
+    expect(buildMetricDeltaChartSeries(metrics, 604800, (row) => row.net_rx)).toEqual([
+      { ts: 100, value: 0 },
+      { ts: 105, value: 500 },
+      { ts: 109, value: null },
+      { ts: 110, value: 500 },
+      { ts: 115, value: 1000 },
+    ])
   })
 })
