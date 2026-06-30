@@ -264,12 +264,12 @@ function AbnormalQuickFilters({
               onClick={() => onChange(option.value)}
               className={`h-10 cursor-pointer rounded-xl border px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 active
-                  ? "border-slate-300 bg-slate-900 text-white shadow-sm dark:border-white/10 dark:bg-slate-50 dark:text-slate-950"
+                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
                   : "border-slate-200 bg-white/70 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700"
               }`}
             >
               <span>{option.label}</span>
-              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-white/15" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300"}`}>
+              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-primary-foreground/15 text-primary-foreground" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300"}`}>
                 {counts[option.value].toLocaleString(language)}
               </span>
             </button>

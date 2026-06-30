@@ -295,7 +295,10 @@ describe("reports page", () => {
 
     render(<Reports />)
 
-    expect(await screen.findByRole("button", { name: "Current offline" })).toBeInTheDocument()
+    const allFilter = await screen.findByRole("button", { name: "All" })
+    expect(allFilter).toHaveClass("bg-primary")
+    expect(allFilter).toHaveClass("text-primary-foreground")
+    expect(screen.getByRole("button", { name: "Current offline" })).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Current offline" }))
     expect(tableNodeNames()).toEqual(["bravo"])
