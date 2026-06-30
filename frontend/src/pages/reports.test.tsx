@@ -73,7 +73,11 @@ describe("reports page", () => {
     return within(table)
       .getAllByRole("row")
       .slice(1)
-      .map((row) => within(row).getAllByRole("cell")[0]?.textContent ?? "")
+      .map((row) => {
+        const firstCell = within(row).getAllByRole("cell")[0]
+        const nodeButton = firstCell ? within(firstCell).queryByRole("button") : null
+        return nodeButton?.textContent ?? firstCell?.textContent ?? ""
+      })
       .map((text) => text.replace(/\d+ \/ \d+ samples/, "").trim())
   }
 
@@ -243,5 +247,104 @@ describe("reports page", () => {
 
     expect((await screen.findAllByText("alpha")).length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("filters the SLA table to abnormal nodes", async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.availabilityReport).mockResolvedValue(report({
+      range: { from: 9800, to: 10000 },
+      nodes: [
+        {
+          node_id: "node-a",
+          name: "alpha",
+          tags: ["prod"],
+          last_seen: 9990,
+          availability_percent: 99.95,
+          expected_samples: 20,
+          observed_samples: 20,
+          offline_duration_seconds: 0,
+          outage_count: 0,
+          latency_p95_ms: 25,
+        },
+        {
+          node_id: "node-b",
+          name: "bravo",
+          tags: ["prod"],
+          last_seen: 9600,
+          availability_percent: 97.5,
+          expected_samples: 20,
+          observed_samples: 16,
+          offline_duration_seconds: 300,
+          outage_count: 2,
+          latency_p95_ms: 410,
+        },
+        {
+          node_id: "node-c",
+          name: "charlie",
+          tags: ["dev"],
+          last_seen: 9990,
+          availability_percent: 99.7,
+          expected_samples: 20,
+          observed_samples: 19,
+          offline_duration_seconds: 60,
+          outage_count: 1,
+          latency_p95_ms: 80,
+        },
+      ],
+    }))
+
+    render(<Reports />)
+
+    expect(await screen.findByRole("button", { name: "Current offline" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Current offline" }))
+    expect(tableNodeNames()).toEqual(["bravo"])
+
+    await user.click(screen.getByRole("button", { name: "Below 99%" }))
+    expect(tableNodeNames()).toEqual(["bravo"])
+
+    await user.click(screen.getByRole("button", { name: "Has outages" }))
+    expect(tableNodeNames()).toEqual(["bravo", "charlie"])
+
+    await user.click(screen.getByRole("button", { name: "High P95" }))
+    expect(tableNodeNames()).toEqual(["bravo"])
+  })
+
+  it("opens a node detail drawer from the SLA table", async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.availabilityReport).mockResolvedValue(report({
+      range: { from: 9800, to: 10000 },
+      nodes: [
+        {
+          node_id: "node-b",
+          name: "bravo",
+          tags: ["prod", "edge"],
+          last_seen: 9600,
+          availability_percent: 97.5,
+          expected_samples: 20,
+          observed_samples: 16,
+          offline_duration_seconds: 300,
+          outage_count: 2,
+          last_outage_start: 9500,
+          last_outage_end: 9600,
+          latency_p50_ms: 120,
+          latency_p95_ms: 410,
+        },
+      ],
+    }))
+
+    render(<Reports />)
+
+    await user.click(await screen.findByRole("button", { name: "Open details for bravo" }))
+
+    const dialog = screen.getByRole("dialog", { name: "bravo report details" })
+    expect(within(dialog).getByText("Currently offline")).toBeInTheDocument()
+    expect(within(dialog).getByText("97.50%")).toBeInTheDocument()
+    expect(within(dialog).getByText("Sample coverage")).toBeInTheDocument()
+    expect(within(dialog).getByText("16 / 20 samples")).toBeInTheDocument()
+    expect(within(dialog).getByText("P50 latency")).toBeInTheDocument()
+    expect(within(dialog).getByText("120.0 ms")).toBeInTheDocument()
+    expect(within(dialog).getByText("Last outage window")).toBeInTheDocument()
+    expect(within(dialog).getByText("1m 40s")).toBeInTheDocument()
   })
 })
