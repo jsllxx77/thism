@@ -21,7 +21,17 @@ type LiveMetricsSample = {
   lastNet?: LiveNetSample
 }
 type LiveMetrics = Record<string, LiveMetricsSample>
+type DashboardViewMode = "cards" | "table"
+
+const DASHBOARD_VIEW_MODE_STORAGE_KEY = "thism-dashboard-view-mode"
+
 const NodeTable = lazy(async () => ({ default: (await import("../components/dashboard/NodeTable")).NodeTable }))
+
+function getInitialDashboardViewMode(): DashboardViewMode {
+  if (typeof window === "undefined") return "cards"
+  const stored = window.localStorage.getItem(DASHBOARD_VIEW_MODE_STORAGE_KEY)
+  return stored === "table" || stored === "cards" ? stored : "cards"
+}
 
 function snapshotToLive(node: Node): LiveMetrics[string] | null {
   const snapshot = node.latest_metrics
@@ -55,7 +65,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
   const [searchFilter, setSearchFilter] = useState("")
   const [tagFilter, setTagFilter] = useState("all")
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards")
+  const [viewMode, setViewMode] = useState<DashboardViewMode>(getInitialDashboardViewMode)
   const [loadingNodes, setLoadingNodes] = useState(true)
   const [nodesError, setNodesError] = useState<string | null>(null)
 
@@ -152,6 +162,11 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
       cancelled = true
     }
   }, [refreshNonce])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(DASHBOARD_VIEW_MODE_STORAGE_KEY, viewMode)
+  }, [viewMode])
 
   useEffect(() => {
     void loadNodes()
@@ -363,7 +378,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
                   </div>
                 }
               >
-                <NodeTable nodes={filteredNodes} onSelectNode={onSelectNode} />
+                <NodeTable nodes={filteredNodes} liveMetrics={live} onSelectNode={onSelectNode} />
               </Suspense>
             </div>
           ) : (

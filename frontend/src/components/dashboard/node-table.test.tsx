@@ -14,6 +14,18 @@ function node(overrides: Partial<Node>): Node {
     created_at: 0,
     last_seen: 0,
     online: true,
+    latest_metrics: {
+      ts: 100,
+      cpu: 24.4,
+      mem_used: 3 * 1024 ** 3,
+      mem_total: 8 * 1024 ** 3,
+      disk_used: 40 * 1024 ** 3,
+      disk_total: 100 * 1024 ** 3,
+      disk_read_bytes: 0,
+      disk_write_bytes: 0,
+      net_rx: 12 * 1024 ** 3,
+      net_tx: 2 * 1024 ** 3,
+    },
     ...overrides,
   }
 }
@@ -48,33 +60,46 @@ describe("node table", () => {
     expect(onSelect).toHaveBeenCalledWith("n2")
   })
 
-  it("shows agent versions with a fallback when unavailable", () => {
-    render(
+  it("shows operational metric columns with formatted resource values", () => {
+    const { container } = render(
       <NodeTable
         nodes={[
-          { ...node({ id: "n1", name: "alpha" }), agent_version: "cda21ec8f20b" } as Node,
-          node({ id: "n2", name: "beta" }),
+          node({ id: "n1", name: "alpha", os: "linux", arch: "amd64" }),
+          node({ id: "n2", name: "beta", latest_metrics: null }),
         ]}
         onSelectNode={vi.fn()}
       />
     )
+    const table = container.querySelector("table") as HTMLElement
 
-    expect(screen.getByRole("columnheader", { name: "Agent" })).toBeInTheDocument()
-    expect(screen.getByText("cda21ec8f20b")).toBeInTheDocument()
-    expect(screen.getByText("—")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Operating System" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "CPU" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Memory" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Disk" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Network" })).toBeInTheDocument()
+    expect(within(table).getAllByText("linux/amd64").length).toBeGreaterThan(0)
+    expect(within(table).getByText("24.4%")).toBeInTheDocument()
+    expect(within(table).getByText("24.4%").parentElement?.parentElement?.className).toContain("grid-rows-[1.25rem_0.375rem_1rem]")
+    expect(within(table).getByText("37.5%")).toBeInTheDocument()
+    expect(within(table).getByText("40.0%")).toBeInTheDocument()
+    expect(within(table).getByText("↓ 12G")).toBeInTheDocument()
+    expect(within(table).getByText("↑ 2G")).toBeInTheDocument()
   })
 
   it("includes dark-safe classes for buttons and row text", () => {
-    render(<NodeTable nodes={[node({ id: "n1", name: "alpha", online: true })]} onSelectNode={vi.fn()} />)
+    const { container } = render(<NodeTable nodes={[node({ id: "n1", name: "alpha", online: true })]} onSelectNode={vi.fn()} />)
+    const table = container.querySelector("table") as HTMLElement
 
     const sortByName = screen.getByRole("button", { name: "Node Name" })
-    const rowNameCell = screen.getByText("alpha")
-    const rowNameButton = screen.getByRole("button", { name: "Open node alpha" })
-    const statusCell = screen.getByText("Online")
+    const rowNameCell = within(table).getByText("alpha")
+    const rowNameButton = within(table).getByRole("button", { name: "Open node alpha" })
+    const statusCell = within(table).getByText("Online")
+    const osCell = within(table).getByText("linux/amd64")
 
     expect(sortByName.className).toContain("dark:hover:text-slate-200")
     expect(rowNameButton.className).toContain("dark:text-slate-100")
     expect(rowNameCell.tagName).toBe("SPAN")
+    expect(osCell.className).toContain("dark:text-slate-300")
     expect(statusCell.className).toContain("dark:text-emerald-300")
   })
 
@@ -89,7 +114,7 @@ describe("node table", () => {
       />
     )
 
-    const rowButton = screen.getByRole("button", { name: "Open node alpha" })
+    const rowButton = screen.getAllByRole("button", { name: "Open node alpha" })[0]
     rowButton.focus()
     await user.keyboard("{Enter}")
 
@@ -97,19 +122,36 @@ describe("node table", () => {
   })
 
   it("shows a country flag before the node name in table view when country code is available", () => {
-    render(<NodeTable nodes={[node({ id: "n1", name: "alpha", country_code: "HK", online: true })]} onSelectNode={vi.fn()} />)
+    const { container } = render(<NodeTable nodes={[node({ id: "n1", name: "alpha", country_code: "HK", online: true })]} onSelectNode={vi.fn()} />)
+    const table = container.querySelector("table") as HTMLElement
 
-    const flag = screen.getByRole("img", { name: "HK" })
+    const flag = screen.getAllByRole("img", { name: "HK" })[0]
     expect(flag).toHaveClass("country-flag")
     expect(flag.querySelector("img")).toHaveAttribute("src", "/assets/flags/HK.svg")
-    expect(screen.getByText("alpha")).toBeInTheDocument()
+    expect(within(table).getByText("alpha")).toBeInTheDocument()
   })
 
-  it("shows node tags in table rows", () => {
-    render(<NodeTable nodes={[node({ id: "n1", name: "alpha", tags: ["prod", "hk"] })]} onSelectNode={vi.fn()} />)
+  it("uses live metrics when available", () => {
+    const { container } = render(
+      <NodeTable
+        nodes={[node({ id: "n1", name: "alpha" })]}
+        liveMetrics={{
+          n1: {
+            cpu: 55.5,
+            memUsed: 6 * 1024 ** 3,
+            memTotal: 8 * 1024 ** 3,
+            netRxSpeed: 128 * 1024,
+            netTxSpeed: 64 * 1024,
+          },
+        }}
+        onSelectNode={vi.fn()}
+      />
+    )
+    const table = container.querySelector("table") as HTMLElement
 
-    expect(screen.getByRole("columnheader", { name: "Tags" })).toBeInTheDocument()
-    expect(screen.getByText("prod")).toBeInTheDocument()
-    expect(screen.getByText("hk")).toBeInTheDocument()
+    expect(within(table).getByText("55.5%")).toBeInTheDocument()
+    expect(within(table).getByText("75.0%")).toBeInTheDocument()
+    expect(within(table).getByText("↓ 128K/s")).toBeInTheDocument()
+    expect(within(table).getByText("↑ 64K/s")).toBeInTheDocument()
   })
 })

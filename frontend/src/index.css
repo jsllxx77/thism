@@ -395,6 +395,10 @@ body {
   transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 
+.motion-table-row > td:first-child {
+  padding-left: var(--motion-table-accent-gutter, 1rem);
+}
+
 .motion-table-row:hover > td,
 .motion-table-row:focus-within > td {
   background-color: rgba(255, 255, 255, 0.84);

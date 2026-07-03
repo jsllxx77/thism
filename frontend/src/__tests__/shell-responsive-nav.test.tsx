@@ -128,6 +128,17 @@ describe("responsive shell nav", () => {
     expect(screen.getByRole("menuitemradio", { name: "Classic" })).toHaveAttribute("aria-checked", "true")
   })
 
+  it("closes compact mobile actions when a menu navigation item is selected", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("button", { name: "Actions" }))
+    await user.click(screen.getByRole("menuitem", { name: "Open reports" }))
+
+    expect(await screen.findByText("Reports page")).toBeInTheDocument()
+    expect(screen.queryByRole("menu", { name: "Actions" })).not.toBeInTheDocument()
+  })
+
   it("navigates to settings from the header shortcut", async () => {
     const user = userEvent.setup()
     renderApp("/")

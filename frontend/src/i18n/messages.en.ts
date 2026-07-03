@@ -122,10 +122,12 @@ export const messagesEn = {
       table: {
         title: "Node Inventory",
         nodeName: "Node Name",
-        agent: "Agent",
-        tags: "Tags",
-        ip: "IP",
+        os: "Operating System",
         status: "Status",
+        cpu: "CPU",
+        memory: "Memory",
+        disk: "Disk",
+        network: "Network",
       },
     },
     reportsPage: {

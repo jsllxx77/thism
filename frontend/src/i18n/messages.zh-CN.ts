@@ -122,10 +122,12 @@ export const messagesZhCN = {
       table: {
         title: "节点清单",
         nodeName: "节点名称",
-        agent: "客户端",
-        tags: "标签",
-        ip: "IP",
+        os: "操作系统",
         status: "状态",
+        cpu: "CPU",
+        memory: "内存",
+        disk: "磁盘",
+        network: "网络",
       },
     },
     reportsPage: {

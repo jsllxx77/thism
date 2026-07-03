@@ -67,10 +67,6 @@ export function AppShell() {
   }, [])
 
   useEffect(() => {
-    setMobileActionsOpen(false)
-  }, [location.pathname])
-
-  useEffect(() => {
     if (!mobileActionsOpen) return
 
     const onPointerDown = (event: PointerEvent) => {
@@ -108,6 +104,7 @@ export function AppShell() {
               aria-label={messages.shell.actions.goToDashboard}
               title={messages.shell.actions.goToDashboard}
               aria-current={onRootPage ? "page" : undefined}
+              onClick={() => setMobileActionsOpen(false)}
               className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-950 sm:h-9 sm:w-9"
             >
               <BarChart3 className="h-4 w-4 text-slate-700 dark:text-slate-200" aria-hidden />

@@ -41,6 +41,10 @@ describe("classic theme CSS", () => {
     expect(css).toContain('[data-theme="graphite"] .motion-table-row:hover > td')
   })
 
+  it("reserves space between table accent bars and first-column content", () => {
+    expect(blockFor(".motion-table-row > td:first-child")).toContain("padding-left: var(--motion-table-accent-gutter, 1rem);")
+  })
+
   it("keeps custom solid themes flat without background overlays", () => {
     expect(blockFor('[data-theme-source="custom"] .app-surface-bg')).toContain("background: hsl(var(--background));")
     expect(css).toContain("background: hsl(var(--card));\n  border: var(--theme-border-width, 1px) solid hsl(var(--border) / 0.92);")

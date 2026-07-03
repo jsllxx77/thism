@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Dashboard } from "../../pages/Dashboard"
@@ -22,6 +22,10 @@ vi.mock("../../lib/ws", () => ({
 }))
 
 describe("dashboard filtering", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
   it("filters by status, searches, toggles view mode, and resets", async () => {
     const user = userEvent.setup()
 
@@ -79,12 +83,22 @@ describe("dashboard filtering", () => {
     expect(screen.getByRole("button", { name: "Table View" }).className).toContain("bg-slate-50/90")
     expect(screen.getByRole("button", { name: "Table View" }).className).toContain("dark:border-white/10")
     expect(await screen.findByText("Node Inventory")).toBeInTheDocument()
+    expect(window.localStorage.getItem("thism-dashboard-view-mode")).toBe("table")
 
     await user.click(screen.getByRole("button", { name: "Reset filters" }))
-    expect(screen.getByText("alpha")).toBeInTheDocument()
-    expect(screen.getByText("beta")).toBeInTheDocument()
+    expect(screen.getAllByText("alpha").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("beta").length).toBeGreaterThan(0)
     expect(allButton.getAttribute("aria-pressed")).toBe("true")
     expect(screen.getByLabelText("Tag filter")).toHaveValue("all")
+  })
+
+  it("restores the persisted table view after reload", async () => {
+    window.localStorage.setItem("thism-dashboard-view-mode", "table")
+
+    render(<Dashboard onSelectNode={() => {}} />)
+
+    expect(await screen.findByText("Node Inventory")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Table View" }).className).toContain("bg-slate-50/90")
   })
 
   it("shows an empty state when no node matches active filters", async () => {
