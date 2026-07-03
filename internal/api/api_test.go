@@ -2114,6 +2114,76 @@ func TestGetLatencyResultsAutoUses1mResolutionForLargeRanges(t *testing.T) {
 	}
 }
 
+func TestGetLatencyResultsAutoSamplesDenseLargeRanges(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	if err := s.CreateLatencyMonitor(&models.LatencyMonitor{
+		ID:                 "monitor-1",
+		Name:               "Healthcheck",
+		Type:               models.LatencyMonitorTypeHTTP,
+		Target:             "https://example.com/healthz",
+		IntervalSeconds:    60,
+		AutoAssignNewNodes: true,
+		CreatedAt:          1700000000,
+		UpdatedAt:          1700000000,
+	}, []string{"node-1"}); err != nil {
+		t.Fatalf("CreateLatencyMonitor: %v", err)
+	}
+
+	const sampleCount = 400
+	const baseTS = int64(1700000040)
+	for i := 0; i < sampleCount; i++ {
+		latency := float64(i)
+		if err := s.InsertLatencyResult(&models.LatencyMonitorResult{
+			MonitorID: "monitor-1",
+			NodeID:    "node-1",
+			TS:        baseTS + int64(i*60),
+			LatencyMs: &latency,
+			Success:   true,
+		}); err != nil {
+			t.Fatalf("InsertLatencyResult %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1700000040&to=1702592040", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Results []models.LatencyMonitorResult `json:"results"`
+		Meta    struct {
+			Resolution string `json:"resolution"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode latency history response: %v", err)
+	}
+	if body.Meta.Resolution != "1m" {
+		t.Fatalf("expected 1m resolution, got %#v", body.Meta)
+	}
+	if len(body.Results) > 360 {
+		t.Fatalf("expected sampled result count <= 360, got %d", len(body.Results))
+	}
+	if len(body.Results) >= sampleCount {
+		t.Fatalf("expected dense history to be sampled, got %d results", len(body.Results))
+	}
+	latestTS := baseTS + int64((sampleCount-1)*60)
+	if got := body.Results[len(body.Results)-1].TS; got != latestTS {
+		t.Fatalf("expected latest sampled point %d, got %d", latestTS, got)
+	}
+}
+
 func TestRegisterNodeAutoAssignsLatencyMonitors(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

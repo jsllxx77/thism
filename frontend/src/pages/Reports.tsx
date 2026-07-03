@@ -176,7 +176,7 @@ function StatusBadge({ children, tone = "neutral" }: { children: ReactNode; tone
   }[tone]
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5 ${toneClass}`}>
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5 ${toneClass}`}>
       {children}
     </span>
   )
@@ -764,7 +764,7 @@ export function Reports() {
                   <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-700 dark:text-slate-100">{t("reportsPage.tableTitle")}</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">{t("reportsPage.filteredCount", { count: filteredRows.length, total: rows.length })}</p>
                 </div>
-                <table className="w-full text-sm">
+                <table className="min-w-[820px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       <SortableTableHeader className="pl-3" label={t("reportsPage.node")} sortKey="name" sort={sort} onSort={handleSort} />

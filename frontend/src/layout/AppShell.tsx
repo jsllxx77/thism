@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { BarChart3, FileText, LogIn, Moon, Palette, RefreshCw, Settings2, Sun } from "lucide-react"
+import { BarChart3, FileText, Languages, LogIn, Moon, MoreHorizontal, Palette, RefreshCw, Settings2, Sun } from "lucide-react"
 import { api, type AccessMode } from "../lib/api"
 import { Button } from "../components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui/select"
@@ -29,6 +29,8 @@ export function AppShell() {
   const { messages, labelForLanguageToggle, toggleLanguage } = useLanguage()
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
+  const mobileActionsRef = useRef<HTMLDivElement | null>(null)
   const showBack = location.pathname !== "/"
   const onSettingsPage = location.pathname.startsWith("/settings")
   const onReportsPage = location.pathname.startsWith("/reports")
@@ -63,6 +65,32 @@ export function AppShell() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    setMobileActionsOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!mobileActionsOpen) return
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!mobileActionsRef.current?.contains(event.target as Node)) {
+        setMobileActionsOpen(false)
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileActionsOpen(false)
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [mobileActionsOpen])
 
   return (
     <div className="min-h-screen app-surface-bg text-slate-900 dark:text-slate-100">
@@ -102,7 +130,127 @@ export function AppShell() {
             )}
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div ref={mobileActionsRef} className="relative flex items-center gap-1 sm:hidden">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label={messages.shell.actions.refreshData}
+              onClick={() => setRefreshNonce((value) => value + 1)}
+              className="h-11 w-11 border-slate-300 bg-white px-0 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={messages.common.actions}
+              aria-expanded={mobileActionsOpen}
+              onClick={() => setMobileActionsOpen((open) => !open)}
+              className="h-11 w-11 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+            </Button>
+            {mobileActionsOpen && (
+              <div
+                role="menu"
+                aria-label={messages.common.actions}
+                className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[min(calc(100vw-1.5rem),20rem)] rounded-2xl border border-slate-200 bg-white p-2 text-sm shadow-2xl shadow-slate-950/15 dark:border-slate-800 dark:bg-slate-950 dark:shadow-black/40"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    navigate("/reports")
+                    setMobileActionsOpen(false)
+                  }}
+                  className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left font-medium transition-colors ${
+                    onReportsPage
+                      ? "bg-primary text-primary-foreground"
+                      : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  <FileText className="h-4 w-4 shrink-0" aria-hidden />
+                  <span>{messages.shell.actions.openReports}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    toggleLanguage()
+                    setMobileActionsOpen(false)
+                  }}
+                  className="flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  <Languages className="h-4 w-4 shrink-0" aria-hidden />
+                  <span>{labelForLanguageToggle}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    toggleMode()
+                    setMobileActionsOpen(false)
+                  }}
+                  className="flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  {mode === "dark" ? <Sun className="h-4 w-4 shrink-0" aria-hidden /> : <Moon className="h-4 w-4 shrink-0" aria-hidden />}
+                  <span>{messages.shell.actions.toggleDarkMode}</span>
+                </button>
+                {accessMode !== "guest" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      navigate("/settings")
+                      setMobileActionsOpen(false)
+                    }}
+                    className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left font-medium transition-colors ${
+                      onSettingsPage
+                        ? "bg-primary text-primary-foreground"
+                        : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                    }`}
+                  >
+                    <Settings2 className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>{messages.shell.actions.openSettings}</span>
+                  </button>
+                )}
+                <div className="my-2 h-px bg-slate-200 dark:bg-slate-800" />
+                <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  {messages.shell.themePicker.label}
+                </div>
+                <div className="grid gap-1">
+                  {themes.map((option) => {
+                    const active = option.name === theme
+                    return (
+                      <button
+                        key={option.name}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={active}
+                        onClick={() => {
+                          setTheme(option.name)
+                          setMobileActionsOpen(false)
+                        }}
+                        className={`flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors ${
+                          active
+                            ? "bg-slate-100 text-slate-950 dark:bg-slate-900 dark:text-slate-50"
+                            : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                        }`}
+                      >
+                        <span className="h-3 w-3 shrink-0 rounded-full border border-slate-300 dark:border-slate-700" style={{ backgroundColor: option.accent }} aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{getThemeLabel(option, messages.shell.themePicker)}</span>
+                        {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="hidden items-center gap-1 sm:flex sm:gap-2">
             <Button
               type="button"
               variant={onReportsPage ? "default" : "outline"}

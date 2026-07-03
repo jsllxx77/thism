@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { deriveRateSeries, formatBytes, formatBytesPerSecond } from "./units"
+import { deriveRateSeries, formatBytes, formatBytesPerSecond, formatCompactBytes, formatCompactBytesPerSecond } from "./units"
 
 describe("formatBytes", () => {
   it("formats values with 1024-based units", () => {
@@ -17,6 +17,23 @@ describe("formatBytesPerSecond", () => {
   it("formats throughput values with a /s suffix", () => {
     expect(formatBytesPerSecond(0)).toBe("0 B/s")
     expect(formatBytesPerSecond(1536)).toBe("1.5 KB/s")
+  })
+})
+
+describe("formatCompactBytes", () => {
+  it("formats values with short axis-safe units", () => {
+    expect(formatCompactBytes(0)).toBe("0B")
+    expect(formatCompactBytes(512)).toBe("512B")
+    expect(formatCompactBytes(1536)).toBe("1.5K")
+    expect(formatCompactBytes(12 * 1024)).toBe("12K")
+    expect(formatCompactBytes(1024 ** 2)).toBe("1M")
+  })
+})
+
+describe("formatCompactBytesPerSecond", () => {
+  it("keeps rate labels compact for chart axes", () => {
+    expect(formatCompactBytesPerSecond(1536)).toBe("1.5K/s")
+    expect(formatCompactBytesPerSecond(12 * 1024 ** 2)).toBe("12M/s")
   })
 })
 

@@ -96,6 +96,8 @@ describe("reports page", () => {
     expect(screen.getByText("Availability ranking")).toBeInTheDocument()
     expect(screen.getByText("Offline impact")).toBeInTheDocument()
     expect(screen.getByText("SLA distribution")).toBeInTheDocument()
+    expect(screen.getByRole("table").className).toContain("min-w-[820px]")
+    expect(screen.getByText("Recently recovered").className).toContain("whitespace-nowrap")
 
     await user.selectOptions(screen.getByLabelText("Tag filter"), "prod")
 

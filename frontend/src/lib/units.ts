@@ -1,4 +1,5 @@
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const
+const COMPACT_BYTE_UNITS = ["B", "K", "M", "G", "T"] as const
 
 export type SeriesPoint = {
   ts: number
@@ -18,6 +19,22 @@ export function formatBytes(bytes: number): string {
 
 export function formatBytesPerSecond(bytesPerSecond: number): string {
   return `${formatBytes(bytesPerSecond)}/s`
+}
+
+export function formatCompactBytes(bytes: number): string {
+  if (bytes === 0) {
+    return "0B"
+  }
+
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), COMPACT_BYTE_UNITS.length - 1)
+  const value = bytes / 1024 ** unitIndex
+  const formatted = value >= 10 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
+
+  return `${formatted}${COMPACT_BYTE_UNITS[unitIndex]}`
+}
+
+export function formatCompactBytesPerSecond(bytesPerSecond: number): string {
+  return `${formatCompactBytes(bytesPerSecond)}/s`
 }
 
 export function deriveRateSeries(points: ReadonlyArray<SeriesPoint>): SeriesPoint[] {

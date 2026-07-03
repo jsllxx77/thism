@@ -63,6 +63,22 @@ const (
 	accessRoleAdmin accessRole = "admin"
 )
 
+func chartPointBudget(rangeSeconds int64) int {
+	if rangeSeconds <= int64(time.Hour.Seconds()) {
+		return 120
+	}
+	if rangeSeconds <= int64((6 * time.Hour).Seconds()) {
+		return 180
+	}
+	if rangeSeconds <= int64((24 * time.Hour).Seconds()) {
+		return 240
+	}
+	if rangeSeconds <= int64((7 * 24 * time.Hour).Seconds()) {
+		return 280
+	}
+	return 360
+}
+
 type accessRoleContextKey struct{}
 type cspNonceContextKey struct{}
 
@@ -2847,7 +2863,11 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 				return
 			}
 		}
-		results, err = s.QueryLatencyResultsByNodeID1m(nodeID, from, to)
+		if resolution == "auto" {
+			results, err = s.QueryLatencyResultsByNodeID1mSampled(nodeID, from, to, chartPointBudget(span))
+		} else {
+			results, err = s.QueryLatencyResultsByNodeID1m(nodeID, from, to)
+		}
 		metaResolution = "1m"
 	} else {
 		results, err = s.QueryLatencyResultsByNodeID(nodeID, from, to)

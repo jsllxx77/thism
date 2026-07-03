@@ -1225,14 +1225,60 @@ ORDER BY ts, monitor_id
 }
 
 func (s *Store) QueryLatencyResultsByNodeID1m(nodeID string, from, to int64) ([]*models.LatencyMonitorResult, error) {
+	return s.queryLatencyResultsByNodeID1m(nodeID, from, to, 0)
+}
+
+func (s *Store) QueryLatencyResultsByNodeID1mSampled(nodeID string, from, to int64, maxTimestamps int) ([]*models.LatencyMonitorResult, error) {
+	return s.queryLatencyResultsByNodeID1m(nodeID, from, to, maxTimestamps)
+}
+
+func (s *Store) queryLatencyResultsByNodeID1m(nodeID string, from, to int64, maxTimestamps int) ([]*models.LatencyMonitorResult, error) {
 	from = (from / 60) * 60
 	to = (to / 60) * 60
-	rows, err := s.db.Query(`
+	query := `
 SELECT monitor_id, node_id, ts, latency_ms_avg, loss_percent_avg, jitter_ms_avg, success_samples, error_message
 FROM latency_1m
 WHERE node_id = ? AND ts BETWEEN ? AND ?
 ORDER BY ts, monitor_id
-`, nodeID, from, to)
+`
+	args := []any{nodeID, from, to}
+	if maxTimestamps > 0 {
+		query = `
+WITH matching_ts AS (
+    SELECT DISTINCT ts
+    FROM latency_1m
+    WHERE node_id = ? AND ts BETWEEN ? AND ?
+),
+ranked_ts AS (
+    SELECT
+        ts,
+        ROW_NUMBER() OVER (ORDER BY ts) - 1 AS row_index,
+        COUNT(*) OVER () AS total_count
+    FROM matching_ts
+),
+bucketed_ts AS (
+    SELECT
+        ts,
+        CASE
+            WHEN total_count <= ? THEN row_index
+            ELSE row_index / ((total_count + ? - 1) / ?)
+        END AS bucket_index
+    FROM ranked_ts
+),
+selected_ts AS (
+    SELECT MAX(ts) AS ts
+    FROM bucketed_ts
+    GROUP BY bucket_index
+)
+SELECT latency_1m.monitor_id, latency_1m.node_id, latency_1m.ts, latency_1m.latency_ms_avg, latency_1m.loss_percent_avg, latency_1m.jitter_ms_avg, latency_1m.success_samples, latency_1m.error_message
+FROM selected_ts
+CROSS JOIN latency_1m INDEXED BY idx_latency_1m_node_ts
+WHERE latency_1m.node_id = ? AND latency_1m.ts = selected_ts.ts
+ORDER BY latency_1m.ts, latency_1m.monitor_id
+`
+		args = []any{nodeID, from, to, maxTimestamps, maxTimestamps, maxTimestamps, nodeID}
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

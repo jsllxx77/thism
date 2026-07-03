@@ -64,7 +64,8 @@ describe("responsive shell nav", () => {
     expect(languageButton.className).toContain("hover:text-slate-950")
     expect(languageButton.className).toContain("dark:text-slate-100")
     expect(languageButton.className).toContain("dark:hover:text-slate-50")
-    expect(await screen.findByRole("button", { name: "Refresh data" })).toBeInTheDocument()
+    expect((await screen.findAllByRole("button", { name: "Refresh data" })).length).toBeGreaterThan(0)
+    expect(await screen.findByRole("button", { name: "Actions" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
     expect(await screen.findByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open reports" })).toBeInTheDocument()
@@ -98,7 +99,7 @@ describe("responsive shell nav", () => {
 
     await user.click(await screen.findByRole("button", { name: "中文" }))
 
-    expect(await screen.findByRole("button", { name: "刷新数据" })).toBeInTheDocument()
+    expect((await screen.findAllByRole("button", { name: "刷新数据" })).length).toBeGreaterThan(0)
     expect(await screen.findByRole("button", { name: "切换深色模式" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "打开报告" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "打开设置" })).toBeInTheDocument()
@@ -110,6 +111,21 @@ describe("responsive shell nav", () => {
 
     await user.click(await screen.findByRole("button", { name: "Open reports" }))
     expect(await screen.findByText("Reports page")).toBeInTheDocument()
+  })
+
+  it("opens compact mobile actions from the header", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+
+    await user.click(await screen.findByRole("button", { name: "Actions" }))
+
+    const menu = await screen.findByRole("menu", { name: "Actions" })
+    expect(menu).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Open reports" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "中文" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Toggle dark mode" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Open settings" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Classic" })).toHaveAttribute("aria-checked", "true")
   })
 
   it("navigates to settings from the header shortcut", async () => {

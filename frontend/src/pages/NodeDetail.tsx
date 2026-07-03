@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
-import { formatBytes, formatBytesPerSecond } from "../lib/units"
+import { formatBytes, formatBytesPerSecond, formatCompactBytes, formatCompactBytesPerSecond } from "../lib/units"
 import { appendLiveMetricPoint, buildNodeDetailMetricSeries, getLatestMetricRate, getMetricRangeDelta } from "../lib/metric-series"
 import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
@@ -378,9 +378,9 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
               netRxSpeedData={netRxSpeedData}
               netTxSpeedData={netTxSpeedData}
               netValueFormatter={formatBytes}
-              netAxisTickFormatter={formatBytes}
+              netAxisTickFormatter={formatCompactBytes}
               netSpeedFormatter={formatBytesPerSecond}
-              netSpeedAxisTickFormatter={formatBytesPerSecond}
+              netSpeedAxisTickFormatter={formatCompactBytesPerSecond}
               networkSummary={networkSummary}
               diskData={diskData}
               diskReadSpeedData={diskReadSpeedData}
