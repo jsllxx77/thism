@@ -133,8 +133,9 @@ describe("node card redesign", () => {
   it("shows a country flag before the node name when country code is available", () => {
     render(<NodeCard node={createNode({ country_code: "HK" })} />)
 
-    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
-    expect(screen.getByText("🇭🇰")).toHaveClass("country-flag__emoji")
+    const flag = screen.getByRole("img", { name: "HK" })
+    expect(flag).toHaveClass("country-flag")
+    expect(flag.querySelector("img")).toHaveAttribute("src", "/assets/flags/HK.svg")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 

@@ -42,8 +42,10 @@ const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
 const frontendSkinSettingKey = "frontend_skin_id"
+const themeSettingsKey = "theme_settings"
 const publicURLSettingKey = "public_url"
 const DefaultFrontendSkinID = "classic"
+const DefaultThemeName = "classic"
 const adminSessionTTL = 30 * 24 * time.Hour
 const sqliteBusyTimeout = 5000
 const availabilityExpectedSampleIntervalSeconds int64 = 5
@@ -496,6 +498,63 @@ ON CONFLICT(key) DO UPDATE SET
 	value = excluded.value,
 	updated_at = excluded.updated_at
 `, frontendSkinSettingKey, id, time.Now().Unix())
+	return err
+}
+
+func normalizeThemeSettings(settings models.ThemeSettings) models.ThemeSettings {
+	settings.Theme = strings.TrimSpace(settings.Theme)
+	if settings.Theme == "" {
+		settings.Theme = DefaultThemeName
+	}
+	if settings.CustomThemes == nil {
+		settings.CustomThemes = []json.RawMessage{}
+	}
+	return settings
+}
+
+func (s *Store) GetThemeSettings() (models.ThemeSettingsView, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, themeSettingsKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return models.ThemeSettingsView{
+			Theme:        DefaultThemeName,
+			CustomThemes: []json.RawMessage{},
+			Configured:   false,
+		}, nil
+	}
+	if err != nil {
+		return models.ThemeSettingsView{}, err
+	}
+
+	var settings models.ThemeSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return models.ThemeSettingsView{
+			Theme:        DefaultThemeName,
+			CustomThemes: []json.RawMessage{},
+			Configured:   false,
+		}, nil
+	}
+	settings = normalizeThemeSettings(settings)
+	return models.ThemeSettingsView{
+		Theme:        settings.Theme,
+		CustomThemes: settings.CustomThemes,
+		Configured:   true,
+	}, nil
+}
+
+func (s *Store) UpsertThemeSettings(settings models.ThemeSettings) error {
+	settings = normalizeThemeSettings(settings)
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, themeSettingsKey, string(raw), time.Now().Unix())
 	return err
 }
 

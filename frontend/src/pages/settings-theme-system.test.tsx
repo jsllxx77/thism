@@ -13,6 +13,8 @@ const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
 const dashboardSettingsMock = vi.fn()
 const updateDashboardSettingsMock = vi.fn()
+const themeSettingsMock = vi.fn()
+const updateThemeSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
@@ -31,6 +33,8 @@ vi.mock("../lib/api", () => ({
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
     dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
     updateDashboardSettings: (...args: unknown[]) => updateDashboardSettingsMock(...args),
+    themeSettings: (...args: unknown[]) => themeSettingsMock(...args),
+    updateThemeSettings: (...args: unknown[]) => updateThemeSettingsMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
@@ -138,6 +142,8 @@ describe("settings theme system", () => {
     updateMetricsRetentionMock.mockReset()
     dashboardSettingsMock.mockReset()
     updateDashboardSettingsMock.mockReset()
+    themeSettingsMock.mockReset()
+    updateThemeSettingsMock.mockReset()
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
@@ -153,6 +159,8 @@ describe("settings theme system", () => {
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
     updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    themeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: false })
+    updateThemeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: true })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
@@ -264,6 +272,12 @@ describe("settings theme system", () => {
     expect(document.documentElement.style.getPropertyValue("--theme-card-radius")).toBe("1.5rem")
     expect(window.localStorage.getItem("thism-color-theme")).toBe("custom:aurora-command")
     expect(window.localStorage.getItem("thism-custom-themes")).toContain("Aurora Command")
+    await waitFor(() => {
+      expect(updateThemeSettingsMock).toHaveBeenCalledWith({
+        theme: "custom:aurora-command",
+        custom_themes: [auroraThemePackage],
+      })
+    })
   })
 
   it("imports and applies a theme package from a GitHub repository URL", async () => {

@@ -519,6 +519,10 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 			handleGetDashboardSettings(w, req, s)
 		})
 
+		r.Get("/api/settings/theme", func(w http.ResponseWriter, req *http.Request) {
+			handleGetThemeSettings(w, req, s)
+		})
+
 		r.Get("/api/settings/public-url", func(w http.ResponseWriter, req *http.Request) {
 			handleGetPublicURL(w, req, s)
 		})
@@ -552,6 +556,10 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 
 		r.Put("/api/settings/dashboard", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdateDashboardSettings(w, req, s)
+		})
+
+		r.Put("/api/settings/theme", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateThemeSettings(w, req, s)
 		})
 
 		r.Put("/api/settings/public-url", func(w http.ResponseWriter, req *http.Request) {
@@ -1813,6 +1821,45 @@ func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *st
 		ShowDashboardCardIP: *reqBody.ShowDashboardCardIP,
 	}
 	if err := s.UpsertDashboardSettings(settings); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func handleGetThemeSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	settings, err := s.GetThemeSettings()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func handleUpdateThemeSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+
+	var reqBody models.ThemeSettings
+	if !decodeJSONBody(w, r, &reqBody) {
+		return
+	}
+	if strings.TrimSpace(reqBody.Theme) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "theme is required"})
+		return
+	}
+	if err := s.UpsertThemeSettings(reqBody); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	settings, err := s.GetThemeSettings()
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

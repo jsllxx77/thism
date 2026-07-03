@@ -1467,31 +1467,18 @@ table td {
   align-items: center;
   justify-content: center;
   vertical-align: middle;
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 }
 
-.country-flag__emoji {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.country-flag--svg .country-flag__emoji {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.country-flag__fallback {
+.country-flag__image {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: 100%;
+  object-fit: contain;
   border-radius: 0.18rem;
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
-.dark .country-flag__fallback {
+.dark .country-flag__image {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 

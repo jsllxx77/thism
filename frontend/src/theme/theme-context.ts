@@ -281,6 +281,10 @@ function definitionFromPackage(themePackage: AppThemePackage): ImportedThemeDefi
   }
 }
 
+export function definitionFromThemePackage(themePackage: AppThemePackage): ImportedThemeDefinition {
+  return definitionFromPackage(normalizeThemePackage(themePackage))
+}
+
 export function parseThemePackage(source: string): ImportedThemeDefinition {
   try {
     return definitionFromPackage(normalizeThemePackage(JSON.parse(source)))

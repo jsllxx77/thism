@@ -1,4 +1,5 @@
 import { getPreferredLanguage } from "../i18n/language"
+import type { AppThemeName, AppThemePackage } from "../theme/theme-context"
 
 const CSRF_REQUIRED_ERROR = "csrf token required"
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"])
@@ -240,6 +241,14 @@ export type DashboardSettings = {
   show_dashboard_card_ip: boolean
 }
 
+export type ThemeSettings = {
+  theme: AppThemeName
+  custom_themes: AppThemePackage[]
+  configured: boolean
+}
+
+export type ThemeSettingsUpdate = Omit<ThemeSettings, "configured">
+
 export type PublicURLSettings = {
   public_url: string
 }
@@ -455,6 +464,12 @@ export const api = {
   dashboardSettings: () => req<DashboardSettings>("/api/settings/dashboard"),
   updateDashboardSettings: (settings: DashboardSettings) =>
     req<DashboardSettings>("/api/settings/dashboard", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+  themeSettings: () => req<ThemeSettings>("/api/settings/theme"),
+  updateThemeSettings: (settings: ThemeSettingsUpdate) =>
+    req<ThemeSettings>("/api/settings/theme", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),

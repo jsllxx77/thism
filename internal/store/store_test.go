@@ -822,6 +822,43 @@ func TestStoreNotificationSettingsRoundTripAndCooldown(t *testing.T) {
 	}
 }
 
+func TestStoreThemeSettingsRoundTrip(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	defaults, err := s.GetThemeSettings()
+	if err != nil {
+		t.Fatalf("GetThemeSettings defaults: %v", err)
+	}
+	if defaults.Configured || defaults.Theme != store.DefaultThemeName || len(defaults.CustomThemes) != 0 {
+		t.Fatalf("unexpected default theme settings: %#v", defaults)
+	}
+
+	settings := models.ThemeSettings{
+		Theme: "custom:aurora-command",
+		CustomThemes: []json.RawMessage{
+			json.RawMessage(`{"type":"thism-theme","version":1,"id":"aurora-command","name":"Aurora Command"}`),
+		},
+	}
+	if err := s.UpsertThemeSettings(settings); err != nil {
+		t.Fatalf("UpsertThemeSettings: %v", err)
+	}
+
+	stored, err := s.GetThemeSettings()
+	if err != nil {
+		t.Fatalf("GetThemeSettings stored: %v", err)
+	}
+	if !stored.Configured || stored.Theme != "custom:aurora-command" || len(stored.CustomThemes) != 1 {
+		t.Fatalf("unexpected stored theme settings: %#v", stored)
+	}
+	if !strings.Contains(string(stored.CustomThemes[0]), "Aurora Command") {
+		t.Fatalf("expected custom theme package to round-trip, got %s", string(stored.CustomThemes[0]))
+	}
+}
+
 func TestStoreNotificationSettingsDefaultDispatcherValues(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {

@@ -99,8 +99,9 @@ describe("node table", () => {
   it("shows a country flag before the node name in table view when country code is available", () => {
     render(<NodeTable nodes={[node({ id: "n1", name: "alpha", country_code: "HK", online: true })]} onSelectNode={vi.fn()} />)
 
-    expect(screen.getByRole("img", { name: "HK" })).toHaveClass("country-flag")
-    expect(screen.getByText("🇭🇰")).toHaveClass("country-flag__emoji")
+    const flag = screen.getByRole("img", { name: "HK" })
+    expect(flag).toHaveClass("country-flag")
+    expect(flag.querySelector("img")).toHaveAttribute("src", "/assets/flags/HK.svg")
     expect(screen.getByText("alpha")).toBeInTheDocument()
   })
 

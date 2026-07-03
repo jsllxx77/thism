@@ -3064,6 +3064,64 @@ func TestDashboardSettingsRoundTripEndpoints(t *testing.T) {
 	}
 }
 
+func TestThemeSettingsRoundTripEndpoints(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/api/settings/theme", nil)
+	defaultReq.Header.Set("Authorization", "Bearer test-admin-token")
+	defaultResp := httptest.NewRecorder()
+	router.ServeHTTP(defaultResp, defaultReq)
+
+	if defaultResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", defaultResp.Code, defaultResp.Body.String())
+	}
+	var defaultBody struct {
+		Theme      string `json:"theme"`
+		Configured bool   `json:"configured"`
+	}
+	if err := json.Unmarshal(defaultResp.Body.Bytes(), &defaultBody); err != nil {
+		t.Fatalf("unmarshal default response: %v", err)
+	}
+	if defaultBody.Configured || defaultBody.Theme != "classic" {
+		t.Fatalf("unexpected default theme settings: %#v", defaultBody)
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/theme", bytes.NewBufferString(`{"theme":"custom:aurora-command","custom_themes":[{"type":"thism-theme","version":1,"id":"aurora-command","name":"Aurora Command"}]}`))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", putResp.Code, putResp.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/theme", nil)
+	getReq.Header.Set("Authorization", "Bearer test-admin-token")
+	getResp := httptest.NewRecorder()
+	router.ServeHTTP(getResp, getReq)
+
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getResp.Code, getResp.Body.String())
+	}
+
+	var body struct {
+		Theme        string            `json:"theme"`
+		CustomThemes []json.RawMessage `json:"custom_themes"`
+		Configured   bool              `json:"configured"`
+	}
+	if err := json.Unmarshal(getResp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !body.Configured || body.Theme != "custom:aurora-command" || len(body.CustomThemes) != 1 {
+		t.Fatalf("unexpected theme settings response: %#v", body)
+	}
+}
+
 func TestPublicURLSettingsRoundTripEndpoints(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
