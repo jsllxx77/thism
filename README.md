@@ -50,16 +50,18 @@ The installer will:
 
 1. Create a deployment directory
 2. Download `compose.yaml` and `.env.example`
-3. Generate a random admin password and API token on first run
+3. Generate a random admin password and API token as Docker secret files on first run
 4. Start `thism-server` from `ghcr.io/jsllxx77/thism:latest`
 
 Prerequisites:
 
 - Docker with `docker compose` v2 available on the host
 
-When it finishes, open `http://<server-ip-or-domain>:8080` from your browser and log in with the credentials printed by the installer. If you are running the installer on the same machine where you will open the browser, `http://localhost:8080` also works.
+When it finishes, open `http://<server-ip-or-domain>:8080` from your browser and log in with the generated credentials. If you are running the installer on the same machine where you will open the browser, `http://localhost:8080` also works.
 
-The generated credentials are stored in `~/thism-deploy/.env`. Treat that file as sensitive because it contains the API token and the web UI administrator password.
+The generated credentials are stored under `~/thism-deploy/secrets/`. `~/thism-deploy/.env` stores only runtime settings and secret-file paths. Treat the `secrets/` directory as sensitive and back it up if you want to preserve the generated API token and web UI administrator password.
+
+Read the web login credentials with `cat ~/thism-deploy/secrets/thism_admin_user` and `cat ~/thism-deploy/secrets/thism_admin_pass`.
 
 To uninstall the server from the host:
 
@@ -77,13 +79,22 @@ cd ~/thism-deploy
 curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/docker-compose.yml -o compose.yaml
 curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/.env.example -o .env
 
-# edit .env before first start
+mkdir -p secrets
+chmod 700 secrets
+printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_token
+printf '%s\n' "admin" > secrets/thism_admin_user
+printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_admin_pass
+chmod 444 secrets/thism_*
+
+# edit .env if you need a different image, host port, or secret file path
 docker compose up -d
 ```
 
 The default compose deployment stores application data in a named Docker volume and publishes the web UI on port `8080`.
 
-The `.env` file contains the API token and web login credentials. Keep it private and back it up if you want to preserve the generated secrets.
+The `.env` file contains runtime settings and secret-file paths. The API token and web login credentials live in `secrets/thism_token`, `secrets/thism_admin_user`, and `secrets/thism_admin_pass`.
+
+Use `cat secrets/thism_admin_user` and `cat secrets/thism_admin_pass` to read the web login credentials.
 
 ## Add and Install an Agent
 

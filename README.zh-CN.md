@@ -50,16 +50,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/i
 
 1. 创建部署目录
 2. 下载 `compose.yaml` 和 `.env.example`
-3. 首次运行时生成随机管理员密码和 API Token
+3. 首次运行时把随机管理员密码和 API Token 生成为 Docker secret 文件
 4. 从 `ghcr.io/jsllxx77/thism:latest` 启动 `thism-server`
 
 前提条件：
 
 - 目标主机已安装 Docker，并且可用 `docker compose` v2
 
-安装完成后，请在浏览器中打开 `http://<服务器 IP 或域名>:8080`，并使用脚本输出的账号密码登录。如果你是在本机安装并且也在本机访问，`http://localhost:8080` 同样可用。
+安装完成后，请在浏览器中打开 `http://<服务器 IP 或域名>:8080`，并使用生成的账号密码登录。如果你是在本机安装并且也在本机访问，`http://localhost:8080` 同样可用。
 
-生成的凭据会保存在 `~/thism-deploy/.env`。这个文件包含 API Token 和 Web 管理员密码，应按敏感文件妥善保管。
+生成的凭据会保存在 `~/thism-deploy/secrets/` 下。`~/thism-deploy/.env` 只保存运行配置和 secret 文件路径。请把 `secrets/` 目录按敏感文件妥善保管；如果需要保留原始 API Token 和 Web 管理员密码，请备份这些 secret 文件。
+
+可以用 `cat ~/thism-deploy/secrets/thism_admin_user` 和 `cat ~/thism-deploy/secrets/thism_admin_pass` 查看 Web 登录账号密码。
 
 如需在当前主机上卸载 server：
 
@@ -77,13 +79,22 @@ cd ~/thism-deploy
 curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/docker-compose.yml -o compose.yaml
 curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/.env.example -o .env
 
-# 首次启动前请先编辑 .env
+mkdir -p secrets
+chmod 700 secrets
+printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_token
+printf '%s\n' "admin" > secrets/thism_admin_user
+printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_admin_pass
+chmod 444 secrets/thism_*
+
+# 如需调整镜像、宿主端口或 secret 文件路径，请先编辑 .env
 docker compose up -d
 ```
 
 默认 compose 部署会把数据保存在 Docker 命名卷中，并将 Web 界面暴露在 `8080` 端口。
 
-`.env` 文件里保存了 API Token 和 Web 登录凭据。请注意保密，并在需要保留原始凭据时做好备份。
+`.env` 文件里保存运行配置和 secret 文件路径。API Token 和 Web 登录凭据分别保存在 `secrets/thism_token`、`secrets/thism_admin_user`、`secrets/thism_admin_pass`。
+
+可以用 `cat secrets/thism_admin_user` 和 `cat secrets/thism_admin_pass` 查看 Web 登录账号密码。
 
 ## 添加并安装 Agent
 
