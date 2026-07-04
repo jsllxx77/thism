@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Activity } from "lucide-react"
 import { api, type AccessMode, type Node } from "../lib/api"
 import { ONLINE_GRACE_PERIOD_SECONDS, isNodeEffectivelyOnline } from "../lib/node-status"
@@ -20,8 +20,12 @@ type LiveMetricsSample = {
   netTxSpeed?: number
   lastNet?: LiveNetSample
 }
-type LiveMetrics = Record<string, LiveMetricsSample>
+export type LiveMetrics = Record<string, LiveMetricsSample>
 type DashboardViewMode = "cards" | "table"
+export type DashboardCache = {
+  nodes: Node[]
+  live: LiveMetrics
+}
 
 const DASHBOARD_VIEW_MODE_STORAGE_KEY = "thism-dashboard-view-mode"
 
@@ -54,55 +58,84 @@ type Props = {
   onSelectNode: (id: string) => void
   refreshNonce?: number
   accessMode?: AccessMode
+  initialCache?: DashboardCache | null
+  onCacheChange?: (cache: DashboardCache) => void
 }
 
-export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin" }: Props) {
+function liveMetricsForNodes(prev: LiveMetrics, nextNodes: Node[]): LiveMetrics {
+  const next: LiveMetrics = {}
+  const validNodeIDs = new Set(nextNodes.map((node) => node.id))
+
+  for (const [nodeID, metrics] of Object.entries(prev)) {
+    if (validNodeIDs.has(nodeID)) {
+      next[nodeID] = metrics
+    }
+  }
+
+  for (const node of nextNodes) {
+    if (next[node.id]) continue
+    const metrics = snapshotToLive(node)
+    if (metrics) {
+      next[node.id] = metrics
+    }
+  }
+
+  return next
+}
+
+export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin", initialCache = null, onCacheChange }: Props) {
   const { t } = useLanguage()
-  const [nodes, setNodes] = useState<Node[]>([])
-  const [live, setLive] = useState<LiveMetrics>({})
+  const [nodes, setNodes] = useState<Node[]>(() => initialCache?.nodes ?? [])
+  const [live, setLive] = useState<LiveMetrics>(() => initialCache?.live ?? {})
   const [showDashboardCardIP, setShowDashboardCardIP] = useState(false)
   const [statusRefreshNonce, setStatusRefreshNonce] = useState(0)
   const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all")
   const [searchFilter, setSearchFilter] = useState("")
   const [tagFilter, setTagFilter] = useState("all")
   const [viewMode, setViewMode] = useState<DashboardViewMode>(getInitialDashboardViewMode)
-  const [loadingNodes, setLoadingNodes] = useState(true)
+  const [loadingNodes, setLoadingNodes] = useState(() => initialCache == null)
   const [nodesError, setNodesError] = useState<string | null>(null)
+  const nodesRef = useRef(nodes)
+  const liveRef = useRef(live)
+  const hasInitialCacheRef = useRef(initialCache != null)
 
-  const loadNodes = useCallback(async () => {
-    setLoadingNodes(true)
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+
+  useEffect(() => {
+    liveRef.current = live
+  }, [live])
+
+  const publishCache = useCallback((nextNodes: Node[], nextLive: LiveMetrics) => {
+    onCacheChange?.({ nodes: nextNodes, live: nextLive })
+  }, [onCacheChange])
+
+  const loadNodes = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? nodesRef.current.length === 0
+    if (showLoading) {
+      setLoadingNodes(true)
+    }
     setNodesError(null)
+    const hadNodesBeforeLoad = nodesRef.current.length > 0
 
     try {
       const response = await api.nodes()
       const nextNodes = response.nodes ?? []
+      const nextLive = liveMetricsForNodes(liveRef.current, nextNodes)
       setNodes(nextNodes)
-      setLive((prev) => {
-        const next: LiveMetrics = {}
-        const validNodeIDs = new Set(nextNodes.map((node) => node.id))
-
-        for (const [nodeID, metrics] of Object.entries(prev)) {
-          if (validNodeIDs.has(nodeID)) {
-            next[nodeID] = metrics
-          }
-        }
-
-        for (const node of nextNodes) {
-          if (next[node.id]) continue
-          const metrics = snapshotToLive(node)
-          if (metrics) {
-            next[node.id] = metrics
-          }
-        }
-
-        return next
-      })
+      setLive(nextLive)
+      nodesRef.current = nextNodes
+      liveRef.current = nextLive
+      publishCache(nextNodes, nextLive)
     } catch {
-      setNodesError(t("dashboard.loadError"))
+      if (!hadNodesBeforeLoad) {
+        setNodesError(t("dashboard.loadError"))
+      }
     } finally {
       setLoadingNodes(false)
     }
-  }, [t])
+  }, [publishCache, t])
 
   useEffect(() => {
     const nowMs = Date.now()
@@ -169,7 +202,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
   }, [viewMode])
 
   useEffect(() => {
-    void loadNodes()
+    void loadNodes({ showLoading: !hasInitialCacheRef.current })
 
     const ws = getDashboardWS()
 
@@ -202,24 +235,37 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
             next.lastNet = { ts, rxBytes, txBytes }
           }
 
-          return {
+          const nextLive = {
             ...prev,
             [node_id]: next,
           }
+          liveRef.current = nextLive
+          publishCache(nodesRef.current, nextLive)
+          return nextLive
         })
         if (typeof last_seen === "number") {
-          setNodes((prev) => prev.map((n) => (n.id === node_id ? { ...n, last_seen } : n)))
+          setNodes((prev) => {
+            const nextNodes = prev.map((n) => (n.id === node_id ? { ...n, last_seen } : n))
+            nodesRef.current = nextNodes
+            publishCache(nextNodes, liveRef.current)
+            return nextNodes
+          })
         }
       }
       if (msg.type === "node_status") {
         const { node_id, online } = msg.payload as { node_id: string; online: boolean }
-        setNodes((prev) => prev.map((n) => (n.id === node_id ? { ...n, online } : n)))
+        setNodes((prev) => {
+          const nextNodes = prev.map((n) => (n.id === node_id ? { ...n, online } : n))
+          nodesRef.current = nextNodes
+          publishCache(nextNodes, liveRef.current)
+          return nextNodes
+        })
       }
     }
 
     ws.on(handler)
     return () => ws.off(handler)
-  }, [loadNodes])
+  }, [loadNodes, publishCache])
 
   const effectiveNodes = nodes.map((node) => {
     const nowMs = Date.now()
@@ -240,7 +286,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
 
   useEffect(() => {
     if (refreshNonce === 0) return
-    void loadNodes()
+    void loadNodes({ showLoading: nodesRef.current.length === 0 })
   }, [loadNodes, refreshNonce])
 
   const filteredNodes = useMemo(() => {
@@ -316,7 +362,7 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
           <p className="text-sm font-medium text-red-700 dark:text-red-300">{nodesError}</p>
           <button
             type="button"
-            onClick={() => void loadNodes()}
+            onClick={() => void loadNodes({ showLoading: true })}
             className="mt-3 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200 dark:hover:bg-red-900/40"
           >
             {t("common.retry")}

@@ -2,7 +2,7 @@ import { Suspense, lazy } from "react"
 import { Navigate, Route, Routes, useNavigate, useOutletContext, useParams } from "react-router-dom"
 import type { AccessMode } from "./lib/api"
 import { AppShell } from "./layout/AppShell"
-import { Dashboard } from "./pages/Dashboard"
+import { Dashboard, type DashboardCache } from "./pages/Dashboard"
 
 const NodeDetail = lazy(async () => ({ default: (await import("./pages/NodeDetail")).NodeDetail }))
 const Settings = lazy(async () => ({ default: (await import("./pages/Settings")).Settings }))
@@ -12,6 +12,8 @@ const NotFound = lazy(async () => ({ default: (await import("./pages/NotFound"))
 type AppShellOutletContext = {
   refreshNonce: number
   accessMode: AccessMode
+  dashboardCache: DashboardCache | null
+  setDashboardCache: (cache: DashboardCache) => void
 }
 
 function RouteFallback() {
@@ -36,10 +38,9 @@ function useShellAccessMode() {
 
 function DashboardRoute() {
   const navigate = useNavigate()
-  const refreshNonce = useShellRefreshNonce()
-  const accessMode = useShellAccessMode()
+  const { refreshNonce, accessMode, dashboardCache, setDashboardCache } = useShellContext()
 
-  return <Dashboard onSelectNode={(id) => navigate(`/nodes/${id}`)} refreshNonce={refreshNonce} accessMode={accessMode} />
+  return <Dashboard onSelectNode={(id) => navigate(`/nodes/${id}`)} refreshNonce={refreshNonce} accessMode={accessMode} initialCache={dashboardCache} onCacheChange={setDashboardCache} />
 }
 
 function NodeDetailRoute() {

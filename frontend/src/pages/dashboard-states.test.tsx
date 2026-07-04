@@ -55,6 +55,44 @@ describe("dashboard page states", () => {
     })
   })
 
+  it("shows cached inventory while refreshing nodes in the background", async () => {
+    const request = deferred<{ nodes: [] }>()
+    nodesMock.mockReturnValue(request.promise)
+
+    render(
+      <Dashboard
+        onSelectNode={() => {}}
+        initialCache={{
+          nodes: [
+            {
+              id: "n1",
+              name: "cached-alpha",
+              online: true,
+              ip: "1.1.1.1",
+              os: "linux",
+              arch: "amd64",
+              created_at: 0,
+              last_seen: 0,
+              latest_metrics: { ts: 1733011200, cpu: 37.5, mem_used: 50, mem_total: 100, disk_used: 0, disk_total: 0, net_rx: 0, net_tx: 0 },
+            },
+          ],
+          live: {
+            n1: { cpu: 37.5, memUsed: 50, memTotal: 100 },
+          },
+        }}
+      />,
+    )
+
+    expect(screen.queryByText("Loading node inventory...")).not.toBeInTheDocument()
+    expect(screen.getByText("cached-alpha")).toBeInTheDocument()
+    expect(nodesMock).toHaveBeenCalledTimes(1)
+
+    request.resolve({ nodes: [] })
+    await waitFor(() => {
+      expect(screen.queryByText("cached-alpha")).not.toBeInTheDocument()
+    })
+  })
+
   it("shows an error state when node loading fails", async () => {
     nodesMock.mockRejectedValue(new Error("network down"))
 

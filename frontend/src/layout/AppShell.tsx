@@ -8,6 +8,7 @@ import { RouteContainer } from "./RouteContainer"
 import { useThemeMode } from "../theme/mode"
 import { type AppThemeDefinition, type AppThemeName, useAppTheme } from "../theme/theme-context"
 import { useLanguage } from "../i18n/language"
+import type { DashboardCache } from "../pages/Dashboard"
 
 function getThemeLabel(theme: AppThemeDefinition, labels: Record<string, string>) {
   return theme.source === "built-in" ? labels[theme.labelKey] : theme.label
@@ -29,6 +30,7 @@ export function AppShell() {
   const { messages, labelForLanguageToggle, toggleLanguage } = useLanguage()
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
+  const [dashboardCache, setDashboardCache] = useState<DashboardCache | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const mobileActionsRef = useRef<HTMLDivElement | null>(null)
   const showBack = location.pathname !== "/"
@@ -347,7 +349,7 @@ export function AppShell() {
 
       <main id="main-content" className="mx-auto max-w-[1440px] px-4 py-6 md:px-6 md:py-8 lg:px-8">
         <RouteContainer showBack={showBack} onBack={() => navigate("/")}>
-          {accessMode === null ? <ShellLoadingState /> : <Outlet context={{ refreshNonce, accessMode }} />}
+          {accessMode === null ? <ShellLoadingState /> : <Outlet context={{ refreshNonce, accessMode, dashboardCache, setDashboardCache }} />}
         </RouteContainer>
       </main>
     </div>
