@@ -21,6 +21,21 @@ function metric(overrides: Partial<MetricsRow>): MetricsRow {
     disk_write_bytes: 0,
     net_rx: 0,
     net_tx: 0,
+    load1: 0,
+    load5: 0,
+    load15: 0,
+    cpu_iowait_percent: 0,
+    cpu_steal_percent: 0,
+    pressure_cpu_some: 0,
+    pressure_memory_some: 0,
+    pressure_memory_full: 0,
+    pressure_io_some: 0,
+    pressure_io_full: 0,
+    swap_used: 0,
+    swap_total: 1,
+    swap_in: 0,
+    swap_out: 0,
+    oom_kills: 0,
     uptime_seconds: 0,
     ...overrides,
   }
@@ -79,6 +94,64 @@ describe("metric-series", () => {
     expect(bundled.diskData).toEqual(buildMetricChartSeries(metrics, 604800, (row) => (row.disk_total > 0 ? (row.disk_used / row.disk_total) * 100 : 0), "average"))
     expect(bundled.diskReadSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_read_bytes ?? 0))
     expect(bundled.diskWriteSpeedData).toEqual(buildMetricRateChartSeries(metrics, 604800, (row) => row.disk_write_bytes ?? 0))
+  })
+
+  it("builds node pressure and memory pressure series", () => {
+    const metrics = [
+      metric({
+        ts: 100,
+        load1: 1,
+        load5: 1.5,
+        load15: 2,
+        cpu_iowait_percent: 3,
+        cpu_steal_percent: 1,
+        pressure_cpu_some: 0.5,
+        pressure_memory_some: 0.7,
+        pressure_memory_full: 0.1,
+        pressure_io_some: 0.9,
+        pressure_io_full: 0.2,
+        swap_used: 100,
+        swap_total: 1000,
+        swap_in: 10,
+        swap_out: 20,
+        oom_kills: 0,
+        uptime_seconds: 1000,
+      }),
+      metric({
+        ts: 110,
+        load1: 2,
+        load5: 2.5,
+        load15: 3,
+        cpu_iowait_percent: 6,
+        cpu_steal_percent: 2,
+        pressure_cpu_some: 1.5,
+        pressure_memory_some: 1.7,
+        pressure_memory_full: 0.3,
+        pressure_io_some: 1.9,
+        pressure_io_full: 0.4,
+        swap_used: 200,
+        swap_total: 1000,
+        swap_in: 30,
+        swap_out: 50,
+        oom_kills: 1,
+        uptime_seconds: 1010,
+      }),
+    ]
+
+    const bundled = buildNodeDetailMetricSeries(metrics, 3600)
+
+    expect(bundled.load1Data).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.load1 ?? 0, "average"))
+    expect(bundled.cpuIOWaitData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.cpu_iowait_percent ?? 0, "average"))
+    expect(bundled.cpuStealData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.cpu_steal_percent ?? 0, "average"))
+    expect(bundled.pressureCPUSomeData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.pressure_cpu_some ?? 0, "average"))
+    expect(bundled.pressureMemorySomeData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.pressure_memory_some ?? 0, "average"))
+    expect(bundled.pressureMemoryFullData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.pressure_memory_full ?? 0, "average"))
+    expect(bundled.pressureIOSomeData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.pressure_io_some ?? 0, "average"))
+    expect(bundled.pressureIOFullData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.pressure_io_full ?? 0, "average"))
+    expect(bundled.swapData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => ((row.swap_total ?? 0) > 0 ? ((row.swap_used ?? 0) / (row.swap_total ?? 1)) * 100 : 0), "average"))
+    expect(bundled.swapInSpeedData).toEqual(buildMetricRateChartSeries(metrics, 3600, (row) => row.swap_in ?? 0))
+    expect(bundled.swapOutSpeedData).toEqual(buildMetricRateChartSeries(metrics, 3600, (row) => row.swap_out ?? 0))
+    expect(bundled.oomKillsData).toEqual(buildMetricChartSeries(metrics, 3600, (row) => row.oom_kills ?? 0, "last"))
   })
 
   it("only returns a latest rate when the newest samples are in the same segment", () => {

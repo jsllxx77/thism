@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { api, type AccessMode, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
+import { api, type AccessMode, type DiskHealthStats, type DockerSnapshot, type LatencyMonitor, type LatencyMonitorResult, type MetricsRow, type Node, type Process, type ServiceCheck } from "../lib/api"
 import { NetworkSummary } from "../components/node-detail/NetworkSummary"
 import { formatBytes, formatBytesPerSecond, formatCompactBytes, formatCompactBytesPerSecond } from "../lib/units"
 import { appendLiveMetricPoint, buildNodeDetailMetricSeries, getLatestMetricRate, getMetricRangeDelta } from "../lib/metric-series"
@@ -7,6 +7,7 @@ import { getDashboardWS } from "../lib/ws"
 import type { WSMessage } from "../lib/ws"
 import { NodeHero } from "../components/node-detail/NodeHero"
 import { HardwarePassport } from "../components/node-detail/HardwarePassport"
+import { DiskHealthPanel } from "../components/node-detail/DiskHealthPanel"
 import { LatencyMonitorChart } from "../components/node-detail/LatencyMonitorChart"
 import { MetricTabs } from "../components/node-detail/MetricTabs"
 import { ProcessTable } from "../components/node-detail/ProcessTable"
@@ -26,12 +27,43 @@ type LiveDiskStats = {
   total?: number
 }
 
+type LiveLoadStats = {
+  load1?: number
+  load5?: number
+  load15?: number
+}
+
+type LiveCPUStats = {
+  iowait_percent?: number
+  steal_percent?: number
+}
+
+type LivePressureStats = {
+  cpu_some_avg10?: number
+  memory_some_avg10?: number
+  memory_full_avg10?: number
+  io_some_avg10?: number
+  io_full_avg10?: number
+}
+
+type LiveSwapStats = {
+  used?: number
+  total?: number
+  in?: number
+  out?: number
+}
+
 type LiveMetricsMessage = Partial<MetricsRow> & {
   cpu: number
+  load?: LiveLoadStats
+  cpu_stats?: LiveCPUStats
+  pressure?: LivePressureStats
   mem?: { used?: number; total?: number }
+  swap?: LiveSwapStats
   net?: { rx_bytes?: number; tx_bytes?: number }
   disk_io?: { read_bytes?: number; write_bytes?: number }
   disk?: LiveDiskStats[]
+  disk_health?: DiskHealthStats[]
 }
 
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 768px)"
@@ -235,14 +267,32 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
           data: LiveMetricsMessage
         }
         if (node_id !== nodeId) return
+        if (Array.isArray(data.disk_health)) {
+          setNode((current) => current ? { ...current, disk_health: data.disk_health } : current)
+        }
         setMetrics((prev) => {
           const previousPoint = prev[prev.length - 1]
           const { diskUsed, diskTotal } = resolveLiveDiskTotals(data, previousPoint)
           const point: MetricsRow = {
             ts: data.ts ?? Math.floor(Date.now() / 1000),
             cpu: data.cpu,
+            load1: data.load?.load1 ?? data.load1 ?? previousPoint?.load1 ?? 0,
+            load5: data.load?.load5 ?? data.load5 ?? previousPoint?.load5 ?? 0,
+            load15: data.load?.load15 ?? data.load15 ?? previousPoint?.load15 ?? 0,
+            cpu_iowait_percent: data.cpu_stats?.iowait_percent ?? data.cpu_iowait_percent ?? previousPoint?.cpu_iowait_percent ?? 0,
+            cpu_steal_percent: data.cpu_stats?.steal_percent ?? data.cpu_steal_percent ?? previousPoint?.cpu_steal_percent ?? 0,
+            pressure_cpu_some: data.pressure?.cpu_some_avg10 ?? data.pressure_cpu_some ?? previousPoint?.pressure_cpu_some ?? 0,
+            pressure_memory_some: data.pressure?.memory_some_avg10 ?? data.pressure_memory_some ?? previousPoint?.pressure_memory_some ?? 0,
+            pressure_memory_full: data.pressure?.memory_full_avg10 ?? data.pressure_memory_full ?? previousPoint?.pressure_memory_full ?? 0,
+            pressure_io_some: data.pressure?.io_some_avg10 ?? data.pressure_io_some ?? previousPoint?.pressure_io_some ?? 0,
+            pressure_io_full: data.pressure?.io_full_avg10 ?? data.pressure_io_full ?? previousPoint?.pressure_io_full ?? 0,
             mem_used: data.mem?.used ?? 0,
             mem_total: data.mem?.total ?? 0,
+            swap_used: data.swap?.used ?? data.swap_used ?? previousPoint?.swap_used ?? 0,
+            swap_total: data.swap?.total ?? data.swap_total ?? previousPoint?.swap_total ?? 0,
+            swap_in: data.swap?.in ?? data.swap_in ?? previousPoint?.swap_in ?? 0,
+            swap_out: data.swap?.out ?? data.swap_out ?? previousPoint?.swap_out ?? 0,
+            oom_kills: data.oom_kills ?? previousPoint?.oom_kills ?? 0,
             disk_used: diskUsed,
             disk_total: diskTotal,
             disk_read_bytes: data.disk_io?.read_bytes ?? data.disk_read_bytes ?? previousPoint?.disk_read_bytes ?? 0,
@@ -274,7 +324,29 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     return () => ws.off(handler)
   }, [effectiveRange, latencyMonitors, nodeId])
 
-  const { cpuData, memData, netRxData, netTxData, netRxSpeedData, netTxSpeedData, diskData, diskReadSpeedData, diskWriteSpeedData } = useMemo(
+  const {
+    cpuData,
+    load1Data,
+    cpuIOWaitData,
+    cpuStealData,
+    pressureCPUSomeData,
+    pressureMemorySomeData,
+    pressureMemoryFullData,
+    pressureIOSomeData,
+    pressureIOFullData,
+    memData,
+    swapData,
+    swapInSpeedData,
+    swapOutSpeedData,
+    oomKillsData,
+    netRxData,
+    netTxData,
+    netRxSpeedData,
+    netTxSpeedData,
+    diskData,
+    diskReadSpeedData,
+    diskWriteSpeedData,
+  } = useMemo(
     () => buildNodeDetailMetricSeries(metrics, effectiveRange),
     [effectiveRange, metrics],
   )
@@ -344,6 +416,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         <>
           <NodeHero node={node} showIP={accessMode !== "guest"} uptimeSeconds={heroUptimeSeconds} />
           <HardwarePassport hardware={node?.hardware} os={node?.os} arch={node?.arch} />
+          <DiskHealthPanel disks={node?.disk_health ?? []} />
           <>
             <section className="panel-card enterprise-surface rounded-[24px] p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -372,7 +445,19 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
             <MetricTabs
               range={range}
               cpuData={cpuData}
+              load1Data={load1Data}
+              cpuIOWaitData={cpuIOWaitData}
+              cpuStealData={cpuStealData}
+              pressureCPUSomeData={pressureCPUSomeData}
+              pressureMemorySomeData={pressureMemorySomeData}
+              pressureMemoryFullData={pressureMemoryFullData}
+              pressureIOSomeData={pressureIOSomeData}
+              pressureIOFullData={pressureIOFullData}
               memData={memData}
+              swapData={swapData}
+              swapInSpeedData={swapInSpeedData}
+              swapOutSpeedData={swapOutSpeedData}
+              oomKillsData={oomKillsData}
               netRxData={netRxData}
               netTxData={netTxData}
               netRxSpeedData={netRxSpeedData}

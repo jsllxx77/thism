@@ -268,6 +268,11 @@ func TestStoreMetrics(t *testing.T) {
 		TS:            time.Now().Unix(),
 		CPU:           55.0,
 		UptimeSeconds: 3723,
+		Load:          models.LoadStats{Load1: 0.42, Load5: 0.52, Load15: 0.62},
+		CPUStats:      models.CPUStats{IOWaitPercent: 3.5, StealPercent: 1.25},
+		Pressure:      models.PressureStats{CPUSomeAvg10: 0.7, MemorySomeAvg10: 1.1, MemoryFullAvg10: 0.2, IOSomeAvg10: 2.3, IOFullAvg10: 0.4},
+		Swap:          models.SwapStats{Used: 512, Total: 2048, In: 128, Out: 256},
+		OOMKills:      2,
 		Mem:           models.MemStats{Used: 1024, Total: 4096},
 		DiskIO:        models.DiskIOStats{ReadBytes: 4096, WriteBytes: 8192},
 	}
@@ -287,6 +292,89 @@ func TestStoreMetrics(t *testing.T) {
 	}
 	if rows[0].DiskReadBytes != 4096 || rows[0].DiskWriteBytes != 8192 {
 		t.Fatalf("expected disk IO counters to round-trip, got %#v", rows[0])
+	}
+	if rows[0].Load1 != 0.42 || rows[0].Load5 != 0.52 || rows[0].Load15 != 0.62 {
+		t.Fatalf("expected load stats to round-trip, got %#v", rows[0])
+	}
+	if rows[0].CPUIOWaitPercent != 3.5 || rows[0].CPUStealPercent != 1.25 {
+		t.Fatalf("expected cpu wait stats to round-trip, got %#v", rows[0])
+	}
+	if rows[0].PressureCPUSome != 0.7 || rows[0].PressureMemorySome != 1.1 || rows[0].PressureMemoryFull != 0.2 || rows[0].PressureIOSome != 2.3 || rows[0].PressureIOFull != 0.4 {
+		t.Fatalf("expected pressure stats to round-trip, got %#v", rows[0])
+	}
+	if rows[0].SwapUsed != 512 || rows[0].SwapTotal != 2048 || rows[0].SwapIn != 128 || rows[0].SwapOut != 256 {
+		t.Fatalf("expected swap stats to round-trip, got %#v", rows[0])
+	}
+	if rows[0].OOMKills != 2 {
+		t.Fatalf("expected oom kills to round-trip, got %d", rows[0].OOMKills)
+	}
+}
+
+func TestMetricsRollupIncludesPressureAndSwapStats(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "n1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	baseTS := int64(1700000040)
+	samples := []*models.MetricsPayload{
+		{
+			TS:            baseTS,
+			CPU:           20,
+			Load:          models.LoadStats{Load1: 1.0, Load5: 2.0, Load15: 3.0},
+			CPUStats:      models.CPUStats{IOWaitPercent: 4, StealPercent: 5},
+			Pressure:      models.PressureStats{CPUSomeAvg10: 1.5, MemorySomeAvg10: 2.5, MemoryFullAvg10: 0.5, IOSomeAvg10: 3.5, IOFullAvg10: 0.75},
+			Swap:          models.SwapStats{Used: 100, Total: 1000, In: 10, Out: 20},
+			OOMKills:      1,
+			UptimeSeconds: 1000,
+			Mem:           models.MemStats{Used: 100, Total: 1000},
+		},
+		{
+			TS:            baseTS + 10,
+			CPU:           40,
+			Load:          models.LoadStats{Load1: 3.0, Load5: 4.0, Load15: 5.0},
+			CPUStats:      models.CPUStats{IOWaitPercent: 8, StealPercent: 9},
+			Pressure:      models.PressureStats{CPUSomeAvg10: 2.5, MemorySomeAvg10: 3.5, MemoryFullAvg10: 1.5, IOSomeAvg10: 4.5, IOFullAvg10: 1.75},
+			Swap:          models.SwapStats{Used: 300, Total: 1000, In: 30, Out: 50},
+			OOMKills:      3,
+			UptimeSeconds: 1010,
+			Mem:           models.MemStats{Used: 300, Total: 1000},
+		},
+	}
+	for _, sample := range samples {
+		if err := s.InsertMetrics("n1", sample); err != nil {
+			t.Fatalf("InsertMetrics: %v", err)
+		}
+	}
+
+	if err := s.RollupMetrics1m(baseTS, baseTS+60); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	rows, err := s.QueryMetrics1m("n1", (baseTS/60)*60, (baseTS/60)*60)
+	if err != nil {
+		t.Fatalf("QueryMetrics1m: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one rollup row, got %d", len(rows))
+	}
+	row := rows[0]
+	if row.Load1 != 2.0 || row.Load5 != 3.0 || row.Load15 != 4.0 {
+		t.Fatalf("expected averaged load stats, got %#v", row)
+	}
+	if row.CPUIOWaitPercent != 6.0 || row.CPUStealPercent != 7.0 {
+		t.Fatalf("expected averaged cpu wait stats, got %#v", row)
+	}
+	if row.PressureCPUSome != 2.0 || row.PressureMemorySome != 3.0 || row.PressureMemoryFull != 1.0 || row.PressureIOSome != 4.0 || row.PressureIOFull != 1.25 {
+		t.Fatalf("expected averaged pressure stats, got %#v", row)
+	}
+	if row.SwapUsed != 200 || row.SwapTotal != 1000 || row.SwapIn != 30 || row.SwapOut != 50 || row.OOMKills != 3 {
+		t.Fatalf("expected rollup swap and oom stats, got %#v", row)
 	}
 }
 
@@ -326,6 +414,70 @@ func TestStoreNodeHardwareMetadata(t *testing.T) {
 	}
 	if node.Hardware.DiskTotal != 322122547200 {
 		t.Fatalf("expected disk total to round-trip, got %d", node.Hardware.DiskTotal)
+	}
+}
+
+func TestStoreNodeDiskHealthMetadata(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "n1", Token: "t1", Name: "node-1"}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	temp := 41.0
+	lifeUsed := 6.0
+	spare := 92.0
+	payload := &models.MetricsPayload{
+		TS:  1700000100,
+		CPU: 10,
+		Mem: models.MemStats{Used: 1, Total: 2},
+		DiskHealth: []models.DiskHealthStats{
+			{
+				Name:                  "nvme0n1",
+				Path:                  "/dev/nvme0n1",
+				Type:                  models.DiskHealthTypeNVMe,
+				Model:                 "Fast NVMe",
+				Serial:                "NVME123",
+				Firmware:              "1.2.3",
+				SizeBytes:             1024000,
+				Status:                models.DiskHealthStatusOK,
+				TemperatureC:          &temp,
+				LifeUsedPercent:       &lifeUsed,
+				AvailableSparePercent: &spare,
+				PowerOnHours:          1234,
+				UnsafeShutdowns:       5,
+			},
+		},
+	}
+	if _, err := s.ApplyAgentSnapshot("n1", payload, "10.0.0.1", 1700000100); err != nil {
+		t.Fatalf("ApplyAgentSnapshot: %v", err)
+	}
+
+	node, err := s.GetNodeByID("n1")
+	if err != nil {
+		t.Fatalf("GetNodeByID: %v", err)
+	}
+	if len(node.DiskHealth) != 1 {
+		t.Fatalf("expected one disk health row, got %#v", node.DiskHealth)
+	}
+	disk := node.DiskHealth[0]
+	if disk.Name != "nvme0n1" || disk.Status != models.DiskHealthStatusOK || disk.TemperatureC == nil || *disk.TemperatureC != 41 {
+		t.Fatalf("unexpected disk health row: %#v", disk)
+	}
+
+	if _, err := s.ApplyAgentSnapshot("n1", &models.MetricsPayload{TS: 1700000110, CPU: 20, Mem: models.MemStats{Used: 1, Total: 2}}, "10.0.0.1", 1700000110); err != nil {
+		t.Fatalf("ApplyAgentSnapshot without disk health: %v", err)
+	}
+	node, err = s.GetNodeByID("n1")
+	if err != nil {
+		t.Fatalf("GetNodeByID after nil disk health: %v", err)
+	}
+	if len(node.DiskHealth) != 1 || node.DiskHealth[0].Name != "nvme0n1" {
+		t.Fatalf("expected nil disk health payload to preserve previous snapshot, got %#v", node.DiskHealth)
 	}
 }
 

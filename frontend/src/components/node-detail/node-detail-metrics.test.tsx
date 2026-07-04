@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import type { Node } from "../../lib/api"
 import { NodeHero } from "./NodeHero"
 import { MetricTabs } from "./MetricTabs"
+import { DiskHealthPanel } from "./DiskHealthPanel"
 
 const node: Node = {
   id: "node-1",
@@ -34,6 +35,39 @@ const node: Node = {
     virtualization_system: "kvm",
     virtualization_role: "guest",
   },
+  disk_health: [
+    {
+      name: "nvme0n1",
+      path: "/dev/nvme0n1",
+      type: "nvme",
+      model: "Fast NVMe",
+      serial: "NVME123",
+      firmware: "1.2.3",
+      size_bytes: 1024000,
+      status: "ok",
+      temperature_c: 41,
+      life_used_percent: 6,
+      available_spare_percent: 92,
+      power_on_hours: 1234,
+      unsafe_shutdowns: 5,
+      media_errors: 0,
+    },
+    {
+      name: "sda",
+      path: "/dev/sda",
+      type: "ata",
+      model: "Bulk SATA",
+      size_bytes: 2048000,
+      status: "critical",
+      temperature_c: 43,
+      power_on_hours: 2222,
+      media_errors: 3,
+      reallocated_sectors: 2,
+      pending_sectors: 1,
+      interface_crc_errors: 3,
+      message: "ATA SMART reports unstable or uncorrectable sectors",
+    },
+  ],
 }
 
 describe("node detail metrics", () => {
@@ -74,6 +108,18 @@ describe("node detail metrics", () => {
         diskData={points}
         diskReadSpeedData={points}
         diskWriteSpeedData={points}
+        load1Data={points}
+        cpuIOWaitData={points}
+        cpuStealData={points}
+        pressureCPUSomeData={points}
+        pressureMemorySomeData={points}
+        pressureMemoryFullData={points}
+        pressureIOSomeData={points}
+        pressureIOFullData={points}
+        swapData={points}
+        swapInSpeedData={points}
+        swapOutSpeedData={points}
+        oomKillsData={points}
       />
     )
 
@@ -88,7 +134,37 @@ describe("node detail metrics", () => {
     expect(screen.getByLabelText("Disk IO")).toBeInTheDocument()
     expect(screen.getByText("Disk Read Speed")).toBeInTheDocument()
     expect(screen.getByText("Disk Write Speed")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "System Pressure" })).toBeInTheDocument()
+    expect(screen.getByText("Load Average (1m)")).toBeInTheDocument()
+    expect(screen.getByText("CPU I/O Wait")).toBeInTheDocument()
+    expect(screen.getByText("CPU Steal")).toBeInTheDocument()
+    expect(screen.getByText("CPU Pressure")).toBeInTheDocument()
+    expect(screen.getByText("IO Pressure")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Memory Pressure" })).toBeInTheDocument()
+    expect(screen.getByText("Swap Usage")).toBeInTheDocument()
+    expect(screen.getByText("Swap In Speed")).toBeInTheDocument()
+    expect(screen.getByText("Swap Out Speed")).toBeInTheDocument()
+    expect(screen.getByText("OOM Kills")).toBeInTheDocument()
+    expect(screen.getByText("Memory Pressure")).toBeInTheDocument()
     const resourceSection = container.querySelector("section[aria-labelledby='resource-usage-heading'] .grid") as HTMLElement | null
     expect(resourceSection?.className).toContain("lg:grid-cols-3")
+  })
+
+  it("renders disk health details", () => {
+    render(<DiskHealthPanel disks={node.disk_health ?? []} />)
+
+    expect(screen.getByRole("heading", { name: "Disk Health" })).toBeInTheDocument()
+    expect(screen.getByText("nvme0n1")).toBeInTheDocument()
+    expect(screen.getByText("Fast NVMe")).toBeInTheDocument()
+    expect(screen.getByText("OK")).toBeInTheDocument()
+    expect(screen.getByText("41.0°C")).toBeInTheDocument()
+    expect(screen.getByText("6.0%")).toBeInTheDocument()
+    expect(screen.getByText("92.0%")).toBeInTheDocument()
+    expect(screen.getByText("sda")).toBeInTheDocument()
+    expect(screen.getByText("Critical")).toBeInTheDocument()
+    expect(screen.getByText("Reallocated 2")).toBeInTheDocument()
+    expect(screen.getByText("Pending 1")).toBeInTheDocument()
+    expect(screen.getByText("CRC 3")).toBeInTheDocument()
+    expect(screen.getByText(/ATA SMART reports unstable/)).toBeInTheDocument()
   })
 })

@@ -67,6 +67,7 @@ export type Node = {
   online: boolean
   tags?: string[]
   hardware?: NodeHardware | null
+  disk_health?: DiskHealthStats[]
   latest_metrics?: MetricsRow | null
 }
 
@@ -85,11 +86,51 @@ export type NodeHardware = {
   virtualization_role: string
 }
 
+export type DiskHealthStatus = "ok" | "warning" | "critical" | "unsupported" | "unknown"
+
+export type DiskHealthStats = {
+  name: string
+  path?: string
+  type: string
+  model?: string
+  serial?: string
+  firmware?: string
+  size_bytes?: number
+  status: DiskHealthStatus
+  temperature_c?: number
+  life_used_percent?: number
+  available_spare_percent?: number
+  power_on_hours?: number
+  unsafe_shutdowns?: number
+  media_errors?: number
+  reallocated_sectors?: number
+  pending_sectors?: number
+  offline_uncorrectable?: number
+  interface_crc_errors?: number
+  critical_warning?: number
+  message?: string
+}
+
 export type MetricsRow = {
   ts: number
   cpu: number
+  load1?: number
+  load5?: number
+  load15?: number
+  cpu_iowait_percent?: number
+  cpu_steal_percent?: number
+  pressure_cpu_some?: number
+  pressure_memory_some?: number
+  pressure_memory_full?: number
+  pressure_io_some?: number
+  pressure_io_full?: number
   mem_used: number
   mem_total: number
+  swap_used?: number
+  swap_total?: number
+  swap_in?: number
+  swap_out?: number
+  oom_kills?: number
   disk_used: number
   disk_total: number
   disk_read_bytes?: number

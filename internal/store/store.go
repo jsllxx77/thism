@@ -70,36 +70,66 @@ func IsValidMetricsRetentionDays(days int) bool {
 
 // MetricsRow is a flat struct representing a single metrics sample for API use.
 type MetricsRow struct {
-	TS             int64   `json:"ts"`
-	CPU            float64 `json:"cpu"`
-	MemUsed        uint64  `json:"mem_used"`
-	MemTotal       uint64  `json:"mem_total"`
-	DiskUsed       uint64  `json:"disk_used"`
-	DiskTotal      uint64  `json:"disk_total"`
-	DiskReadBytes  uint64  `json:"disk_read_bytes"`
-	DiskWriteBytes uint64  `json:"disk_write_bytes"`
-	NetRx          uint64  `json:"net_rx"`
-	NetTx          uint64  `json:"net_tx"`
-	UptimeSeconds  uint64  `json:"uptime_seconds,omitempty"`
+	TS                 int64   `json:"ts"`
+	CPU                float64 `json:"cpu"`
+	Load1              float64 `json:"load1"`
+	Load5              float64 `json:"load5"`
+	Load15             float64 `json:"load15"`
+	CPUIOWaitPercent   float64 `json:"cpu_iowait_percent"`
+	CPUStealPercent    float64 `json:"cpu_steal_percent"`
+	PressureCPUSome    float64 `json:"pressure_cpu_some"`
+	PressureMemorySome float64 `json:"pressure_memory_some"`
+	PressureMemoryFull float64 `json:"pressure_memory_full"`
+	PressureIOSome     float64 `json:"pressure_io_some"`
+	PressureIOFull     float64 `json:"pressure_io_full"`
+	MemUsed            uint64  `json:"mem_used"`
+	MemTotal           uint64  `json:"mem_total"`
+	SwapUsed           uint64  `json:"swap_used"`
+	SwapTotal          uint64  `json:"swap_total"`
+	SwapIn             uint64  `json:"swap_in"`
+	SwapOut            uint64  `json:"swap_out"`
+	OOMKills           uint64  `json:"oom_kills"`
+	DiskUsed           uint64  `json:"disk_used"`
+	DiskTotal          uint64  `json:"disk_total"`
+	DiskReadBytes      uint64  `json:"disk_read_bytes"`
+	DiskWriteBytes     uint64  `json:"disk_write_bytes"`
+	NetRx              uint64  `json:"net_rx"`
+	NetTx              uint64  `json:"net_tx"`
+	UptimeSeconds      uint64  `json:"uptime_seconds,omitempty"`
 }
 
 type Metrics1mRow struct {
-	NodeID       string
-	TS           int64
-	Samples      int64
-	CPUAvg       float64
-	CPUMax       float64
-	MemUsedAvg   int64
-	MemUsedMax   int64
-	MemTotalMax  int64
-	DiskUsedAvg  int64
-	DiskUsedMax  int64
-	DiskTotalMax int64
-	DiskReadMax  int64
-	DiskWriteMax int64
-	NetRxMax     int64
-	NetTxMax     int64
-	UptimeMax    int64
+	NodeID                string
+	TS                    int64
+	Samples               int64
+	CPUAvg                float64
+	CPUMax                float64
+	Load1Avg              float64
+	Load5Avg              float64
+	Load15Avg             float64
+	CPUIOWaitAvg          float64
+	CPUStealAvg           float64
+	PressureCPUSomeAvg    float64
+	PressureMemorySomeAvg float64
+	PressureMemoryFullAvg float64
+	PressureIOSomeAvg     float64
+	PressureIOFullAvg     float64
+	MemUsedAvg            int64
+	MemUsedMax            int64
+	MemTotalMax           int64
+	SwapUsedAvg           int64
+	SwapTotalMax          int64
+	SwapInMax             int64
+	SwapOutMax            int64
+	OOMKillsMax           int64
+	DiskUsedAvg           int64
+	DiskUsedMax           int64
+	DiskTotalMax          int64
+	DiskReadMax           int64
+	DiskWriteMax          int64
+	NetRxMax              int64
+	NetTxMax              int64
+	UptimeMax             int64
 }
 
 // New opens (or creates) the SQLite database at the given path, runs migrations,
@@ -177,6 +207,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     arch          TEXT DEFAULT '',
     agent_version TEXT DEFAULT '',
     hardware_json TEXT DEFAULT '',
+    disk_health_json TEXT DEFAULT '',
     created_at    INTEGER NOT NULL DEFAULT 0,
     last_seen     INTEGER NOT NULL DEFAULT 0
 );
@@ -194,8 +225,23 @@ CREATE TABLE IF NOT EXISTS metrics (
     node_id     TEXT NOT NULL,
     ts          INTEGER NOT NULL,
     cpu_percent REAL DEFAULT 0,
+    load1       REAL DEFAULT 0,
+    load5       REAL DEFAULT 0,
+    load15      REAL DEFAULT 0,
+    cpu_iowait_percent REAL DEFAULT 0,
+    cpu_steal_percent  REAL DEFAULT 0,
+    pressure_cpu_some    REAL DEFAULT 0,
+    pressure_memory_some REAL DEFAULT 0,
+    pressure_memory_full REAL DEFAULT 0,
+    pressure_io_some     REAL DEFAULT 0,
+    pressure_io_full     REAL DEFAULT 0,
     mem_used    INTEGER DEFAULT 0,
     mem_total   INTEGER DEFAULT 0,
+    swap_used   INTEGER DEFAULT 0,
+    swap_total  INTEGER DEFAULT 0,
+    swap_in     INTEGER DEFAULT 0,
+    swap_out    INTEGER DEFAULT 0,
+    oom_kills   INTEGER DEFAULT 0,
     disk_used   INTEGER DEFAULT 0,
     disk_total  INTEGER DEFAULT 0,
     disk_read_bytes  INTEGER DEFAULT 0,
@@ -213,9 +259,24 @@ CREATE TABLE IF NOT EXISTS metrics_1m (
     samples            INTEGER NOT NULL DEFAULT 0,
     cpu_avg            REAL DEFAULT 0,
     cpu_max            REAL DEFAULT 0,
+    load1_avg          REAL DEFAULT 0,
+    load5_avg          REAL DEFAULT 0,
+    load15_avg         REAL DEFAULT 0,
+    cpu_iowait_avg     REAL DEFAULT 0,
+    cpu_steal_avg      REAL DEFAULT 0,
+    pressure_cpu_some_avg    REAL DEFAULT 0,
+    pressure_memory_some_avg REAL DEFAULT 0,
+    pressure_memory_full_avg REAL DEFAULT 0,
+    pressure_io_some_avg     REAL DEFAULT 0,
+    pressure_io_full_avg     REAL DEFAULT 0,
     mem_used_avg       INTEGER DEFAULT 0,
     mem_used_max       INTEGER DEFAULT 0,
     mem_total_max      INTEGER DEFAULT 0,
+    swap_used_avg      INTEGER DEFAULT 0,
+    swap_total_max     INTEGER DEFAULT 0,
+    swap_in_max        INTEGER DEFAULT 0,
+    swap_out_max       INTEGER DEFAULT 0,
+    oom_kills_max      INTEGER DEFAULT 0,
     disk_used_avg      INTEGER DEFAULT 0,
     disk_used_max      INTEGER DEFAULT 0,
     disk_total_max     INTEGER DEFAULT 0,
@@ -378,6 +439,9 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 	if err := s.ensureColumn("nodes", "hardware_json", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("nodes", "disk_health_json", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("nodes", "ip_families", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
@@ -398,6 +462,46 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 	}
 	if err := s.ensureColumn("metrics_1m", "disk_write_max", "INTEGER DEFAULT 0"); err != nil {
 		return err
+	}
+	for _, column := range []struct {
+		table      string
+		name       string
+		definition string
+	}{
+		{"metrics", "load1", "REAL DEFAULT 0"},
+		{"metrics", "load5", "REAL DEFAULT 0"},
+		{"metrics", "load15", "REAL DEFAULT 0"},
+		{"metrics", "cpu_iowait_percent", "REAL DEFAULT 0"},
+		{"metrics", "cpu_steal_percent", "REAL DEFAULT 0"},
+		{"metrics", "pressure_cpu_some", "REAL DEFAULT 0"},
+		{"metrics", "pressure_memory_some", "REAL DEFAULT 0"},
+		{"metrics", "pressure_memory_full", "REAL DEFAULT 0"},
+		{"metrics", "pressure_io_some", "REAL DEFAULT 0"},
+		{"metrics", "pressure_io_full", "REAL DEFAULT 0"},
+		{"metrics", "swap_used", "INTEGER DEFAULT 0"},
+		{"metrics", "swap_total", "INTEGER DEFAULT 0"},
+		{"metrics", "swap_in", "INTEGER DEFAULT 0"},
+		{"metrics", "swap_out", "INTEGER DEFAULT 0"},
+		{"metrics", "oom_kills", "INTEGER DEFAULT 0"},
+		{"metrics_1m", "load1_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "load5_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "load15_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "cpu_iowait_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "cpu_steal_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "pressure_cpu_some_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "pressure_memory_some_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "pressure_memory_full_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "pressure_io_some_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "pressure_io_full_avg", "REAL DEFAULT 0"},
+		{"metrics_1m", "swap_used_avg", "INTEGER DEFAULT 0"},
+		{"metrics_1m", "swap_total_max", "INTEGER DEFAULT 0"},
+		{"metrics_1m", "swap_in_max", "INTEGER DEFAULT 0"},
+		{"metrics_1m", "swap_out_max", "INTEGER DEFAULT 0"},
+		{"metrics_1m", "oom_kills_max", "INTEGER DEFAULT 0"},
+	} {
+		if err := s.ensureColumn(column.table, column.name, column.definition); err != nil {
+			return err
+		}
 	}
 	if err := s.ensureColumn("monitor_results", "loss_percent", "REAL"); err != nil {
 		return err
@@ -2111,6 +2215,31 @@ func decodeHardware(raw string) *models.NodeHardware {
 	return &hardware
 }
 
+func encodeDiskHealth(disks []models.DiskHealthStats) (string, error) {
+	if disks == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(disks)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeDiskHealth(raw string) []models.DiskHealthStats {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var disks []models.DiskHealthStats
+	if err := json.Unmarshal([]byte(raw), &disks); err != nil {
+		return nil
+	}
+	if disks == nil {
+		return []models.DiskHealthStats{}
+	}
+	return disks
+}
+
 func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
 	var used uint64
 	var total uint64
@@ -2126,7 +2255,13 @@ func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
 // functions here quickly regresses page load time on real deployments.
 func latestMetricsLookupQuery() string {
 	return `
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
+SELECT ts, cpu_percent,
+       load1, load5, load15,
+       cpu_iowait_percent, cpu_steal_percent,
+       pressure_cpu_some, pressure_memory_some, pressure_memory_full, pressure_io_some, pressure_io_full,
+       mem_used, mem_total,
+       swap_used, swap_total, swap_in, swap_out, oom_kills,
+       disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
 FROM metrics
 WHERE node_id = ?
 ORDER BY ts DESC, id DESC
@@ -2139,7 +2274,13 @@ func latestMetricsBatchLookupQuery(nodeCount int) string {
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", nodeCount), ",")
 	return `
-SELECT n.id, m.ts, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.disk_read_bytes, m.disk_write_bytes, m.net_rx, m.net_tx, m.uptime_seconds
+SELECT n.id, m.ts, m.cpu_percent,
+       m.load1, m.load5, m.load15,
+       m.cpu_iowait_percent, m.cpu_steal_percent,
+       m.pressure_cpu_some, m.pressure_memory_some, m.pressure_memory_full, m.pressure_io_some, m.pressure_io_full,
+       m.mem_used, m.mem_total,
+       m.swap_used, m.swap_total, m.swap_in, m.swap_out, m.oom_kills,
+       m.disk_used, m.disk_total, m.disk_read_bytes, m.disk_write_bytes, m.net_rx, m.net_tx, m.uptime_seconds
 FROM nodes n
 JOIN metrics m ON m.id = (
 	SELECT id
@@ -2529,11 +2670,15 @@ func (s *Store) UpsertNode(node *models.Node) error {
 	if err != nil {
 		return err
 	}
+	diskHealthJSON, err := encodeDiskHealth(node.DiskHealth)
+	if err != nil {
+		return err
+	}
 	ipFamiliesJSON := encodeIPFamilies(node.IPFamilies)
 
 	_, err = s.db.Exec(`
-INSERT INTO nodes (id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO nodes (id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, disk_health_json, created_at, last_seen)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name          = excluded.name,
     token         = excluded.token,
@@ -2543,9 +2688,10 @@ ON CONFLICT(id) DO UPDATE SET
     arch          = excluded.arch,
     agent_version = CASE WHEN excluded.agent_version != '' THEN excluded.agent_version ELSE nodes.agent_version END,
     hardware_json = CASE WHEN excluded.hardware_json != '' THEN excluded.hardware_json ELSE nodes.hardware_json END,
+    disk_health_json = CASE WHEN excluded.disk_health_json != '' THEN excluded.disk_health_json ELSE nodes.disk_health_json END,
     last_seen     = excluded.last_seen
 `,
-		node.ID, node.Name, node.Token, node.IP, ipFamiliesJSON, node.OS, node.Arch, node.AgentVersion, hardwareJSON,
+		node.ID, node.Name, node.Token, node.IP, ipFamiliesJSON, node.OS, node.Arch, node.AgentVersion, hardwareJSON, diskHealthJSON,
 		node.CreatedAt, node.LastSeen,
 	)
 	return err
@@ -2608,6 +2754,15 @@ func updateNodeMetadataWith(db sqlExecer, nodeID, ip string, ipFamilies []string
 	return err
 }
 
+func updateNodeDiskHealthWith(db sqlExecer, nodeID string, disks []models.DiskHealthStats) error {
+	raw, err := encodeDiskHealth(disks)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`UPDATE nodes SET disk_health_json = ? WHERE id = ?`, raw, nodeID)
+	return err
+}
+
 func loadNodeIPFamiliesWith(db queryRower, nodeID string) ([]string, error) {
 	var rawFamilies string
 	if err := db.QueryRow(`SELECT ip_families FROM nodes WHERE id = ?`, nodeID).Scan(&rawFamilies); err != nil {
@@ -2622,14 +2777,15 @@ func loadNodeIPFamiliesWith(db queryRower, nodeID string) ([]string, error) {
 // GetNodeByToken returns the node with the given token, or (nil, nil) if not found.
 func (s *Store) GetNodeByToken(token string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, disk_health_json, created_at, last_seen
 FROM nodes WHERE token = ?`, token)
 
 	var ipFamiliesJSON string
 	var hardwareJSON string
+	var diskHealthJSON string
 	var n models.Node
 	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
-		&hardwareJSON, &n.CreatedAt, &n.LastSeen)
+		&hardwareJSON, &diskHealthJSON, &n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2638,6 +2794,7 @@ FROM nodes WHERE token = ?`, token)
 	}
 	n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 	n.Hardware = decodeHardware(hardwareJSON)
+	n.DiskHealth = decodeDiskHealth(diskHealthJSON)
 	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
 		return nil, err
 	}
@@ -2647,14 +2804,15 @@ FROM nodes WHERE token = ?`, token)
 // GetNodeByID returns the node with the given ID, or (nil, nil) if not found.
 func (s *Store) GetNodeByID(id string) (*models.Node, error) {
 	row := s.db.QueryRow(`
-SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, disk_health_json, created_at, last_seen
 FROM nodes WHERE id = ?`, id)
 
 	var ipFamiliesJSON string
 	var hardwareJSON string
+	var diskHealthJSON string
 	var n models.Node
 	err := row.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
-		&hardwareJSON, &n.CreatedAt, &n.LastSeen)
+		&hardwareJSON, &diskHealthJSON, &n.CreatedAt, &n.LastSeen)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2663,6 +2821,7 @@ FROM nodes WHERE id = ?`, id)
 	}
 	n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 	n.Hardware = decodeHardware(hardwareJSON)
+	n.DiskHealth = decodeDiskHealth(diskHealthJSON)
 	if err := s.hydrateNodeTags([]*models.Node{&n}); err != nil {
 		return nil, err
 	}
@@ -2672,7 +2831,7 @@ FROM nodes WHERE id = ?`, id)
 // ListNodes returns all registered nodes.
 func (s *Store) ListNodes() ([]*models.Node, error) {
 	rows, err := s.db.Query(`
-SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, created_at, last_seen
+SELECT id, name, token, ip, ip_families, os, arch, agent_version, hardware_json, disk_health_json, created_at, last_seen
 FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -2684,12 +2843,14 @@ FROM nodes ORDER BY name`)
 		var n models.Node
 		var ipFamiliesJSON string
 		var hardwareJSON string
+		var diskHealthJSON string
 		if err := rows.Scan(&n.ID, &n.Name, &n.Token, &n.IP, &ipFamiliesJSON, &n.OS, &n.Arch, &n.AgentVersion,
-			&hardwareJSON, &n.CreatedAt, &n.LastSeen); err != nil {
+			&hardwareJSON, &diskHealthJSON, &n.CreatedAt, &n.LastSeen); err != nil {
 			return nil, err
 		}
 		n.IPFamilies = decodeIPFamilies(ipFamiliesJSON)
 		n.Hardware = decodeHardware(hardwareJSON)
+		n.DiskHealth = decodeDiskHealth(diskHealthJSON)
 		nodes = append(nodes, &n)
 	}
 	if err := rows.Err(); err != nil {
@@ -2754,10 +2915,23 @@ func insertMetricsWith(db sqlExecer, nodeID string, m *models.MetricsPayload) er
 
 	diskUsed, diskTotal := aggregateDiskTotals(m.Disk)
 	_, err := db.Exec(`
-INSERT INTO metrics (node_id, ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO metrics (
+  node_id, ts, cpu_percent,
+  load1, load5, load15,
+  cpu_iowait_percent, cpu_steal_percent,
+  pressure_cpu_some, pressure_memory_some, pressure_memory_full, pressure_io_some, pressure_io_full,
+  mem_used, mem_total,
+  swap_used, swap_total, swap_in, swap_out, oom_kills,
+  disk_used, disk_total, disk_read_bytes, disk_write_bytes,
+  net_rx, net_tx, uptime_seconds
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nodeID, m.TS, m.CPU,
+		m.Load.Load1, m.Load.Load5, m.Load.Load15,
+		m.CPUStats.IOWaitPercent, m.CPUStats.StealPercent,
+		m.Pressure.CPUSomeAvg10, m.Pressure.MemorySomeAvg10, m.Pressure.MemoryFullAvg10, m.Pressure.IOSomeAvg10, m.Pressure.IOFullAvg10,
 		m.Mem.Used, m.Mem.Total,
+		m.Swap.Used, m.Swap.Total, m.Swap.In, m.Swap.Out, m.OOMKills,
 		diskUsed, diskTotal,
 		m.DiskIO.ReadBytes, m.DiskIO.WriteBytes,
 		m.Net.RxBytes, m.Net.TxBytes, m.UptimeSeconds,
@@ -2769,7 +2943,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ordered by ascending timestamp.
 func (s *Store) QueryMetrics(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
+SELECT ts, cpu_percent,
+       load1, load5, load15,
+       cpu_iowait_percent, cpu_steal_percent,
+       pressure_cpu_some, pressure_memory_some, pressure_memory_full, pressure_io_some, pressure_io_full,
+       mem_used, mem_total,
+       swap_used, swap_total, swap_in, swap_out, oom_kills,
+       disk_used, disk_total, disk_read_bytes, disk_write_bytes, net_rx, net_tx, uptime_seconds
 FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
@@ -2781,7 +2961,34 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 	var result []*MetricsRow
 	for rows.Next() {
 		var r MetricsRow
-		if err := rows.Scan(&r.TS, &r.CPU, &r.MemUsed, &r.MemTotal, &r.DiskUsed, &r.DiskTotal, &r.DiskReadBytes, &r.DiskWriteBytes, &r.NetRx, &r.NetTx, &r.UptimeSeconds); err != nil {
+		if err := rows.Scan(
+			&r.TS,
+			&r.CPU,
+			&r.Load1,
+			&r.Load5,
+			&r.Load15,
+			&r.CPUIOWaitPercent,
+			&r.CPUStealPercent,
+			&r.PressureCPUSome,
+			&r.PressureMemorySome,
+			&r.PressureMemoryFull,
+			&r.PressureIOSome,
+			&r.PressureIOFull,
+			&r.MemUsed,
+			&r.MemTotal,
+			&r.SwapUsed,
+			&r.SwapTotal,
+			&r.SwapIn,
+			&r.SwapOut,
+			&r.OOMKills,
+			&r.DiskUsed,
+			&r.DiskTotal,
+			&r.DiskReadBytes,
+			&r.DiskWriteBytes,
+			&r.NetRx,
+			&r.NetTx,
+			&r.UptimeSeconds,
+		); err != nil {
 			return nil, err
 		}
 		result = append(result, &r)
@@ -2791,7 +2998,13 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 
 func (s *Store) QueryMetrics1m(nodeID string, from, to int64) ([]*MetricsRow, error) {
 	rows, err := s.db.Query(`
-SELECT ts, cpu_avg, mem_used_avg, mem_total_max, disk_used_avg, disk_total_max, disk_read_max, disk_write_max, net_rx_max, net_tx_max, uptime_seconds_max
+SELECT ts, cpu_avg,
+       load1_avg, load5_avg, load15_avg,
+       cpu_iowait_avg, cpu_steal_avg,
+       pressure_cpu_some_avg, pressure_memory_some_avg, pressure_memory_full_avg, pressure_io_some_avg, pressure_io_full_avg,
+       mem_used_avg, mem_total_max,
+       swap_used_avg, swap_total_max, swap_in_max, swap_out_max, oom_kills_max,
+       disk_used_avg, disk_total_max, disk_read_max, disk_write_max, net_rx_max, net_tx_max, uptime_seconds_max
 FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		nodeID, from, to,
 	)
@@ -2812,7 +3025,39 @@ FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		var netRxMax int64
 		var netTxMax int64
 		var uptimeMax int64
-		if err := rows.Scan(&r.TS, &r.CPU, &memUsedAvg, &memTotalMax, &diskUsedAvg, &diskTotalMax, &diskReadMax, &diskWriteMax, &netRxMax, &netTxMax, &uptimeMax); err != nil {
+		var swapUsedAvg int64
+		var swapTotalMax int64
+		var swapInMax int64
+		var swapOutMax int64
+		var oomKillsMax int64
+		if err := rows.Scan(
+			&r.TS,
+			&r.CPU,
+			&r.Load1,
+			&r.Load5,
+			&r.Load15,
+			&r.CPUIOWaitPercent,
+			&r.CPUStealPercent,
+			&r.PressureCPUSome,
+			&r.PressureMemorySome,
+			&r.PressureMemoryFull,
+			&r.PressureIOSome,
+			&r.PressureIOFull,
+			&memUsedAvg,
+			&memTotalMax,
+			&swapUsedAvg,
+			&swapTotalMax,
+			&swapInMax,
+			&swapOutMax,
+			&oomKillsMax,
+			&diskUsedAvg,
+			&diskTotalMax,
+			&diskReadMax,
+			&diskWriteMax,
+			&netRxMax,
+			&netTxMax,
+			&uptimeMax,
+		); err != nil {
 			return nil, err
 		}
 		if memUsedAvg > 0 {
@@ -2820,6 +3065,21 @@ FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 		}
 		if memTotalMax > 0 {
 			r.MemTotal = uint64(memTotalMax)
+		}
+		if swapUsedAvg > 0 {
+			r.SwapUsed = uint64(swapUsedAvg)
+		}
+		if swapTotalMax > 0 {
+			r.SwapTotal = uint64(swapTotalMax)
+		}
+		if swapInMax > 0 {
+			r.SwapIn = uint64(swapInMax)
+		}
+		if swapOutMax > 0 {
+			r.SwapOut = uint64(swapOutMax)
+		}
+		if oomKillsMax > 0 {
+			r.OOMKills = uint64(oomKillsMax)
 		}
 		if diskUsedAvg > 0 {
 			r.DiskUsed = uint64(diskUsedAvg)
@@ -2860,7 +3120,11 @@ func (s *Store) RollupMetrics1m(from, to int64) error {
 INSERT INTO metrics_1m (
   node_id, ts, samples,
   cpu_avg, cpu_max,
+  load1_avg, load5_avg, load15_avg,
+  cpu_iowait_avg, cpu_steal_avg,
+  pressure_cpu_some_avg, pressure_memory_some_avg, pressure_memory_full_avg, pressure_io_some_avg, pressure_io_full_avg,
   mem_used_avg, mem_used_max, mem_total_max,
+  swap_used_avg, swap_total_max, swap_in_max, swap_out_max, oom_kills_max,
   disk_used_avg, disk_used_max, disk_total_max,
   disk_read_max, disk_write_max,
   net_rx_max, net_tx_max,
@@ -2872,9 +3136,24 @@ SELECT
   COUNT(*) AS samples,
   AVG(cpu_percent) AS cpu_avg,
   MAX(cpu_percent) AS cpu_max,
+  AVG(load1) AS load1_avg,
+  AVG(load5) AS load5_avg,
+  AVG(load15) AS load15_avg,
+  AVG(cpu_iowait_percent) AS cpu_iowait_avg,
+  AVG(cpu_steal_percent) AS cpu_steal_avg,
+  AVG(pressure_cpu_some) AS pressure_cpu_some_avg,
+  AVG(pressure_memory_some) AS pressure_memory_some_avg,
+  AVG(pressure_memory_full) AS pressure_memory_full_avg,
+  AVG(pressure_io_some) AS pressure_io_some_avg,
+  AVG(pressure_io_full) AS pressure_io_full_avg,
   CAST(AVG(mem_used) AS INTEGER) AS mem_used_avg,
   MAX(mem_used) AS mem_used_max,
   MAX(mem_total) AS mem_total_max,
+  CAST(AVG(swap_used) AS INTEGER) AS swap_used_avg,
+  MAX(swap_total) AS swap_total_max,
+  MAX(swap_in) AS swap_in_max,
+  MAX(swap_out) AS swap_out_max,
+  MAX(oom_kills) AS oom_kills_max,
   CAST(AVG(disk_used) AS INTEGER) AS disk_used_avg,
   MAX(disk_used) AS disk_used_max,
   MAX(disk_total) AS disk_total_max,
@@ -2890,9 +3169,24 @@ ON CONFLICT(node_id, ts) DO UPDATE SET
   samples            = excluded.samples,
   cpu_avg            = excluded.cpu_avg,
   cpu_max            = excluded.cpu_max,
+  load1_avg          = excluded.load1_avg,
+  load5_avg          = excluded.load5_avg,
+  load15_avg         = excluded.load15_avg,
+  cpu_iowait_avg     = excluded.cpu_iowait_avg,
+  cpu_steal_avg      = excluded.cpu_steal_avg,
+  pressure_cpu_some_avg    = excluded.pressure_cpu_some_avg,
+  pressure_memory_some_avg = excluded.pressure_memory_some_avg,
+  pressure_memory_full_avg = excluded.pressure_memory_full_avg,
+  pressure_io_some_avg     = excluded.pressure_io_some_avg,
+  pressure_io_full_avg     = excluded.pressure_io_full_avg,
   mem_used_avg       = excluded.mem_used_avg,
   mem_used_max       = excluded.mem_used_max,
   mem_total_max      = excluded.mem_total_max,
+  swap_used_avg      = excluded.swap_used_avg,
+  swap_total_max     = excluded.swap_total_max,
+  swap_in_max        = excluded.swap_in_max,
+  swap_out_max       = excluded.swap_out_max,
+  oom_kills_max      = excluded.oom_kills_max,
   disk_used_avg      = excluded.disk_used_avg,
   disk_used_max      = excluded.disk_used_max,
   disk_total_max     = excluded.disk_total_max,
@@ -2916,8 +3210,23 @@ func (s *Store) LatestMetricsByNodeID(nodeID string) (*models.NodeMetricsSnapsho
 	if err := row.Scan(
 		&snapshot.TS,
 		&snapshot.CPU,
+		&snapshot.Load1,
+		&snapshot.Load5,
+		&snapshot.Load15,
+		&snapshot.CPUIOWaitPercent,
+		&snapshot.CPUStealPercent,
+		&snapshot.PressureCPUSome,
+		&snapshot.PressureMemorySome,
+		&snapshot.PressureMemoryFull,
+		&snapshot.PressureIOSome,
+		&snapshot.PressureIOFull,
 		&snapshot.MemUsed,
 		&snapshot.MemTotal,
+		&snapshot.SwapUsed,
+		&snapshot.SwapTotal,
+		&snapshot.SwapIn,
+		&snapshot.SwapOut,
+		&snapshot.OOMKills,
 		&snapshot.DiskUsed,
 		&snapshot.DiskTotal,
 		&snapshot.DiskReadBytes,
@@ -2972,8 +3281,23 @@ func (s *Store) LatestMetricsByNodeIDs(nodeIDs []string) (map[string]*models.Nod
 			&nodeID,
 			&snapshot.TS,
 			&snapshot.CPU,
+			&snapshot.Load1,
+			&snapshot.Load5,
+			&snapshot.Load15,
+			&snapshot.CPUIOWaitPercent,
+			&snapshot.CPUStealPercent,
+			&snapshot.PressureCPUSome,
+			&snapshot.PressureMemorySome,
+			&snapshot.PressureMemoryFull,
+			&snapshot.PressureIOSome,
+			&snapshot.PressureIOFull,
 			&snapshot.MemUsed,
 			&snapshot.MemTotal,
+			&snapshot.SwapUsed,
+			&snapshot.SwapTotal,
+			&snapshot.SwapIn,
+			&snapshot.SwapOut,
+			&snapshot.OOMKills,
 			&snapshot.DiskUsed,
 			&snapshot.DiskTotal,
 			&snapshot.DiskReadBytes,
@@ -3213,6 +3537,11 @@ func (s *Store) ApplyAgentSnapshot(nodeID string, payload *models.MetricsPayload
 	}
 	if err := updateNodeMetadataWith(tx, nodeID, resolvedIP, payload.IPFamilies, payload.OS, payload.Arch, payload.AgentVersion, payload.Hardware, lastSeen); err != nil {
 		return false, err
+	}
+	if payload.DiskHealth != nil {
+		if err := updateNodeDiskHealthWith(tx, nodeID, payload.DiskHealth); err != nil {
+			return false, err
+		}
 	}
 	latencyAssignmentsChanged, err := pruneLatencyMonitorAssignmentsForNodeWith(tx, nodeID, payload.IPFamilies, resolvedIP)
 	if err != nil {

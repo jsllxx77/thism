@@ -34,6 +34,7 @@
 - Agent 自更新带 Ed25519 签名校验（缺公钥时 fail-closed 拒绝更新）
 - 节点标签、标签筛选，以及 SLA 风格的可用性报告
 - 支持由选定节点执行 ICMP、TCP、HTTP 延迟监测
+- 节点详情支持负载、CPU steal/I/O wait、pressure、swap/OOM，以及内置 NVMe/ATA SMART 硬盘健康检测；节点无需额外安装组件
 - 可配置指标保留时长，默认 30 天，并支持更长报告窗口
 - 支持从 GitHub 安装运行时 shadcn/ui 主题包和完整前端皮肤包
 - 提供预构建 GHCR 镜像与 Docker Compose 部署方式

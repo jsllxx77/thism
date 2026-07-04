@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,11 +26,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/gorilla/websocket"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	psnet "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
@@ -73,7 +76,9 @@ var (
 	cpuPercentFunc              = cpu.Percent
 	cpuTimesFunc                = cpu.Times
 	cpuCountsFunc               = cpu.Counts
+	loadAvgFunc                 = load.Avg
 	virtualMemoryFunc           = mem.VirtualMemory
+	swapMemoryFunc              = mem.SwapMemory
 	hostInfoFunc                = host.Info
 	diskPartitionsFunc          = disk.Partitions
 	diskUsageFunc               = disk.Usage
@@ -85,7 +90,14 @@ var (
 	nowFunc                     = time.Now
 	collectProcessSamplesFunc   = collectProcessSamples
 	collectDockerContainersFunc = collectDockerContainers
+	readNVMeHealthLogFunc       = readNVMeHealthLog
+	readATAHealthFunc           = readATAHealth
 	httpClient                  = newSelfUpdateHTTPClient()
+)
+
+var (
+	diskHealthSysBlockPath = "/sys/block"
+	diskHealthDevRootPath  = "/dev"
 )
 
 func newSelfUpdateHTTPClient() *http.Client {
@@ -197,6 +209,8 @@ type Collector struct {
 	cpuSampleReady        bool
 	lastCPUTotal          float64
 	lastCPUIdle           float64
+	lastCPUIOWait         float64
+	lastCPUSteal          float64
 	networkCacheMu        sync.Mutex
 	cachedLocalIP         string
 	cachedIPFamilies      []string
@@ -258,13 +272,17 @@ func (c *Collector) primeCPUSample() {
 	c.cpuSampleMu.Lock()
 	c.lastCPUTotal = sample.total
 	c.lastCPUIdle = sample.idle
+	c.lastCPUIOWait = sample.iowait
+	c.lastCPUSteal = sample.steal
 	c.cpuSampleReady = true
 	c.cpuSampleMu.Unlock()
 }
 
 type cpuSample struct {
-	total float64
-	idle  float64
+	total  float64
+	idle   float64
+	iowait float64
+	steal  float64
 }
 
 func readCPUSample() (cpuSample, bool) {
@@ -278,7 +296,7 @@ func readCPUSample() (cpuSample, bool) {
 func cpuSampleFromTimes(times cpu.TimesStat) cpuSample {
 	idle := times.Idle + times.Iowait
 	total := times.User + times.System + times.Idle + times.Nice + times.Iowait + times.Irq + times.Softirq + times.Steal + times.Guest + times.GuestNice
-	return cpuSample{total: total, idle: idle}
+	return cpuSample{total: total, idle: idle, iowait: times.Iowait, steal: times.Steal}
 }
 
 func clampCPUPercent(value float64) float64 {
@@ -291,10 +309,16 @@ func clampCPUPercent(value float64) float64 {
 	return value
 }
 
-func (c *Collector) sampleCPUPercent() (float64, bool) {
+type cpuDeltaStats struct {
+	UsagePercent  float64
+	IOWaitPercent float64
+	StealPercent  float64
+}
+
+func (c *Collector) sampleCPUStats() (cpuDeltaStats, bool) {
 	sample, ok := readCPUSample()
 	if !ok {
-		return 0, false
+		return cpuDeltaStats{}, false
 	}
 
 	c.cpuSampleMu.Lock()
@@ -303,20 +327,38 @@ func (c *Collector) sampleCPUPercent() (float64, bool) {
 	if !c.cpuSampleReady {
 		c.lastCPUTotal = sample.total
 		c.lastCPUIdle = sample.idle
+		c.lastCPUIOWait = sample.iowait
+		c.lastCPUSteal = sample.steal
 		c.cpuSampleReady = true
-		return 0, false
+		return cpuDeltaStats{}, false
 	}
 
 	deltaTotal := sample.total - c.lastCPUTotal
 	deltaIdle := sample.idle - c.lastCPUIdle
+	deltaIOWait := sample.iowait - c.lastCPUIOWait
+	deltaSteal := sample.steal - c.lastCPUSteal
 	c.lastCPUTotal = sample.total
 	c.lastCPUIdle = sample.idle
+	c.lastCPUIOWait = sample.iowait
+	c.lastCPUSteal = sample.steal
 	if deltaTotal <= 0 || deltaIdle < 0 {
-		return 0, false
+		return cpuDeltaStats{}, false
 	}
 
 	usage := ((deltaTotal - deltaIdle) / deltaTotal) * 100
-	return clampCPUPercent(usage), true
+	stats := cpuDeltaStats{UsagePercent: clampCPUPercent(usage)}
+	if deltaIOWait > 0 {
+		stats.IOWaitPercent = clampCPUPercent((deltaIOWait / deltaTotal) * 100)
+	}
+	if deltaSteal > 0 {
+		stats.StealPercent = clampCPUPercent((deltaSteal / deltaTotal) * 100)
+	}
+	return stats, true
+}
+
+func (c *Collector) sampleCPUPercent() (float64, bool) {
+	stats, ok := c.sampleCPUStats()
+	return stats.UsagePercent, ok
 }
 
 func (c *Collector) SetAgentVersion(version string) {
@@ -610,6 +652,545 @@ func collectDiskIOStats() models.DiskIOStats {
 	return models.DiskIOStats{ReadBytes: readBytes, WriteBytes: writeBytes}
 }
 
+type nvmePassthruCmd struct {
+	Opcode      uint8
+	Flags       uint8
+	Rsvd1       uint16
+	Nsid        uint32
+	Cdw2        uint32
+	Cdw3        uint32
+	Metadata    uint64
+	Addr        uint64
+	MetadataLen uint32
+	DataLen     uint32
+	Cdw10       uint32
+	Cdw11       uint32
+	Cdw12       uint32
+	Cdw13       uint32
+	Cdw14       uint32
+	Cdw15       uint32
+	TimeoutMS   uint32
+	Result      uint32
+}
+
+type nvmeHealthLog struct {
+	CriticalWarning uint8
+	TemperatureC    *float64
+	LifeUsedPercent *float64
+	AvailableSpare  *float64
+	PowerOnHours    uint64
+	UnsafeShutdowns uint64
+	MediaErrors     uint64
+}
+
+type ataHealthLog struct {
+	TemperatureC          *float64
+	LifeUsedPercent       *float64
+	PowerOnHours          uint64
+	ReallocatedSectors    uint64
+	PendingSectors        uint64
+	OfflineUncorrectable  uint64
+	InterfaceCRCErrors    uint64
+	ReportedUncorrectable uint64
+}
+
+const (
+	nvmeIoctlAdminCmd = uintptr(0xC0484E41)
+	nvmeAdminGetLog   = uint8(0x02)
+	nvmeSmartLogID    = uint32(0x02)
+	nvmeGlobalNSID    = uint32(0xffffffff)
+)
+
+const (
+	sgIoctl              = uintptr(0x2285)
+	sgDxferFromDev       = int32(-3)
+	sgInterfaceID        = int32('S')
+	ataPassThrough16     = byte(0x85)
+	ataProtocolPIODataIn = byte(4)
+	ataSmartCommand      = byte(0xB0)
+	ataSmartReadData     = byte(0xD0)
+	ataSmartLBAHigh      = byte(0xC2)
+	ataSmartLBAMid       = byte(0x4F)
+)
+
+var errATASmartUnsupported = errors.New("ATA SMART passthrough is not supported by this block device")
+
+type sgIOHdr struct {
+	InterfaceID    int32
+	DxferDirection int32
+	CmdLen         uint8
+	MxSbLen        uint8
+	IovecCount     uint16
+	DxferLen       uint32
+	Dxferp         uintptr
+	Cmdp           uintptr
+	Sbp            uintptr
+	Timeout        uint32
+	Flags          uint32
+	PackID         int32
+	UsrPtr         uintptr
+	Status         uint8
+	MaskedStatus   uint8
+	MsgStatus      uint8
+	SbLenWr        uint8
+	HostStatus     uint16
+	DriverStatus   uint16
+	Resid          int32
+	Duration       uint32
+	Info           uint32
+}
+
+func collectDiskHealth() []models.DiskHealthStats {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(diskHealthSysBlockPath)
+	if err != nil {
+		return nil
+	}
+
+	disks := make([]models.DiskHealthStats, 0, len(entries))
+	for _, entry := range entries {
+		if !isDiskHealthBlockEntry(entry) {
+			continue
+		}
+		name := entry.Name()
+		if shouldSkipDiskHealthDevice(name) {
+			continue
+		}
+
+		stats := collectDiskHealthForDevice(name)
+		if stats.Name == "" {
+			continue
+		}
+		disks = append(disks, stats)
+	}
+	sort.Slice(disks, func(i, j int) bool {
+		return disks[i].Name < disks[j].Name
+	})
+	return disks
+}
+
+func collectDiskHealthForDevice(name string) models.DiskHealthStats {
+	deviceRoot := filepath.Join(diskHealthSysBlockPath, name)
+	stats := models.DiskHealthStats{
+		Name:   name,
+		Path:   filepath.Join(diskHealthDevRootPath, name),
+		Type:   classifyDiskHealthType(name, deviceRoot),
+		Status: models.DiskHealthStatusUnknown,
+		Model:  readSysfsString(filepath.Join(deviceRoot, "device/model")),
+		Serial: readSysfsString(filepath.Join(deviceRoot, "device/serial")),
+	}
+	if firmware := readSysfsString(filepath.Join(deviceRoot, "device/firmware_rev")); firmware != "" {
+		stats.Firmware = firmware
+	} else if firmware := readSysfsString(filepath.Join(deviceRoot, "device/rev")); firmware != "" {
+		stats.Firmware = firmware
+	}
+	stats.SizeBytes = readBlockDeviceSizeBytes(filepath.Join(deviceRoot, "size"))
+
+	switch stats.Type {
+	case models.DiskHealthTypeNVMe:
+		controllerPath, ok := nvmeControllerPathForBlockDevice(name)
+		if !ok {
+			stats.Status = models.DiskHealthStatusUnknown
+			stats.Message = "NVMe controller path not found"
+			return stats
+		}
+		log, err := readNVMeHealthLogFunc(controllerPath)
+		if err != nil {
+			stats.Status = models.DiskHealthStatusUnknown
+			stats.Message = "NVMe health log unavailable: " + err.Error()
+			return stats
+		}
+		return diskHealthFromNVMeLog(stats, log)
+	case models.DiskHealthTypeATA:
+		log, err := readATAHealthFunc(stats.Path)
+		if err != nil {
+			if errors.Is(err, errATASmartUnsupported) {
+				stats.Status = models.DiskHealthStatusUnsupported
+			} else {
+				stats.Status = models.DiskHealthStatusUnknown
+			}
+			stats.Message = "ATA SMART data unavailable: " + err.Error()
+			return stats
+		}
+		return diskHealthFromATAHealthLog(stats, log)
+	case models.DiskHealthTypeVirtual:
+		stats.Status = models.DiskHealthStatusUnsupported
+		stats.Message = "virtual block device does not expose hardware health"
+		return stats
+	default:
+		stats.Status = models.DiskHealthStatusUnsupported
+		stats.Message = "block device health is not supported"
+		return stats
+	}
+}
+
+func isDiskHealthBlockEntry(entry os.DirEntry) bool {
+	if entry == nil {
+		return false
+	}
+	if entry.IsDir() {
+		return true
+	}
+	info, err := os.Stat(filepath.Join(diskHealthSysBlockPath, entry.Name()))
+	return err == nil && info.IsDir()
+}
+
+func shouldSkipDiskHealthDevice(name string) bool {
+	for _, prefix := range []string{"loop", "ram", "zram", "fd", "sr"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyDiskHealthType(name, deviceRoot string) string {
+	if strings.HasPrefix(name, "nvme") {
+		return models.DiskHealthTypeNVMe
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(deviceRoot)
+	if err == nil && (strings.Contains(resolvedRoot, "/devices/virtual/block/") || strings.Contains(resolvedRoot, "/virtio")) {
+		return models.DiskHealthTypeVirtual
+	}
+	if strings.HasPrefix(name, "vd") || strings.HasPrefix(name, "xvd") || strings.HasPrefix(name, "dm-") {
+		return models.DiskHealthTypeVirtual
+	}
+	rotational := strings.TrimSpace(string(readFileOrNil(filepath.Join(deviceRoot, "queue/rotational"))))
+	if strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "hd") || rotational == "1" {
+		return models.DiskHealthTypeATA
+	}
+	return models.DiskHealthTypeUnknown
+}
+
+func readSysfsString(path string) string {
+	return strings.TrimSpace(string(readFileOrNil(path)))
+}
+
+func readFileOrNil(path string) []byte {
+	data, err := readFileFunc(path)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func readBlockDeviceSizeBytes(path string) uint64 {
+	raw := strings.TrimSpace(string(readFileOrNil(path)))
+	if raw == "" {
+		return 0
+	}
+	sectors, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return sectors * 512
+}
+
+func nvmeControllerPathForBlockDevice(name string) (string, bool) {
+	if !strings.HasPrefix(name, "nvme") {
+		return "", false
+	}
+	namespaceIndex := strings.LastIndex(name, "n")
+	if namespaceIndex <= len("nvme") {
+		return "", false
+	}
+	controllerName := name[:namespaceIndex]
+	return filepath.Join(diskHealthDevRootPath, controllerName), true
+}
+
+func readNVMeHealthLog(controllerPath string) (nvmeHealthLog, error) {
+	file, err := os.OpenFile(controllerPath, os.O_RDONLY, 0)
+	if err != nil {
+		return nvmeHealthLog{}, err
+	}
+	defer file.Close()
+
+	data := make([]byte, 512)
+	cmd := nvmePassthruCmd{
+		Opcode:    nvmeAdminGetLog,
+		Nsid:      nvmeGlobalNSID,
+		Addr:      uint64(uintptr(unsafe.Pointer(&data[0]))),
+		DataLen:   uint32(len(data)),
+		Cdw10:     ((uint32(len(data)/4) - 1) << 16) | nvmeSmartLogID,
+		TimeoutMS: 1000,
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), nvmeIoctlAdminCmd, uintptr(unsafe.Pointer(&cmd)))
+	if errno != 0 {
+		return nvmeHealthLog{}, errno
+	}
+	return parseNVMeHealthLog(data), nil
+}
+
+func readATAHealth(devicePath string) (ataHealthLog, error) {
+	file, err := os.OpenFile(devicePath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return ataHealthLog{}, err
+	}
+	defer file.Close()
+
+	data, err := readATASmartData(file.Fd())
+	if err != nil {
+		return ataHealthLog{}, err
+	}
+	return parseATAHealthLog(data), nil
+}
+
+func readATASmartData(fd uintptr) ([]byte, error) {
+	data := make([]byte, 512)
+	sense := make([]byte, 32)
+	cdb := [16]byte{
+		0:  ataPassThrough16,
+		1:  ataProtocolPIODataIn << 1,
+		2:  0x0e, // T_DIR=device-to-host, BYT_BLOK=blocks, T_LENGTH=sector count.
+		4:  ataSmartReadData,
+		6:  1,
+		10: ataSmartLBAMid,
+		12: ataSmartLBAHigh,
+		14: ataSmartCommand,
+	}
+	hdr := sgIOHdr{
+		InterfaceID:    sgInterfaceID,
+		DxferDirection: sgDxferFromDev,
+		CmdLen:         uint8(len(cdb)),
+		MxSbLen:        uint8(len(sense)),
+		DxferLen:       uint32(len(data)),
+		Dxferp:         uintptr(unsafe.Pointer(&data[0])),
+		Cmdp:           uintptr(unsafe.Pointer(&cdb[0])),
+		Sbp:            uintptr(unsafe.Pointer(&sense[0])),
+		Timeout:        5000,
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, sgIoctl, uintptr(unsafe.Pointer(&hdr)))
+	if errno != 0 {
+		if errno == syscall.ENOTTY || errno == syscall.EINVAL || errno == syscall.ENODEV {
+			return nil, fmt.Errorf("%w: %v", errATASmartUnsupported, errno)
+		}
+		return nil, errno
+	}
+	if hdr.Status != 0 || hdr.HostStatus != 0 || hdr.DriverStatus != 0 {
+		if ataSenseReportsUnsupported(sense[:min(int(hdr.SbLenWr), len(sense))]) {
+			return nil, errATASmartUnsupported
+		}
+		return nil, fmt.Errorf("SG_IO status=%#x host=%#x driver=%#x", hdr.Status, hdr.HostStatus, hdr.DriverStatus)
+	}
+	return data, nil
+}
+
+func ataSenseReportsUnsupported(sense []byte) bool {
+	if len(sense) < 4 {
+		return false
+	}
+	responseCode := sense[0] & 0x7f
+	switch responseCode {
+	case 0x70, 0x71:
+		if len(sense) < 14 {
+			return false
+		}
+		senseKey := sense[2] & 0x0f
+		return senseKey == 0x05
+	case 0x72, 0x73:
+		senseKey := sense[1] & 0x0f
+		return senseKey == 0x05
+	default:
+		return false
+	}
+}
+
+func parseNVMeHealthLog(data []byte) nvmeHealthLog {
+	if len(data) < 176 {
+		return nvmeHealthLog{}
+	}
+
+	var temperature *float64
+	kelvin := binary.LittleEndian.Uint16(data[1:3])
+	if kelvin > 0 {
+		celsius := float64(kelvin) - 273.15
+		temperature = &celsius
+	}
+	lifeUsed := float64(data[5])
+	availableSpare := float64(data[3])
+	return nvmeHealthLog{
+		CriticalWarning: data[0],
+		TemperatureC:    temperature,
+		LifeUsedPercent: &lifeUsed,
+		AvailableSpare:  &availableSpare,
+		PowerOnHours:    binary.LittleEndian.Uint64(data[128:136]),
+		UnsafeShutdowns: binary.LittleEndian.Uint64(data[144:152]),
+		MediaErrors:     binary.LittleEndian.Uint64(data[160:168]),
+	}
+}
+
+func parseATAHealthLog(data []byte) ataHealthLog {
+	if len(data) < 362 {
+		return ataHealthLog{}
+	}
+
+	var log ataHealthLog
+	for offset := 2; offset+12 <= 362; offset += 12 {
+		id := data[offset]
+		if id == 0 {
+			continue
+		}
+		current := data[offset+3]
+		raw := ataAttributeRawValue(data[offset+5 : offset+11])
+		switch id {
+		case 5:
+			log.ReallocatedSectors = raw
+		case 9:
+			log.PowerOnHours = raw
+		case 187:
+			log.ReportedUncorrectable = raw
+		case 190, 194:
+			if temperature := ataTemperatureFromRaw(raw); temperature != nil {
+				log.TemperatureC = temperature
+			}
+		case 197:
+			log.PendingSectors = raw
+		case 198:
+			log.OfflineUncorrectable = raw
+		case 199:
+			log.InterfaceCRCErrors = raw
+		case 177, 202, 231, 233:
+			if lifeUsed, ok := ataLifeUsedFromAttribute(current, raw); ok {
+				log.LifeUsedPercent = &lifeUsed
+			}
+		}
+	}
+	return log
+}
+
+func ataAttributeRawValue(raw []byte) uint64 {
+	var value uint64
+	for index := 0; index < len(raw) && index < 6; index++ {
+		value |= uint64(raw[index]) << (8 * index)
+	}
+	return value
+}
+
+func ataTemperatureFromRaw(raw uint64) *float64 {
+	if raw == 0 {
+		return nil
+	}
+	temperature := raw & 0xff
+	if temperature == 0 || temperature > 150 {
+		temperature = raw
+	}
+	if temperature == 0 || temperature > 150 {
+		return nil
+	}
+	result := float64(temperature)
+	return &result
+}
+
+func ataLifeUsedFromAttribute(current byte, raw uint64) (float64, bool) {
+	if raw > 0 && raw <= 100 {
+		return float64(raw), true
+	}
+	if current > 0 && current <= 100 {
+		return 100 - float64(current), true
+	}
+	return 0, false
+}
+
+func diskHealthFromATAHealthLog(stats models.DiskHealthStats, log ataHealthLog) models.DiskHealthStats {
+	stats.Status = models.DiskHealthStatusOK
+	stats.TemperatureC = log.TemperatureC
+	stats.LifeUsedPercent = log.LifeUsedPercent
+	stats.PowerOnHours = log.PowerOnHours
+	stats.ReallocatedSectors = log.ReallocatedSectors
+	stats.PendingSectors = log.PendingSectors
+	stats.OfflineUncorrectable = log.OfflineUncorrectable
+	stats.InterfaceCRCErrors = log.InterfaceCRCErrors
+	stats.MediaErrors = log.ReallocatedSectors + log.PendingSectors + log.OfflineUncorrectable + log.ReportedUncorrectable
+
+	if log.PendingSectors > 0 || log.OfflineUncorrectable > 0 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "ATA SMART reports unstable or uncorrectable sectors"
+		return stats
+	}
+	if log.TemperatureC != nil && *log.TemperatureC >= 80 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "ATA temperature is critical"
+		return stats
+	}
+	if log.LifeUsedPercent != nil && *log.LifeUsedPercent >= 100 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "ATA estimated life is exhausted"
+		return stats
+	}
+	if log.ReallocatedSectors > 0 || log.ReportedUncorrectable > 0 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "ATA SMART reports media errors"
+		return stats
+	}
+	if log.TemperatureC != nil && *log.TemperatureC >= 70 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "ATA temperature is elevated"
+		return stats
+	}
+	if log.LifeUsedPercent != nil && *log.LifeUsedPercent >= 90 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "ATA estimated life is near exhaustion"
+		return stats
+	}
+	if log.InterfaceCRCErrors > 0 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "ATA interface CRC errors were reported"
+		return stats
+	}
+	return stats
+}
+
+func diskHealthFromNVMeLog(stats models.DiskHealthStats, log nvmeHealthLog) models.DiskHealthStats {
+	stats.Status = models.DiskHealthStatusOK
+	stats.CriticalWarning = log.CriticalWarning
+	stats.TemperatureC = log.TemperatureC
+	stats.LifeUsedPercent = log.LifeUsedPercent
+	stats.AvailableSparePercent = log.AvailableSpare
+	stats.PowerOnHours = log.PowerOnHours
+	stats.UnsafeShutdowns = log.UnsafeShutdowns
+	stats.MediaErrors = log.MediaErrors
+
+	if log.CriticalWarning != 0 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "NVMe critical warning is set"
+		return stats
+	}
+	if log.TemperatureC != nil && *log.TemperatureC >= 80 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "NVMe temperature is critical"
+		return stats
+	}
+	if log.LifeUsedPercent != nil && *log.LifeUsedPercent >= 100 {
+		stats.Status = models.DiskHealthStatusCritical
+		stats.Message = "NVMe estimated life is exhausted"
+		return stats
+	}
+	if log.MediaErrors > 0 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "NVMe media errors were reported"
+		return stats
+	}
+	if log.TemperatureC != nil && *log.TemperatureC >= 70 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "NVMe temperature is elevated"
+		return stats
+	}
+	if log.LifeUsedPercent != nil && *log.LifeUsedPercent >= 90 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "NVMe estimated life is near exhaustion"
+		return stats
+	}
+	if log.AvailableSpare != nil && *log.AvailableSpare <= 10 {
+		stats.Status = models.DiskHealthStatusWarning
+		stats.Message = "NVMe available spare is low"
+		return stats
+	}
+	return stats
+}
+
 func (c *Collector) cachedNonLoopbackInterfaceNames(currentTime time.Time) map[string]struct{} {
 	c.networkCacheMu.Lock()
 	if !c.cachedInterfacesAt.IsZero() && currentTime.Sub(c.cachedInterfacesAt) < networkTopologyCacheTTL && len(c.cachedInterfaces) > 0 {
@@ -729,6 +1310,123 @@ func (c *Collector) collectNetworkStats(currentTime time.Time) models.NetStats {
 	return collectNetworkStatsForInterfaces(c.cachedNonLoopbackInterfaceNames(currentTime))
 }
 
+type pressureFileStats struct {
+	SomeAvg10 float64
+	FullAvg10 float64
+}
+
+func parsePressureFile(data []byte) (pressureFileStats, error) {
+	var stats pressureFileStats
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		var target *float64
+		switch fields[0] {
+		case "some":
+			target = &stats.SomeAvg10
+		case "full":
+			target = &stats.FullAvg10
+		default:
+			continue
+		}
+		for _, field := range fields[1:] {
+			valueText, ok := strings.CutPrefix(field, "avg10=")
+			if !ok {
+				continue
+			}
+			value, err := strconv.ParseFloat(valueText, 64)
+			if err != nil {
+				return pressureFileStats{}, err
+			}
+			*target = value
+			break
+		}
+	}
+	return stats, nil
+}
+
+func readPressureFile(path string) pressureFileStats {
+	data, err := readFileFunc(path)
+	if err != nil {
+		return pressureFileStats{}
+	}
+	stats, err := parsePressureFile(data)
+	if err != nil {
+		return pressureFileStats{}
+	}
+	return stats
+}
+
+func collectPressureStats() models.PressureStats {
+	cpuPressure := readPressureFile("/proc/pressure/cpu")
+	memoryPressure := readPressureFile("/proc/pressure/memory")
+	ioPressure := readPressureFile("/proc/pressure/io")
+	return models.PressureStats{
+		CPUSomeAvg10:    cpuPressure.SomeAvg10,
+		MemorySomeAvg10: memoryPressure.SomeAvg10,
+		MemoryFullAvg10: memoryPressure.FullAvg10,
+		IOSomeAvg10:     ioPressure.SomeAvg10,
+		IOFullAvg10:     ioPressure.FullAvg10,
+	}
+}
+
+func collectSwapStats() models.SwapStats {
+	swap, err := swapMemoryFunc()
+	if err != nil || swap == nil {
+		return models.SwapStats{}
+	}
+	return models.SwapStats{
+		Used:  swap.Used,
+		Total: swap.Total,
+		In:    swap.Sin,
+		Out:   swap.Sout,
+	}
+}
+
+func collectOOMKills() uint64 {
+	if count, ok := readOOMKillCountFromVMStat("/proc/vmstat"); ok {
+		return count
+	}
+	return countOOMKillEvents([]string{"/var/log/kern.log", "/var/log/messages", "/var/log/syslog"})
+}
+
+func readOOMKillCountFromVMStat(path string) (uint64, bool) {
+	data, err := readFileFunc(path)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] != "oom_kill" {
+			continue
+		}
+		count, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return count, true
+	}
+	return 0, false
+}
+
+func countOOMKillEvents(paths []string) uint64 {
+	var count uint64
+	for _, path := range paths {
+		data, err := readFileFunc(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.ToLower(string(data)), "\n") {
+			if strings.Contains(line, "out of memory: killed process") || strings.Contains(line, "oom-kill:") {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // Collect gathers a single snapshot of system metrics.
 func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	currentTime := c.currentTime()
@@ -751,14 +1449,28 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	if hostInfo, err := hostInfoFunc(); err == nil && hostInfo != nil {
 		payload.UptimeSeconds = hostInfo.Uptime
 	}
+	if loadAvg, err := loadAvgFunc(); err == nil && loadAvg != nil {
+		payload.Load = models.LoadStats{
+			Load1:  loadAvg.Load1,
+			Load5:  loadAvg.Load5,
+			Load15: loadAvg.Load15,
+		}
+	}
+	payload.Pressure = collectPressureStats()
+	payload.Swap = collectSwapStats()
+	payload.OOMKills = collectOOMKills()
 
 	// CPU — compute usage from non-blocking cumulative CPU time deltas.
-	if cpuPercent, ok := c.sampleCPUPercent(); ok {
-		payload.CPU = cpuPercent
+	if cpuStats, ok := c.sampleCPUStats(); ok {
+		payload.CPU = cpuStats.UsagePercent
+		payload.CPUStats = models.CPUStats{
+			IOWaitPercent: cpuStats.IOWaitPercent,
+			StealPercent:  cpuStats.StealPercent,
+		}
 	}
 
 	// Memory.
-	vmStat, err := mem.VirtualMemory()
+	vmStat, err := virtualMemoryFunc()
 	if err == nil {
 		payload.Mem = models.MemStats{
 			Used:  vmStat.Used,
@@ -767,10 +1479,10 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	}
 
 	// Disk — iterate partitions, skip any that fail Usage().
-	partitions, err := disk.Partitions(false)
+	partitions, err := diskPartitionsFunc(false)
 	if err == nil {
 		for _, p := range partitions {
-			usage, err := disk.Usage(p.Mountpoint)
+			usage, err := diskUsageFunc(p.Mountpoint)
 			if err != nil {
 				continue
 			}
@@ -792,6 +1504,7 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 				payload.Hardware = nil
 			}
 		}
+		payload.DiskHealth = collectDiskHealth()
 		processSamples, err := collectProcessSamplesFunc()
 		if err == nil {
 			payload.Processes = selectTopProcesses(processSamples, processSnapshotLimit)

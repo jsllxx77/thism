@@ -3752,10 +3752,33 @@ func dashboardMetricsDataFromSnapshot(snapshot *models.NodeMetricsSnapshot) map[
 	return map[string]any{
 		"ts":  snapshot.TS,
 		"cpu": snapshot.CPU,
+		"load": map[string]any{
+			"load1":  snapshot.Load1,
+			"load5":  snapshot.Load5,
+			"load15": snapshot.Load15,
+		},
+		"cpu_stats": map[string]any{
+			"iowait_percent": snapshot.CPUIOWaitPercent,
+			"steal_percent":  snapshot.CPUStealPercent,
+		},
+		"pressure": map[string]any{
+			"cpu_some_avg10":    snapshot.PressureCPUSome,
+			"memory_some_avg10": snapshot.PressureMemorySome,
+			"memory_full_avg10": snapshot.PressureMemoryFull,
+			"io_some_avg10":     snapshot.PressureIOSome,
+			"io_full_avg10":     snapshot.PressureIOFull,
+		},
 		"mem": map[string]any{
 			"used":  snapshot.MemUsed,
 			"total": snapshot.MemTotal,
 		},
+		"swap": map[string]any{
+			"used":  snapshot.SwapUsed,
+			"total": snapshot.SwapTotal,
+			"in":    snapshot.SwapIn,
+			"out":   snapshot.SwapOut,
+		},
+		"oom_kills": snapshot.OOMKills,
 		"net": map[string]any{
 			"rx_bytes": snapshot.NetRx,
 			"tx_bytes": snapshot.NetTx,
@@ -3779,7 +3802,12 @@ func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]
 	data := map[string]any{
 		"ts":             payload.TS,
 		"cpu":            payload.CPU,
+		"load":           payload.Load,
+		"cpu_stats":      payload.CPUStats,
+		"pressure":       payload.Pressure,
 		"mem":            payload.Mem,
+		"swap":           payload.Swap,
+		"oom_kills":      payload.OOMKills,
 		"net":            payload.Net,
 		"disk_io":        payload.DiskIO,
 		"disk_used":      diskUsed,
@@ -3789,6 +3817,9 @@ func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]
 
 	if len(payload.Disk) > 0 {
 		data["disk"] = payload.Disk
+	}
+	if payload.DiskHealth != nil {
+		data["disk_health"] = payload.DiskHealth
 	}
 
 	return data

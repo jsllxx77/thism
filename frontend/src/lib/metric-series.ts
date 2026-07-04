@@ -6,7 +6,19 @@ export type ChartPoint = { ts: number; value: number | null }
 
 export type NodeDetailMetricSeries = {
   cpuData: ChartPoint[]
+  load1Data: ChartPoint[]
+  cpuIOWaitData: ChartPoint[]
+  cpuStealData: ChartPoint[]
+  pressureCPUSomeData: ChartPoint[]
+  pressureMemorySomeData: ChartPoint[]
+  pressureMemoryFullData: ChartPoint[]
+  pressureIOSomeData: ChartPoint[]
+  pressureIOFullData: ChartPoint[]
   memData: ChartPoint[]
+  swapData: ChartPoint[]
+  swapInSpeedData: ChartPoint[]
+  swapOutSpeedData: ChartPoint[]
+  oomKillsData: ChartPoint[]
   netRxData: ChartPoint[]
   netTxData: ChartPoint[]
   netRxSpeedData: ChartPoint[]
@@ -243,7 +255,19 @@ export function buildNodeDetailMetricSeries(
 
   return {
     cpuData: mergeSegmentedSeries(segments.map((segment) => segment.cpu), targetPoints, "average"),
+    load1Data: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.load1 ?? 0, "average"),
+    cpuIOWaitData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.cpu_iowait_percent ?? 0, "average"),
+    cpuStealData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.cpu_steal_percent ?? 0, "average"),
+    pressureCPUSomeData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.pressure_cpu_some ?? 0, "average"),
+    pressureMemorySomeData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.pressure_memory_some ?? 0, "average"),
+    pressureMemoryFullData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.pressure_memory_full ?? 0, "average"),
+    pressureIOSomeData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.pressure_io_some ?? 0, "average"),
+    pressureIOFullData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.pressure_io_full ?? 0, "average"),
     memData: mergeSegmentedSeries(segments.map((segment) => segment.memory), targetPoints, "average"),
+    swapData: buildMetricChartSeries(metrics, rangeSeconds, (row) => ((row.swap_total ?? 0) > 0 ? ((row.swap_used ?? 0) / (row.swap_total ?? 1)) * 100 : 0), "average"),
+    swapInSpeedData: buildMetricRateChartSeries(metrics, rangeSeconds, (row) => row.swap_in ?? 0),
+    swapOutSpeedData: buildMetricRateChartSeries(metrics, rangeSeconds, (row) => row.swap_out ?? 0),
+    oomKillsData: buildMetricChartSeries(metrics, rangeSeconds, (row) => row.oom_kills ?? 0, "last"),
     netRxData: buildMetricDeltaChartSeries(metrics, rangeSeconds, (row) => row.net_rx),
     netTxData: buildMetricDeltaChartSeries(metrics, rangeSeconds, (row) => row.net_tx),
     netRxSpeedData: mergeSegmentedSeries(segments.map((segment) => segment.netRxSpeed), targetPoints, "average"),

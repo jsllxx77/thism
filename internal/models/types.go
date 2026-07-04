@@ -16,6 +16,7 @@ type Node struct {
 	Online        bool                 `json:"online"`
 	Tags          []string             `json:"tags"`
 	Hardware      *NodeHardware        `json:"hardware,omitempty"`
+	DiskHealth    []DiskHealthStats    `json:"disk_health,omitempty"`
 	LatestMetrics *NodeMetricsSnapshot `json:"latest_metrics,omitempty"`
 }
 
@@ -44,17 +45,32 @@ func (h *NodeHardware) IsEmpty() bool {
 }
 
 type NodeMetricsSnapshot struct {
-	TS             int64   `json:"ts"`
-	CPU            float64 `json:"cpu"`
-	MemUsed        uint64  `json:"mem_used"`
-	MemTotal       uint64  `json:"mem_total"`
-	DiskUsed       uint64  `json:"disk_used"`
-	DiskTotal      uint64  `json:"disk_total"`
-	DiskReadBytes  uint64  `json:"disk_read_bytes"`
-	DiskWriteBytes uint64  `json:"disk_write_bytes"`
-	NetRx          uint64  `json:"net_rx"`
-	NetTx          uint64  `json:"net_tx"`
-	UptimeSeconds  uint64  `json:"uptime_seconds,omitempty"`
+	TS                 int64   `json:"ts"`
+	CPU                float64 `json:"cpu"`
+	Load1              float64 `json:"load1"`
+	Load5              float64 `json:"load5"`
+	Load15             float64 `json:"load15"`
+	CPUIOWaitPercent   float64 `json:"cpu_iowait_percent"`
+	CPUStealPercent    float64 `json:"cpu_steal_percent"`
+	PressureCPUSome    float64 `json:"pressure_cpu_some"`
+	PressureMemorySome float64 `json:"pressure_memory_some"`
+	PressureMemoryFull float64 `json:"pressure_memory_full"`
+	PressureIOSome     float64 `json:"pressure_io_some"`
+	PressureIOFull     float64 `json:"pressure_io_full"`
+	MemUsed            uint64  `json:"mem_used"`
+	MemTotal           uint64  `json:"mem_total"`
+	SwapUsed           uint64  `json:"swap_used"`
+	SwapTotal          uint64  `json:"swap_total"`
+	SwapIn             uint64  `json:"swap_in"`
+	SwapOut            uint64  `json:"swap_out"`
+	OOMKills           uint64  `json:"oom_kills"`
+	DiskUsed           uint64  `json:"disk_used"`
+	DiskTotal          uint64  `json:"disk_total"`
+	DiskReadBytes      uint64  `json:"disk_read_bytes"`
+	DiskWriteBytes     uint64  `json:"disk_write_bytes"`
+	NetRx              uint64  `json:"net_rx"`
+	NetTx              uint64  `json:"net_tx"`
+	UptimeSeconds      uint64  `json:"uptime_seconds,omitempty"`
 }
 
 type AvailabilityReportRange struct {
@@ -109,15 +125,47 @@ type MetricsPayload struct {
 	Arch            string            `json:"arch,omitempty"`
 	AgentVersion    string            `json:"agent_version,omitempty"`
 	UptimeSeconds   uint64            `json:"uptime_seconds,omitempty"`
+	Load            LoadStats         `json:"load"`
+	CPUStats        CPUStats          `json:"cpu_stats"`
+	Pressure        PressureStats     `json:"pressure"`
+	Swap            SwapStats         `json:"swap"`
+	OOMKills        uint64            `json:"oom_kills,omitempty"`
 	Hardware        *NodeHardware     `json:"hardware,omitempty"`
 	Mem             MemStats          `json:"mem"`
 	Disk            []DiskStats       `json:"disk"`
+	DiskHealth      []DiskHealthStats `json:"disk_health"`
 	DiskIO          DiskIOStats       `json:"disk_io"`
 	Net             NetStats          `json:"net"`
 	Processes       []Process         `json:"processes"`
 	Services        []Service         `json:"services"`
 	DockerAvailable *bool             `json:"docker_available,omitempty"`
 	Containers      []DockerContainer `json:"containers,omitempty"`
+}
+
+type LoadStats struct {
+	Load1  float64 `json:"load1"`
+	Load5  float64 `json:"load5"`
+	Load15 float64 `json:"load15"`
+}
+
+type CPUStats struct {
+	IOWaitPercent float64 `json:"iowait_percent"`
+	StealPercent  float64 `json:"steal_percent"`
+}
+
+type PressureStats struct {
+	CPUSomeAvg10    float64 `json:"cpu_some_avg10"`
+	MemorySomeAvg10 float64 `json:"memory_some_avg10"`
+	MemoryFullAvg10 float64 `json:"memory_full_avg10"`
+	IOSomeAvg10     float64 `json:"io_some_avg10"`
+	IOFullAvg10     float64 `json:"io_full_avg10"`
+}
+
+type SwapStats struct {
+	Used  uint64 `json:"used"`
+	Total uint64 `json:"total"`
+	In    uint64 `json:"in"`
+	Out   uint64 `json:"out"`
 }
 
 type MemStats struct {
@@ -129,6 +177,42 @@ type DiskStats struct {
 	Mount string `json:"mount"`
 	Used  uint64 `json:"used"`
 	Total uint64 `json:"total"`
+}
+
+const (
+	DiskHealthTypeNVMe    = "nvme"
+	DiskHealthTypeATA     = "ata"
+	DiskHealthTypeVirtual = "virtual"
+	DiskHealthTypeUnknown = "unknown"
+
+	DiskHealthStatusOK          = "ok"
+	DiskHealthStatusWarning     = "warning"
+	DiskHealthStatusCritical    = "critical"
+	DiskHealthStatusUnsupported = "unsupported"
+	DiskHealthStatusUnknown     = "unknown"
+)
+
+type DiskHealthStats struct {
+	Name                  string   `json:"name"`
+	Path                  string   `json:"path,omitempty"`
+	Type                  string   `json:"type"`
+	Model                 string   `json:"model,omitempty"`
+	Serial                string   `json:"serial,omitempty"`
+	Firmware              string   `json:"firmware,omitempty"`
+	SizeBytes             uint64   `json:"size_bytes,omitempty"`
+	Status                string   `json:"status"`
+	TemperatureC          *float64 `json:"temperature_c,omitempty"`
+	LifeUsedPercent       *float64 `json:"life_used_percent,omitempty"`
+	AvailableSparePercent *float64 `json:"available_spare_percent,omitempty"`
+	PowerOnHours          uint64   `json:"power_on_hours,omitempty"`
+	UnsafeShutdowns       uint64   `json:"unsafe_shutdowns,omitempty"`
+	MediaErrors           uint64   `json:"media_errors,omitempty"`
+	ReallocatedSectors    uint64   `json:"reallocated_sectors,omitempty"`
+	PendingSectors        uint64   `json:"pending_sectors,omitempty"`
+	OfflineUncorrectable  uint64   `json:"offline_uncorrectable,omitempty"`
+	InterfaceCRCErrors    uint64   `json:"interface_crc_errors,omitempty"`
+	CriticalWarning       uint8    `json:"critical_warning,omitempty"`
+	Message               string   `json:"message,omitempty"`
 }
 
 type DiskIOStats struct {

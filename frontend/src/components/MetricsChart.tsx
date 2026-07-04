@@ -37,7 +37,7 @@ export function MetricsChart({
   tooltipLabelFormatter,
 }: Props) {
   const { language } = useLanguage()
-  const gradId = `grad-${label.replace(/\s+/g, "-")}`
+  const gradId = `grad-${label.replace(/[^a-zA-Z0-9_-]+/g, "-")}`
   const formatTooltipValue = valueFormatter ?? ((value: number) => `${value.toFixed(1)}${unit}`)
   const formatAxisTick = axisTickFormatter
   const formatXAxisTick = xAxisTickFormatter ?? ((value: number) =>

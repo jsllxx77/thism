@@ -34,6 +34,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Ed25519-signed agent self-updates (fail-closed when the public key is missing)
 - Node tags, tag filtering, and SLA-style availability reports
 - Built-in ICMP, TCP, and HTTP latency monitoring from selected nodes
+- Node detail diagnostics for load, CPU steal/I/O wait, pressure, swap/OOM, and embedded NVMe/ATA SMART disk health without extra node packages
 - Configurable metrics retention, defaulting to 30 days with longer reporting options
 - Runtime shadcn/ui theme packages and full frontend skin packages installable from GitHub
 - Prebuilt GHCR image plus Docker Compose deployment path
