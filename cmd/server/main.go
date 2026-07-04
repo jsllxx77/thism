@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -42,6 +43,36 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
+// envOrFile returns envName when set, otherwise it reads a value from
+// fileEnvName when that environment variable points to a Docker/Kubernetes
+// secret file. It trims only trailing newlines so generated secret files work
+// without changing intentional spaces in the secret.
+func envOrFile(envName, fileEnvName, fallback string) (string, error) {
+	if v, ok := os.LookupEnv(envName); ok {
+		return v, nil
+	}
+	path, ok := os.LookupEnv(fileEnvName)
+	if !ok {
+		return fallback, nil
+	}
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s (%s): %w", fileEnvName, path, err)
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
+}
+
+func mustEnvOrFile(envName, fileEnvName, fallback string) string {
+	v, err := envOrFile(envName, fileEnvName, fallback)
+	if err != nil {
+		log.Fatalf("failed to load %s: %v", envName, err)
+	}
+	return v
+}
+
 func defaultFrontendSkinsDir(dbPath string) string {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" || dbPath == ":memory:" {
@@ -53,18 +84,18 @@ func defaultFrontendSkinsDir(dbPath string) string {
 func main() {
 	port := flag.String("port", envOr("THISM_PORT", "12026"), "HTTP port")
 	dbPath := flag.String("db", envOr("THISM_DB", "./thism.db"), "SQLite database path")
-	adminToken := flag.String("token", os.Getenv("THISM_TOKEN"), "Admin token for API auth (env: THISM_TOKEN)")
-	adminUser := flag.String("admin-user", os.Getenv("THISM_ADMIN_USER"), "Admin username for login page authentication (env: THISM_ADMIN_USER)")
-	adminPass := flag.String("admin-pass", os.Getenv("THISM_ADMIN_PASS"), "Admin password for login page authentication (env: THISM_ADMIN_PASS)")
+	adminToken := flag.String("token", mustEnvOrFile("THISM_TOKEN", "THISM_TOKEN_FILE", ""), "Admin token for API auth (env: THISM_TOKEN or THISM_TOKEN_FILE)")
+	adminUser := flag.String("admin-user", mustEnvOrFile("THISM_ADMIN_USER", "THISM_ADMIN_USER_FILE", ""), "Admin username for login page authentication (env: THISM_ADMIN_USER or THISM_ADMIN_USER_FILE)")
+	adminPass := flag.String("admin-pass", mustEnvOrFile("THISM_ADMIN_PASS", "THISM_ADMIN_PASS_FILE", ""), "Admin password for login page authentication (env: THISM_ADMIN_PASS or THISM_ADMIN_PASS_FILE)")
 	geoIPDBPath := flag.String("geoip-db", envOr("THISM_GEOIP_DB", geo.DefaultDBPath), "Path to local GeoIP mmdb database")
 	frontendSkinsDir := flag.String("frontend-skins-dir", os.Getenv("THISM_FRONTEND_SKINS_DIR"), "Directory for installed frontend skin packages (env: THISM_FRONTEND_SKINS_DIR)")
 	flag.Parse()
 
 	if *adminToken == "" {
-		log.Fatal("admin token is required: pass --token or set THISM_TOKEN")
+		log.Fatal("admin token is required: pass --token or set THISM_TOKEN / THISM_TOKEN_FILE")
 	}
 	if (*adminUser == "") != (*adminPass == "") {
-		log.Fatal("admin-user and admin-pass must be provided together (via flags or THISM_ADMIN_USER / THISM_ADMIN_PASS)")
+		log.Fatal("admin-user and admin-pass must be provided together (via flags, THISM_ADMIN_USER / THISM_ADMIN_PASS, or THISM_ADMIN_USER_FILE / THISM_ADMIN_PASS_FILE)")
 	}
 
 	s, err := store.New(*dbPath)

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -295,6 +296,7 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 
 	s, _ := store.New(":memory:")
 	defer s.Close()
+	seedInstallNode(t, s, "node-token-1", "Bitsflow")
 	h := hub.New(s)
 	go h.Run()
 	router := api.NewRouter(s, h, "test-admin-token", nil)
@@ -373,6 +375,60 @@ func TestInstallScriptUsesTempBinarySwap(t *testing.T) {
 	}
 }
 
+func TestInstallScriptRejectsUnknownNodeToken(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/install.sh?token=missing-token&name=Bitsflow", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected invalid install token to return 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInstallScriptShellEscapesUserControlledValues(t *testing.T) {
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "pwned")
+	maliciousName := `edge"; touch ` + marker + `; #`
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	seedInstallNode(t, s, "node-token-1", maliciousName)
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/install.sh?token=node-token-1&name="+url.QueryEscape(maliciousName), nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	script := w.Body.String()
+	end := strings.Index(script, "\nTARGET_BIN=")
+	if end == -1 {
+		t.Fatalf("expected install script variable block, got: %s", script)
+	}
+	prefix := script[:end]
+	cmd := exec.Command("bash", "-c", prefix)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("expected shell variable block to be valid bash, err=%v output=%s script=%s", err, string(output), prefix)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("expected install script variable block not to execute injected command, marker stat err=%v script=%s", err, prefix)
+	}
+}
+
 func TestFrontendRequiresAdminAuth(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -426,6 +482,7 @@ func TestInstallScriptPrefersArtifactVersionFiles(t *testing.T) {
 
 	s, _ := store.New(":memory:")
 	defer s.Close()
+	seedInstallNode(t, s, "node-token-1", "Bitsflow")
 	h := hub.New(s)
 	go h.Run()
 	router := api.NewRouter(s, h, "test-admin-token", nil)
@@ -452,6 +509,7 @@ func TestInstallScriptPrefersArtifactVersionFiles(t *testing.T) {
 func TestInstallScriptUsesConfiguredPublicURL(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
+	seedInstallNode(t, s, "node-token-1", "Bitsflow")
 	if _, err := s.SetPublicURL("https://thism.example.com/"); err != nil {
 		t.Fatalf("SetPublicURL: %v", err)
 	}
@@ -470,11 +528,18 @@ func TestInstallScriptUsesConfiguredPublicURL(t *testing.T) {
 	}
 
 	script := w.Body.String()
-	if !strings.Contains(script, `BASE="https://thism.example.com"`) {
+	if !strings.Contains(script, `BASE='https://thism.example.com'`) {
 		t.Fatalf("expected install script to use configured public URL, got: %s", script)
 	}
 	if strings.Contains(script, "internal.example:12026") {
 		t.Fatalf("expected install script to avoid request host when public URL is configured, got: %s", script)
+	}
+}
+
+func seedInstallNode(t *testing.T, s *store.Store, token, name string) {
+	t.Helper()
+	if err := s.UpsertNode(&models.Node{ID: "install-node", Name: name, Token: token, CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("seed install node: %v", err)
 	}
 }
 

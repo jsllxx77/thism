@@ -21,7 +21,7 @@ No open high-severity code items remain from this review.
 - [ ] Identifier-concatenated SQL in `internal/store/store.go:339` (`PRAGMA table_info(<table>)`) and `:363` (`ALTER TABLE ... ADD COLUMN ...`) — gate on a whitelist of identifiers used by migrations.
 - [ ] Agent token rotation: tokens currently never expire. Add a TTL and a graceful-rotation flow.
 - [ ] Agent WebSocket Origin check allows empty `Origin` — fine for non-browser clients but should be a separate code path from the dashboard upgrade.
-- [ ] Dockerfile pins floating tags (`node:20-alpine`, `golang:1.24-alpine`, `alpine:3.19`). Pin `@sha256:...` digests and upgrade Alpine.
+- [x] Dockerfile still pins floating runtime tags (`node:20-alpine`, `golang:1.26.4-alpine`, `alpine:3.19`). Pin `@sha256:...` digests and upgrade Alpine.
 - [ ] `err.Error()` from internal errors is returned to API clients in ~50 places — wrap in generic error + correlation ID for logging.
 
 ## Low-severity / housekeeping
@@ -49,3 +49,6 @@ For history, the following audit findings were resolved in v0.6.0 – v0.6.2. Se
 - CI signing pipeline gated on `THISM_RELEASE_PUBLIC_KEY` / `THISM_RELEASE_PRIVATE_KEY` repository secrets; release fails fast when secrets are missing (v0.6.1).
 - In-product install script switched from `--token` on `ExecStart=` to an `EnvironmentFile` (v0.6.1).
 - Both server and agent read credentials from `THISM_*` env vars and the bundled units invoke the binaries with no flags — `/proc/<pid>/cmdline` carries no secrets (v0.6.2).
+- Server credentials can now be loaded from `THISM_TOKEN_FILE`, `THISM_ADMIN_USER_FILE`, and `THISM_ADMIN_PASS_FILE`; Docker Compose mounts them as Docker secrets and `install-compose.sh` migrates legacy `.env` secrets into files under a 0700 secrets directory.
+- Docker build stages now use digest-pinned `node:20-alpine`, `golang:1.26.4-alpine`, and `alpine:3.24` base images.
+- Local `make dev-server` and non-systemd `make dev-restart` no longer pass admin credentials as process arguments.

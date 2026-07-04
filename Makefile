@@ -17,7 +17,6 @@ BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X github.com/thism-dev/thism/internal/version.Version=$(VERSION) -X github.com/thism-dev/thism/internal/version.Commit=$(COMMIT) -X github.com/thism-dev/thism/internal/version.BuildTime=$(BUILD_TIME)
 SERVER_TLS_SPKI_SHA256 ?=
 AGENT_LDFLAGS := $(LDFLAGS)$(if $(RELEASE_PUBLIC_KEY), -X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64=$(RELEASE_PUBLIC_KEY),)$(if $(SERVER_TLS_SPKI_SHA256), -X github.com/thism-dev/thism/internal/collector.ServerTLSSPKISHA256Base64=$(SERVER_TLS_SPKI_SHA256),)
-ADMIN_AUTH_ARGS := $(strip $(if $(ADMIN_USER),--admin-user $(ADMIN_USER),) $(if $(ADMIN_PASS),--admin-pass $(ADMIN_PASS),))
 DEV_SYSTEMD_SERVICE ?= thism-server.service
 DEV_SYSTEMD_ENV_FILE ?= /etc/default/thism-server
 DEV_ROOT_CMD := $(if $(filter 0,$(shell id -u 2>/dev/null)),,$(SUDO))
@@ -57,7 +56,7 @@ dev-ui:
 
 dev-server:
 	@if [ -z "$(TOKEN)" ]; then echo "TOKEN is required (e.g. TOKEN=\"\$$(openssl rand -hex 32)\" make dev-server)"; exit 1; fi
-	GOCACHE=$(GOCACHE_DIR) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/server --token $(TOKEN) --port $(PORT) $(ADMIN_AUTH_ARGS)
+	THISM_TOKEN="$(TOKEN)" THISM_PORT="$(PORT)" THISM_ADMIN_USER="$(ADMIN_USER)" THISM_ADMIN_PASS="$(ADMIN_PASS)" GOCACHE=$(GOCACHE_DIR) $(GO) run -ldflags "$(LDFLAGS)" ./cmd/server
 
 dev-rebuild:
 	cd frontend && npm run build
@@ -88,7 +87,7 @@ dev-restart: dev-rebuild
 		$(DEV_ROOT_CMD) systemctl --no-pager --lines=8 status $(DEV_SYSTEMD_SERVICE); \
 	else \
 		pkill -x thism-server || true; \
-		nohup ./bin/thism-server --token $(TOKEN) --port $(PORT) $(ADMIN_AUTH_ARGS) >/tmp/thism-server.log 2>&1 & echo $$!; \
+		THISM_TOKEN="$(TOKEN)" THISM_PORT="$(PORT)" THISM_ADMIN_USER="$(ADMIN_USER)" THISM_ADMIN_PASS="$(ADMIN_PASS)" nohup ./bin/thism-server >/tmp/thism-server.log 2>&1 & echo $$!; \
 	fi
 	@echo "Server restarted. Logs: /tmp/thism-server.log"
 

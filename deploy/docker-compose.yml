@@ -6,18 +6,25 @@ services:
       - "${THISM_PORT:-8080}:8080"
     volumes:
       - thism-data:/data
-    command:
-      - --port
-      - "8080"
-      - --db
-      - /data/thism.db
-      - --token
-      - ${THISM_TOKEN:?set THISM_TOKEN in .env}
-      - --admin-user
-      - ${THISM_ADMIN_USER:?set THISM_ADMIN_USER in .env}
-      - --admin-pass
-      - ${THISM_ADMIN_PASS:?set THISM_ADMIN_PASS in .env}
+    environment:
+      THISM_PORT: "8080"
+      THISM_DB: /data/thism.db
+      THISM_TOKEN_FILE: /run/secrets/thism_token
+      THISM_ADMIN_USER_FILE: /run/secrets/thism_admin_user
+      THISM_ADMIN_PASS_FILE: /run/secrets/thism_admin_pass
+    secrets:
+      - thism_token
+      - thism_admin_user
+      - thism_admin_pass
     restart: unless-stopped
 
 volumes:
   thism-data:
+
+secrets:
+  thism_token:
+    file: ${THISM_TOKEN_SECRET_FILE:-./secrets/thism_token}
+  thism_admin_user:
+    file: ${THISM_ADMIN_USER_SECRET_FILE:-./secrets/thism_admin_user}
+  thism_admin_pass:
+    file: ${THISM_ADMIN_PASS_SECRET_FILE:-./secrets/thism_admin_pass}

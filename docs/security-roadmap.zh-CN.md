@@ -21,7 +21,7 @@
 - [ ] `internal/store/store.go:339` 的 `PRAGMA table_info(<table>)` 和 `:363` 的 `ALTER TABLE ... ADD COLUMN ...` 用了字符串拼接 SQL identifier，需用白名单约束。
 - [ ] Agent token 永不过期。加 TTL + 优雅轮换流程。
 - [ ] Agent WebSocket Origin 校验允许空 Origin，非浏览器 client 这样设是合理的，但应该和 dashboard 升级路径走不同分支。
-- [ ] Dockerfile 用浮动 tag（`node:20-alpine`、`golang:1.24-alpine`、`alpine:3.19`），应 pin `@sha256:...` digest 并升级 Alpine。
+- [x] Dockerfile 仍使用浮动运行时 tag（`node:20-alpine`、`golang:1.26.4-alpine`、`alpine:3.19`），应 pin `@sha256:...` digest 并升级 Alpine。
 - [ ] `err.Error()` 直接进 API 响应大约 50 处，应该包成 generic error + correlation ID（详细错误进日志）。
 
 ## Low 级 / 杂项
@@ -49,3 +49,6 @@
 - CI 签名流水线依赖 `THISM_RELEASE_PUBLIC_KEY` / `THISM_RELEASE_PRIVATE_KEY` 仓库 secret；缺 secret 时 release 直接失败（v0.6.1）。
 - 面板内置 install 脚本从 `--token` on `ExecStart=` 改为 `EnvironmentFile`（v0.6.1）。
 - Server 与 agent 都改为从 `THISM_*` 环境变量读凭据，systemd unit 调用二进制不传任何 flag —— `/proc/<pid>/cmdline` 不再含敏感数据（v0.6.2）。
+- Server 凭据现在支持从 `THISM_TOKEN_FILE`、`THISM_ADMIN_USER_FILE`、`THISM_ADMIN_PASS_FILE` 读取；Docker Compose 以 Docker secrets 挂载这些文件，`install-compose.sh` 会把旧 `.env` 明文凭据迁移到 0700 secrets 目录下的文件。
+- Docker 构建阶段已改用带 digest 的 `node:20-alpine`、`golang:1.26.4-alpine` 和 `alpine:3.24` 基础镜像。
+- 本地 `make dev-server` 和非 systemd 的 `make dev-restart` fallback 不再把管理员凭据作为进程参数传递。

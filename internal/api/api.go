@@ -3011,6 +3011,10 @@ func buildInstallCommand(r *http.Request, s *store.Store, token, name string) st
 // -----------------------------------------------------------------------
 
 func handleInstallScript(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	if s == nil {
+		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		return
+	}
 	token := bearerToken(r)
 	if token == "" {
 		token = r.URL.Query().Get("token")
@@ -3020,15 +3024,23 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request, s *store.Store)
 		http.Error(w, "authorization bearer token and name query param required", http.StatusBadRequest)
 		return
 	}
+	node, err := s.GetNodeByToken(token)
+	if err != nil || node == nil {
+		http.Error(w, uiMessage(resolveUILanguage(r), "invalidToken"), http.StatusUnauthorized)
+		return
+	}
+	if strings.TrimSpace(node.Name) != "" {
+		name = node.Name
+	}
 
 	baseURL := publicBaseURL(r, s)
 	amd64TargetVersion := resolveAgentTargetVersion("linux", "amd64")
 	arm64TargetVersion := resolveAgentTargetVersion("linux", "arm64")
 
 	script := "#!/bin/bash\nset -e\n\n" +
-		"TOKEN=\"" + token + "\"\n" +
-		"NAME=\"" + name + "\"\n" +
-		"BASE=\"" + baseURL + "\"\n\n" +
+		"TOKEN=" + shellQuote(token) + "\n" +
+		"NAME=" + shellQuote(name) + "\n" +
+		"BASE=" + shellQuote(baseURL) + "\n\n" +
 		"TARGET_BIN=\"/usr/local/bin/thism-agent\"\n" +
 		"VERSION_FILE=\"/usr/local/bin/.thism-agent.version\"\n" +
 		"ENV_FILE=\"/etc/default/thism-agent\"\n" +
@@ -3084,6 +3096,10 @@ func handleInstallScript(w http.ResponseWriter, r *http.Request, s *store.Store)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(script))
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func handleAgentRelease(w http.ResponseWriter, r *http.Request, s *store.Store) {

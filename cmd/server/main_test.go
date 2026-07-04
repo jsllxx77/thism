@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -101,5 +102,76 @@ func TestEnvOrReturnsEmptyEnvValue(t *testing.T) {
 	t.Setenv("THISM_TEST_KEY_EMPTY", "")
 	if got := envOr("THISM_TEST_KEY_EMPTY", "fallback"); got != "" {
 		t.Fatalf("expected explicit empty env value to be respected, got %q", got)
+	}
+}
+
+func TestEnvOrFileReturnsEnvWhenSet(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secretPath, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	t.Setenv("THISM_TEST_SECRET", "from-env")
+	t.Setenv("THISM_TEST_SECRET_FILE", secretPath)
+
+	got, err := envOrFile("THISM_TEST_SECRET", "THISM_TEST_SECRET_FILE", "fallback")
+	if err != nil {
+		t.Fatalf("envOrFile returned error: %v", err)
+	}
+	if got != "from-env" {
+		t.Fatalf("expected env value to win over file, got %q", got)
+	}
+}
+
+func TestEnvOrFileReturnsFileValueWhenEnvUnset(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secretPath, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	t.Setenv("THISM_TEST_SECRET_FILE", secretPath)
+
+	got, err := envOrFile("THISM_TEST_SECRET", "THISM_TEST_SECRET_FILE", "fallback")
+	if err != nil {
+		t.Fatalf("envOrFile returned error: %v", err)
+	}
+	if got != "from-file" {
+		t.Fatalf("expected file value without trailing newline, got %q", got)
+	}
+}
+
+func TestEnvOrFileReturnsFallbackWhenEnvAndFileUnset(t *testing.T) {
+	got, err := envOrFile("THISM_TEST_SECRET_UNSET", "THISM_TEST_SECRET_FILE_UNSET", "fallback")
+	if err != nil {
+		t.Fatalf("envOrFile returned error: %v", err)
+	}
+	if got != "fallback" {
+		t.Fatalf("expected fallback when env and file env are unset, got %q", got)
+	}
+}
+
+func TestEnvOrFileReturnsEmptyEnvValue(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secretPath, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	t.Setenv("THISM_TEST_SECRET_EMPTY", "")
+	t.Setenv("THISM_TEST_SECRET_EMPTY_FILE", secretPath)
+
+	got, err := envOrFile("THISM_TEST_SECRET_EMPTY", "THISM_TEST_SECRET_EMPTY_FILE", "fallback")
+	if err != nil {
+		t.Fatalf("envOrFile returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected explicit empty env value to be respected, got %q", got)
+	}
+}
+
+func TestEnvOrFileReturnsErrorWhenFileCannotBeRead(t *testing.T) {
+	t.Setenv("THISM_TEST_SECRET_FILE", filepath.Join(t.TempDir(), "missing"))
+
+	if _, err := envOrFile("THISM_TEST_SECRET", "THISM_TEST_SECRET_FILE", "fallback"); err == nil {
+		t.Fatal("expected unreadable secret file to return an error")
 	}
 }

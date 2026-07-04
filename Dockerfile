@@ -1,5 +1,5 @@
 # Stage 1: Build frontend
-FROM node:20-alpine AS frontend
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build Go binaries
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS builder
 WORKDIR /app
 ARG THISM_VERSION=dev
 ARG THISM_COMMIT=unknown
@@ -46,7 +46,7 @@ RUN set -eux; \
     fi
 
 # Stage 3: Minimal runtime image
-FROM alpine:3.19
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 RUN adduser -D -h /opt/thism thism \
 	&& mkdir -p /opt/thism/dist /data \
 	&& chown -R thism:thism /opt/thism /data

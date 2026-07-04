@@ -122,6 +122,7 @@ export const messagesEn = {
       table: {
         title: "Node Inventory",
         nodeName: "Node Name",
+        agent: "Agent",
         os: "Operating System",
         status: "Status",
         cpu: "CPU",
