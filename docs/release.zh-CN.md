@@ -5,8 +5,12 @@
 正式发布仅通过手动语义化标签触发：
 
 1. 准备并合并可发布变更到 `main`。
-2. 在本地创建语义化版本标签，例如 `v1.4.0`。
-3. 执行 `git push origin v1.4.0` 推送标签。
+2. 参考 `docs/releases/TEMPLATE.md` 创建 `docs/releases/v1.4.0.md`，手写英文和中文发布摘要。
+3. 把发布说明提交并合并到 `main`。
+4. 在本地创建语义化版本标签，例如 `v1.4.0`。
+5. 执行 `git push origin v1.4.0` 推送标签。
+
+如果 `docs/releases/<tag>.md` 缺失，或文件中没有 `## English` 与 `## 中文` 两个 section，release 工作流会直接失败，不会继续发布。中文部分必须是面向用户的中文摘要，不能再直接复制英文 commit 标题。
 
 Release 工作流只会在推送 `v*` 标签时执行，并发布：
 

@@ -5,8 +5,12 @@
 Formal releases are tag-driven only:
 
 1. Prepare and merge release-ready changes to `main`.
-2. Create a semantic version tag locally, for example `v1.4.0`.
-3. Push the tag with `git push origin v1.4.0`.
+2. Create `docs/releases/v1.4.0.md` from `docs/releases/TEMPLATE.md` and write the English and Chinese release summaries by hand.
+3. Commit and merge the release notes to `main`.
+4. Create a semantic version tag locally, for example `v1.4.0`.
+5. Push the tag with `git push origin v1.4.0`.
+
+The release workflow refuses to publish if `docs/releases/<tag>.md` is missing or does not contain both `## English` and `## 中文` sections. The Chinese section must be a real user-facing Chinese summary, not copied English commit titles.
 
 The release workflow runs only for pushed `v*` tags and publishes:
 
