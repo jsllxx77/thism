@@ -87,6 +87,13 @@ export type NodeHardware = {
 }
 
 export type DiskHealthStatus = "ok" | "warning" | "critical" | "unsupported" | "unknown"
+export type DiskHealthSupportStatus = "supported" | "unsupported" | "degraded" | "unknown"
+
+export type DiskHealthMount = {
+  mount: string
+  fs_type?: string
+  read_only?: boolean
+}
 
 export type DiskHealthStats = {
   name: string
@@ -97,6 +104,9 @@ export type DiskHealthStats = {
   firmware?: string
   size_bytes?: number
   status: DiskHealthStatus
+  support_status?: DiskHealthSupportStatus
+  mounts?: DiskHealthMount[]
+  read_only?: boolean
   temperature_c?: number
   life_used_percent?: number
   available_spare_percent?: number

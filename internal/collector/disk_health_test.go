@@ -3,6 +3,7 @@ package collector
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/thism-dev/thism/internal/models"
@@ -94,6 +95,9 @@ func TestCollectDiskHealthEnumeratesSysfsAndNVMeHealth(t *testing.T) {
 	if nvme.Status != models.DiskHealthStatusOK || nvme.TemperatureC == nil || *nvme.TemperatureC != 42 || nvme.LifeUsedPercent == nil || *nvme.LifeUsedPercent != 7 || nvme.AvailableSparePercent == nil || *nvme.AvailableSparePercent != 91 {
 		t.Fatalf("unexpected nvme health: %#v", nvme)
 	}
+	if nvme.SupportStatus != models.DiskHealthSupportSupported {
+		t.Fatalf("expected nvme physical health support, got %#v", nvme)
+	}
 	if nvme.SizeBytes != 1024000 || nvme.PowerOnHours != 1234 || nvme.UnsafeShutdowns != 5 {
 		t.Fatalf("unexpected nvme counters: %#v", nvme)
 	}
@@ -102,8 +106,145 @@ func TestCollectDiskHealthEnumeratesSysfsAndNVMeHealth(t *testing.T) {
 	if sata.Name != "sda" || sata.Type != models.DiskHealthTypeATA || sata.Status != models.DiskHealthStatusOK {
 		t.Fatalf("expected sata disk to report embedded SMART health, got %#v", sata)
 	}
+	if sata.SupportStatus != models.DiskHealthSupportSupported {
+		t.Fatalf("expected sata physical health support, got %#v", sata)
+	}
 	if sata.TemperatureC == nil || *sata.TemperatureC != 38 || sata.LifeUsedPercent == nil || *sata.LifeUsedPercent != 12 || sata.PowerOnHours != 4321 {
 		t.Fatalf("unexpected sata health: %#v", sata)
+	}
+}
+
+func TestCollectDiskHealthReportsVirtualDiskObservableState(t *testing.T) {
+	tempDir := t.TempDir()
+	sysBlock := filepath.Join(tempDir, "sys", "block")
+	devRoot := filepath.Join(tempDir, "dev")
+	procMounts := filepath.Join(tempDir, "proc", "mounts")
+	if err := os.MkdirAll(devRoot, 0o755); err != nil {
+		t.Fatalf("mkdir dev root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(procMounts), 0o755); err != nil {
+		t.Fatalf("mkdir proc root: %v", err)
+	}
+	writeSysfsFile(t, sysBlock, "vda", "queue/rotational", "0\n")
+	writeSysfsFile(t, sysBlock, "vda", "ro", "1\n")
+	writeSysfsFile(t, sysBlock, "vda", "size", "4096\n")
+	if err := os.WriteFile(filepath.Join(devRoot, "vda"), nil, 0o600); err != nil {
+		t.Fatalf("write virtual disk placeholder: %v", err)
+	}
+	if err := os.WriteFile(procMounts, []byte("/dev/vda1 / ext4 ro,relatime 0 0\n"), 0o644); err != nil {
+		t.Fatalf("write proc mounts: %v", err)
+	}
+
+	originalSysBlockPath := diskHealthSysBlockPath
+	originalDevRootPath := diskHealthDevRootPath
+	originalProcMountsPath := diskHealthProcMountsPath
+	defer func() {
+		diskHealthSysBlockPath = originalSysBlockPath
+		diskHealthDevRootPath = originalDevRootPath
+		diskHealthProcMountsPath = originalProcMountsPath
+	}()
+
+	diskHealthSysBlockPath = sysBlock
+	diskHealthDevRootPath = devRoot
+	diskHealthProcMountsPath = procMounts
+
+	disks := collectDiskHealth()
+	if len(disks) != 1 {
+		t.Fatalf("expected one virtual disk, got %#v", disks)
+	}
+	disk := disks[0]
+	if disk.Name != "vda" || disk.Type != models.DiskHealthTypeVirtual {
+		t.Fatalf("unexpected virtual disk identity: %#v", disk)
+	}
+	if disk.Status != models.DiskHealthStatusUnsupported || disk.SupportStatus != models.DiskHealthSupportUnsupported {
+		t.Fatalf("expected virtual disk physical health to be unsupported, got %#v", disk)
+	}
+	if !disk.ReadOnly {
+		t.Fatalf("expected read-only state from sysfs/proc mounts, got %#v", disk)
+	}
+	if len(disk.Mounts) != 1 || disk.Mounts[0].Mount != "/" || disk.Mounts[0].FSType != "ext4" || !disk.Mounts[0].ReadOnly {
+		t.Fatalf("expected observable mount state, got %#v", disk.Mounts)
+	}
+	if disk.SizeBytes != 2097152 {
+		t.Fatalf("expected virtual disk size to remain observable, got %#v", disk)
+	}
+}
+
+func TestCollectDiskHealthTreatsCloudNVMeAsVirtualHealth(t *testing.T) {
+	tempDir := t.TempDir()
+	sysBlock := filepath.Join(tempDir, "sys", "block")
+	devRoot := filepath.Join(tempDir, "dev")
+	writeSysfsFile(t, sysBlock, "nvme1n1", "queue/rotational", "0\n")
+	writeSysfsFile(t, sysBlock, "nvme1n1", "device/model", "Amazon Elastic Block Store\n")
+	if err := os.MkdirAll(devRoot, 0o755); err != nil {
+		t.Fatalf("mkdir dev root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devRoot, "nvme1n1"), nil, 0o600); err != nil {
+		t.Fatalf("write cloud nvme placeholder: %v", err)
+	}
+
+	originalSysBlockPath := diskHealthSysBlockPath
+	originalDevRootPath := diskHealthDevRootPath
+	originalReadNVMeHealthLogFunc := readNVMeHealthLogFunc
+	defer func() {
+		diskHealthSysBlockPath = originalSysBlockPath
+		diskHealthDevRootPath = originalDevRootPath
+		readNVMeHealthLogFunc = originalReadNVMeHealthLogFunc
+	}()
+
+	diskHealthSysBlockPath = sysBlock
+	diskHealthDevRootPath = devRoot
+	readNVMeHealthLogFunc = func(string) (nvmeHealthLog, error) {
+		t.Fatal("cloud NVMe disks must not use hardware NVMe health passthrough")
+		return nvmeHealthLog{}, nil
+	}
+
+	disks := collectDiskHealth()
+	if len(disks) != 1 {
+		t.Fatalf("expected one cloud nvme disk, got %#v", disks)
+	}
+	if disks[0].Type != models.DiskHealthTypeVirtual || disks[0].SupportStatus != models.DiskHealthSupportUnsupported || disks[0].Status != models.DiskHealthStatusUnsupported {
+		t.Fatalf("expected cloud nvme physical health to be unsupported, got %#v", disks[0])
+	}
+}
+
+func TestCollectDiskHealthMarksPhysicalHealthAccessDegraded(t *testing.T) {
+	tempDir := t.TempDir()
+	sysBlock := filepath.Join(tempDir, "sys", "block")
+	devRoot := filepath.Join(tempDir, "dev")
+	writeSysfsFile(t, sysBlock, "sda", "queue/rotational", "1\n")
+	writeSysfsFile(t, sysBlock, "sda", "ro", "0\n")
+	if err := os.MkdirAll(devRoot, 0o755); err != nil {
+		t.Fatalf("mkdir dev root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devRoot, "sda"), nil, 0o600); err != nil {
+		t.Fatalf("write sata placeholder: %v", err)
+	}
+
+	originalSysBlockPath := diskHealthSysBlockPath
+	originalDevRootPath := diskHealthDevRootPath
+	originalReadATAHealthFunc := readATAHealthFunc
+	defer func() {
+		diskHealthSysBlockPath = originalSysBlockPath
+		diskHealthDevRootPath = originalDevRootPath
+		readATAHealthFunc = originalReadATAHealthFunc
+	}()
+
+	diskHealthSysBlockPath = sysBlock
+	diskHealthDevRootPath = devRoot
+	readATAHealthFunc = func(string) (ataHealthLog, error) {
+		return ataHealthLog{}, errATASmartUnsupported
+	}
+
+	disks := collectDiskHealth()
+	if len(disks) != 1 {
+		t.Fatalf("expected one sata disk, got %#v", disks)
+	}
+	if disks[0].Status != models.DiskHealthStatusUnknown || disks[0].SupportStatus != models.DiskHealthSupportDegraded {
+		t.Fatalf("expected degraded physical health access, got %#v", disks[0])
+	}
+	if !strings.Contains(disks[0].Message, "SMART") {
+		t.Fatalf("expected degraded support message to mention SMART failure, got %#v", disks[0])
 	}
 }
 

@@ -1,5 +1,5 @@
-import { AlertTriangle, CheckCircle2, HardDrive, HelpCircle, XCircle } from "lucide-react"
-import type { DiskHealthStats, DiskHealthStatus } from "../../lib/api"
+import { AlertTriangle, CheckCircle2, HardDrive, HelpCircle, ShieldAlert, ShieldCheck, XCircle } from "lucide-react"
+import type { DiskHealthStats, DiskHealthStatus, DiskHealthSupportStatus } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
 import { formatBytes } from "../../lib/units"
 
@@ -21,6 +21,10 @@ function formatOptionalCount(value?: number): string {
 
 function formatOptionalBytes(value?: number): string {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? formatBytes(value) : "—"
+}
+
+function formatMounts(disk: DiskHealthStats): string {
+  return disk.mounts?.map((mount) => mount.mount).filter(Boolean).join(", ") ?? ""
 }
 
 function statusTone(status: DiskHealthStatus) {
@@ -53,6 +57,35 @@ function statusTone(status: DiskHealthStatus) {
       return {
         icon: HelpCircle,
         labelKey: "nodeDetail.diskHealthStatusUnknown",
+        className: "border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
+      }
+  }
+}
+
+function supportTone(status?: DiskHealthSupportStatus) {
+  switch (status) {
+    case "supported":
+      return {
+        icon: ShieldCheck,
+        labelKey: "nodeDetail.diskHealthSupportSupported",
+        className: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300",
+      }
+    case "unsupported":
+      return {
+        icon: HelpCircle,
+        labelKey: "nodeDetail.diskHealthSupportUnsupported",
+        className: "border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
+      }
+    case "degraded":
+      return {
+        icon: ShieldAlert,
+        labelKey: "nodeDetail.diskHealthSupportDegraded",
+        className: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300",
+      }
+    default:
+      return {
+        icon: HelpCircle,
+        labelKey: "nodeDetail.diskHealthSupportUnknown",
         className: "border-slate-200 bg-slate-100 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300",
       }
   }
@@ -95,6 +128,13 @@ export function DiskHealthPanel({ disks = [] }: Props) {
             {disks.map((disk) => {
               const tone = statusTone(disk.status)
               const Icon = tone.icon
+              const supportStatus = disk.support_status ?? (disk.status === "unsupported" ? "unsupported" : "unknown")
+              const support = supportTone(supportStatus)
+              const SupportIcon = support.icon
+              const mounts = formatMounts(disk)
+              const message = supportStatus === "unsupported" && disk.type === "virtual"
+                ? t("nodeDetail.diskHealthVirtualNotice")
+                : disk.message
               const mediaErrorDetails = [
                 { label: t("nodeDetail.diskHealthReallocated"), value: disk.reallocated_sectors },
                 { label: t("nodeDetail.diskHealthPending"), value: disk.pending_sectors },
@@ -107,13 +147,23 @@ export function DiskHealthPanel({ disks = [] }: Props) {
                     <p className="font-semibold text-slate-900 dark:text-slate-50">{disk.name}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{disk.model || disk.path || disk.type}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{formatOptionalBytes(disk.size_bytes)}</p>
+                    {mounts ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("nodeDetail.diskHealthMounts")} {mounts}</p> : null}
+                    {mounts || disk.read_only ? (
+                      <p className={`mt-1 text-xs font-medium ${disk.read_only ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                        {disk.read_only ? t("nodeDetail.diskHealthReadOnly") : t("nodeDetail.diskHealthWritable")}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="border-b border-slate-100 px-3 py-3 dark:border-white/5">
                     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium ${tone.className}`}>
                       <Icon className="h-3.5 w-3.5" />
                       {t(tone.labelKey)}
                     </span>
-                    {disk.message ? <p className="mt-2 max-w-[16rem] text-xs text-slate-500 dark:text-slate-400">{disk.message}</p> : null}
+                    <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium ${support.className}`}>
+                      <SupportIcon className="h-3.5 w-3.5" />
+                      {t(support.labelKey)}
+                    </span>
+                    {message ? <p className="mt-2 max-w-[16rem] text-xs text-slate-500 dark:text-slate-400">{message}</p> : null}
                   </div>
                   <div className="border-b border-slate-100 px-3 py-3 tabular-nums dark:border-white/5">{formatOptionalTemperature(disk.temperature_c)}</div>
                   <div className="border-b border-slate-100 px-3 py-3 tabular-nums dark:border-white/5">{formatOptionalPercent(disk.life_used_percent)}</div>

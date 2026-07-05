@@ -45,6 +45,8 @@ const node: Node = {
       firmware: "1.2.3",
       size_bytes: 1024000,
       status: "ok",
+      support_status: "supported",
+      mounts: [{ mount: "/", fs_type: "ext4", read_only: false }],
       temperature_c: 41,
       life_used_percent: 6,
       available_spare_percent: 92,
@@ -59,6 +61,7 @@ const node: Node = {
       model: "Bulk SATA",
       size_bytes: 2048000,
       status: "critical",
+      support_status: "supported",
       temperature_c: 43,
       power_on_hours: 2222,
       media_errors: 3,
@@ -66,6 +69,17 @@ const node: Node = {
       pending_sectors: 1,
       interface_crc_errors: 3,
       message: "ATA SMART reports unstable or uncorrectable sectors",
+    },
+    {
+      name: "vda",
+      path: "/dev/vda",
+      type: "virtual",
+      size_bytes: 21474836480,
+      status: "unsupported",
+      support_status: "unsupported",
+      read_only: true,
+      mounts: [{ mount: "/", fs_type: "ext4", read_only: true }],
+      message: "virtual block device does not expose hardware health",
     },
   ],
 }
@@ -166,5 +180,10 @@ describe("node detail metrics", () => {
     expect(screen.getByText("Pending 1")).toBeInTheDocument()
     expect(screen.getByText("CRC 3")).toBeInTheDocument()
     expect(screen.getByText(/ATA SMART reports unstable/)).toBeInTheDocument()
+    expect(screen.getByText("vda")).toBeInTheDocument()
+    expect(screen.getByText("Physical health unavailable")).toBeInTheDocument()
+    expect(screen.getByText(/Cloud\/virtual disk/)).toBeInTheDocument()
+    expect(screen.getAllByText("Mounts /").length).toBeGreaterThan(0)
+    expect(screen.getByText("Read-only")).toBeInTheDocument()
   })
 })

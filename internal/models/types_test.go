@@ -21,13 +21,17 @@ func TestMetricsPayloadJSON(t *testing.T) {
 		OOMKills:      2,
 		DiskHealth: []models.DiskHealthStats{
 			{
-				Name:                  "nvme0n1",
-				Path:                  "/dev/nvme0n1",
-				Type:                  "nvme",
-				Model:                 "FastDisk",
-				Serial:                "SN123",
-				SizeBytes:             1024,
-				Status:                models.DiskHealthStatusOK,
+				Name:          "nvme0n1",
+				Path:          "/dev/nvme0n1",
+				Type:          "nvme",
+				Model:         "FastDisk",
+				Serial:        "SN123",
+				SizeBytes:     1024,
+				Status:        models.DiskHealthStatusOK,
+				SupportStatus: models.DiskHealthSupportSupported,
+				Mounts: []models.DiskHealthMount{
+					{Mount: "/", FSType: "ext4", ReadOnly: false},
+				},
 				TemperatureC:          float64Ptr(36),
 				LifeUsedPercent:       float64Ptr(4),
 				AvailableSparePercent: float64Ptr(95),
@@ -72,6 +76,12 @@ func TestMetricsPayloadJSON(t *testing.T) {
 	}
 	if len(out.DiskHealth) != 1 || out.DiskHealth[0].Name != "nvme0n1" || out.DiskHealth[0].Status != models.DiskHealthStatusOK {
 		t.Fatalf("expected disk health to round-trip, got %#v", out.DiskHealth)
+	}
+	if out.DiskHealth[0].SupportStatus != models.DiskHealthSupportSupported {
+		t.Fatalf("expected disk health support status to round-trip, got %#v", out.DiskHealth[0])
+	}
+	if len(out.DiskHealth[0].Mounts) != 1 || out.DiskHealth[0].Mounts[0].Mount != "/" || out.DiskHealth[0].Mounts[0].FSType != "ext4" || out.DiskHealth[0].Mounts[0].ReadOnly {
+		t.Fatalf("expected disk mount observations to round-trip, got %#v", out.DiskHealth[0].Mounts)
 	}
 	if out.DiskHealth[0].TemperatureC == nil || *out.DiskHealth[0].TemperatureC != 36 {
 		t.Fatalf("expected disk temperature to round-trip, got %#v", out.DiskHealth[0].TemperatureC)

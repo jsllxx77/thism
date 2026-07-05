@@ -190,29 +190,43 @@ const (
 	DiskHealthStatusCritical    = "critical"
 	DiskHealthStatusUnsupported = "unsupported"
 	DiskHealthStatusUnknown     = "unknown"
+
+	DiskHealthSupportSupported   = "supported"
+	DiskHealthSupportUnsupported = "unsupported"
+	DiskHealthSupportDegraded    = "degraded"
+	DiskHealthSupportUnknown     = "unknown"
 )
 
+type DiskHealthMount struct {
+	Mount    string `json:"mount"`
+	FSType   string `json:"fs_type,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+}
+
 type DiskHealthStats struct {
-	Name                  string   `json:"name"`
-	Path                  string   `json:"path,omitempty"`
-	Type                  string   `json:"type"`
-	Model                 string   `json:"model,omitempty"`
-	Serial                string   `json:"serial,omitempty"`
-	Firmware              string   `json:"firmware,omitempty"`
-	SizeBytes             uint64   `json:"size_bytes,omitempty"`
-	Status                string   `json:"status"`
-	TemperatureC          *float64 `json:"temperature_c,omitempty"`
-	LifeUsedPercent       *float64 `json:"life_used_percent,omitempty"`
-	AvailableSparePercent *float64 `json:"available_spare_percent,omitempty"`
-	PowerOnHours          uint64   `json:"power_on_hours,omitempty"`
-	UnsafeShutdowns       uint64   `json:"unsafe_shutdowns,omitempty"`
-	MediaErrors           uint64   `json:"media_errors,omitempty"`
-	ReallocatedSectors    uint64   `json:"reallocated_sectors,omitempty"`
-	PendingSectors        uint64   `json:"pending_sectors,omitempty"`
-	OfflineUncorrectable  uint64   `json:"offline_uncorrectable,omitempty"`
-	InterfaceCRCErrors    uint64   `json:"interface_crc_errors,omitempty"`
-	CriticalWarning       uint8    `json:"critical_warning,omitempty"`
-	Message               string   `json:"message,omitempty"`
+	Name                  string            `json:"name"`
+	Path                  string            `json:"path,omitempty"`
+	Type                  string            `json:"type"`
+	Model                 string            `json:"model,omitempty"`
+	Serial                string            `json:"serial,omitempty"`
+	Firmware              string            `json:"firmware,omitempty"`
+	SizeBytes             uint64            `json:"size_bytes,omitempty"`
+	Status                string            `json:"status"`
+	SupportStatus         string            `json:"support_status,omitempty"`
+	Mounts                []DiskHealthMount `json:"mounts,omitempty"`
+	ReadOnly              bool              `json:"read_only,omitempty"`
+	TemperatureC          *float64          `json:"temperature_c,omitempty"`
+	LifeUsedPercent       *float64          `json:"life_used_percent,omitempty"`
+	AvailableSparePercent *float64          `json:"available_spare_percent,omitempty"`
+	PowerOnHours          uint64            `json:"power_on_hours,omitempty"`
+	UnsafeShutdowns       uint64            `json:"unsafe_shutdowns,omitempty"`
+	MediaErrors           uint64            `json:"media_errors,omitempty"`
+	ReallocatedSectors    uint64            `json:"reallocated_sectors,omitempty"`
+	PendingSectors        uint64            `json:"pending_sectors,omitempty"`
+	OfflineUncorrectable  uint64            `json:"offline_uncorrectable,omitempty"`
+	InterfaceCRCErrors    uint64            `json:"interface_crc_errors,omitempty"`
+	CriticalWarning       uint8             `json:"critical_warning,omitempty"`
+	Message               string            `json:"message,omitempty"`
 }
 
 type DiskIOStats struct {

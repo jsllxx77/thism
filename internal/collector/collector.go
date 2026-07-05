@@ -96,8 +96,9 @@ var (
 )
 
 var (
-	diskHealthSysBlockPath = "/sys/block"
-	diskHealthDevRootPath  = "/dev"
+	diskHealthSysBlockPath   = "/sys/block"
+	diskHealthDevRootPath    = "/dev"
+	diskHealthProcMountsPath = "/proc/mounts"
 )
 
 func newSelfUpdateHTTPClient() *http.Client {
@@ -775,12 +776,21 @@ func collectDiskHealth() []models.DiskHealthStats {
 func collectDiskHealthForDevice(name string) models.DiskHealthStats {
 	deviceRoot := filepath.Join(diskHealthSysBlockPath, name)
 	stats := models.DiskHealthStats{
-		Name:   name,
-		Path:   filepath.Join(diskHealthDevRootPath, name),
-		Type:   classifyDiskHealthType(name, deviceRoot),
-		Status: models.DiskHealthStatusUnknown,
-		Model:  readSysfsString(filepath.Join(deviceRoot, "device/model")),
-		Serial: readSysfsString(filepath.Join(deviceRoot, "device/serial")),
+		Name:          name,
+		Path:          filepath.Join(diskHealthDevRootPath, name),
+		Type:          classifyDiskHealthType(name, deviceRoot),
+		Status:        models.DiskHealthStatusUnknown,
+		SupportStatus: models.DiskHealthSupportUnknown,
+		Model:         readSysfsString(filepath.Join(deviceRoot, "device/model")),
+		Serial:        readSysfsString(filepath.Join(deviceRoot, "device/serial")),
+	}
+	stats.ReadOnly = readBlockDeviceReadOnly(filepath.Join(deviceRoot, "ro"))
+	stats.Mounts = readDiskHealthMounts(name)
+	for _, mount := range stats.Mounts {
+		if mount.ReadOnly {
+			stats.ReadOnly = true
+			break
+		}
 	}
 	if firmware := readSysfsString(filepath.Join(deviceRoot, "device/firmware_rev")); firmware != "" {
 		stats.Firmware = firmware
@@ -794,12 +804,14 @@ func collectDiskHealthForDevice(name string) models.DiskHealthStats {
 		controllerPath, ok := nvmeControllerPathForBlockDevice(name)
 		if !ok {
 			stats.Status = models.DiskHealthStatusUnknown
+			stats.SupportStatus = models.DiskHealthSupportDegraded
 			stats.Message = "NVMe controller path not found"
 			return stats
 		}
 		log, err := readNVMeHealthLogFunc(controllerPath)
 		if err != nil {
 			stats.Status = models.DiskHealthStatusUnknown
+			stats.SupportStatus = models.DiskHealthSupportDegraded
 			stats.Message = "NVMe health log unavailable: " + err.Error()
 			return stats
 		}
@@ -807,21 +819,23 @@ func collectDiskHealthForDevice(name string) models.DiskHealthStats {
 	case models.DiskHealthTypeATA:
 		log, err := readATAHealthFunc(stats.Path)
 		if err != nil {
-			if errors.Is(err, errATASmartUnsupported) {
-				stats.Status = models.DiskHealthStatusUnsupported
-			} else {
-				stats.Status = models.DiskHealthStatusUnknown
-			}
+			stats.Status = models.DiskHealthStatusUnknown
+			stats.SupportStatus = models.DiskHealthSupportDegraded
 			stats.Message = "ATA SMART data unavailable: " + err.Error()
+			if errors.Is(err, errATASmartUnsupported) {
+				stats.Message = "ATA SMART passthrough unavailable: " + err.Error()
+			}
 			return stats
 		}
 		return diskHealthFromATAHealthLog(stats, log)
 	case models.DiskHealthTypeVirtual:
 		stats.Status = models.DiskHealthStatusUnsupported
-		stats.Message = "virtual block device does not expose hardware health"
+		stats.SupportStatus = models.DiskHealthSupportUnsupported
+		stats.Message = "cloud or virtual block device does not expose physical disk health"
 		return stats
 	default:
 		stats.Status = models.DiskHealthStatusUnsupported
+		stats.SupportStatus = models.DiskHealthSupportUnsupported
 		stats.Message = "block device health is not supported"
 		return stats
 	}
@@ -848,9 +862,6 @@ func shouldSkipDiskHealthDevice(name string) bool {
 }
 
 func classifyDiskHealthType(name, deviceRoot string) string {
-	if strings.HasPrefix(name, "nvme") {
-		return models.DiskHealthTypeNVMe
-	}
 	resolvedRoot, err := filepath.EvalSymlinks(deviceRoot)
 	if err == nil && (strings.Contains(resolvedRoot, "/devices/virtual/block/") || strings.Contains(resolvedRoot, "/virtio")) {
 		return models.DiskHealthTypeVirtual
@@ -858,11 +869,49 @@ func classifyDiskHealthType(name, deviceRoot string) string {
 	if strings.HasPrefix(name, "vd") || strings.HasPrefix(name, "xvd") || strings.HasPrefix(name, "dm-") {
 		return models.DiskHealthTypeVirtual
 	}
+	identity := strings.Join([]string{
+		readSysfsString(filepath.Join(deviceRoot, "device/model")),
+		readSysfsString(filepath.Join(deviceRoot, "device/vendor")),
+	}, " ")
+	if diskHealthIdentityLooksVirtual(identity) {
+		return models.DiskHealthTypeVirtual
+	}
+	if strings.HasPrefix(name, "nvme") {
+		return models.DiskHealthTypeNVMe
+	}
 	rotational := strings.TrimSpace(string(readFileOrNil(filepath.Join(deviceRoot, "queue/rotational"))))
 	if strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "hd") || rotational == "1" {
 		return models.DiskHealthTypeATA
 	}
 	return models.DiskHealthTypeUnknown
+}
+
+func diskHealthIdentityLooksVirtual(identity string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(identity))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"amazon elastic block store",
+		"amazon ec2 nvme instance storage",
+		"google persistentdisk",
+		"persistent disk",
+		"microsoft virtual",
+		"virtual disk",
+		"qemu",
+		"vmware",
+		"vbox",
+		"xen",
+		"virtio",
+		"alibaba cloud",
+		"tencent cloud",
+		"cloud block",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func readSysfsString(path string) string {
@@ -887,6 +936,87 @@ func readBlockDeviceSizeBytes(path string) uint64 {
 		return 0
 	}
 	return sectors * 512
+}
+
+func readBlockDeviceReadOnly(path string) bool {
+	return strings.TrimSpace(string(readFileOrNil(path))) == "1"
+}
+
+func readDiskHealthMounts(deviceName string) []models.DiskHealthMount {
+	raw := readFileOrNil(diskHealthProcMountsPath)
+	if len(raw) == 0 {
+		return nil
+	}
+
+	lines := strings.Split(string(raw), "\n")
+	mounts := make([]models.DiskHealthMount, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		if !mountSourceMatchesBlockDevice(fields[0], deviceName) {
+			continue
+		}
+		mounts = append(mounts, models.DiskHealthMount{
+			Mount:    decodeProcMountField(fields[1]),
+			FSType:   fields[2],
+			ReadOnly: mountOptionsReadOnly(fields[3]),
+		})
+	}
+	sort.Slice(mounts, func(i, j int) bool {
+		return mounts[i].Mount < mounts[j].Mount
+	})
+	return mounts
+}
+
+func mountSourceMatchesBlockDevice(source, deviceName string) bool {
+	base := filepath.Base(decodeProcMountField(source))
+	if base == deviceName {
+		return true
+	}
+	if !strings.HasPrefix(base, deviceName) {
+		return false
+	}
+	return isPartitionSuffix(strings.TrimPrefix(base, deviceName))
+}
+
+func isPartitionSuffix(suffix string) bool {
+	if suffix == "" {
+		return false
+	}
+	if suffix[0] == 'p' {
+		suffix = suffix[1:]
+	}
+	if suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeProcMountField(value string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\`,
+		`\040`, " ",
+		`\011`, "\t",
+		`\012`, "\n",
+		`\134`, `\`,
+	)
+	return replacer.Replace(value)
+}
+
+func mountOptionsReadOnly(options string) bool {
+	for _, option := range strings.Split(options, ",") {
+		if option == "ro" {
+			return true
+		}
+	}
+	return false
 }
 
 func nvmeControllerPathForBlockDevice(name string) (string, bool) {
@@ -1096,6 +1226,7 @@ func ataLifeUsedFromAttribute(current byte, raw uint64) (float64, bool) {
 
 func diskHealthFromATAHealthLog(stats models.DiskHealthStats, log ataHealthLog) models.DiskHealthStats {
 	stats.Status = models.DiskHealthStatusOK
+	stats.SupportStatus = models.DiskHealthSupportSupported
 	stats.TemperatureC = log.TemperatureC
 	stats.LifeUsedPercent = log.LifeUsedPercent
 	stats.PowerOnHours = log.PowerOnHours
@@ -1145,6 +1276,7 @@ func diskHealthFromATAHealthLog(stats models.DiskHealthStats, log ataHealthLog) 
 
 func diskHealthFromNVMeLog(stats models.DiskHealthStats, log nvmeHealthLog) models.DiskHealthStats {
 	stats.Status = models.DiskHealthStatusOK
+	stats.SupportStatus = models.DiskHealthSupportSupported
 	stats.CriticalWarning = log.CriticalWarning
 	stats.TemperatureC = log.TemperatureC
 	stats.LifeUsedPercent = log.LifeUsedPercent
