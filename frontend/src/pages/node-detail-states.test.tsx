@@ -40,6 +40,10 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+function expectBefore(first: Element, second: Element) {
+  expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+}
+
 describe("node detail page states", () => {
   beforeEach(() => {
     nodeMock.mockReset()
@@ -334,6 +338,65 @@ describe("node detail page states", () => {
 
     expect(await screen.findByText("Hardware")).toBeInTheDocument()
     expect(screen.getAllByText("AMD EPYC 7B13").length).toBeGreaterThan(0)
+  })
+
+  it("orders node detail sections from primary trends to health and deeper diagnostics", async () => {
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+        hardware: {
+          cpu_model: "AMD EPYC 7B13",
+          cpu_cores: 8,
+          cpu_threads: 16,
+          memory_total: 34359738368,
+          disk_total: 322122547200,
+          virtualization_system: "kvm",
+          virtualization_role: "guest",
+        },
+        disk_health: [
+          {
+            name: "vda",
+            path: "/dev/vda",
+            type: "virtual",
+            size_bytes: 21474836480,
+            status: "unsupported",
+            support_status: "unsupported",
+            mounts: [{ mount: "/", fs_type: "ext4", read_only: false }],
+          },
+        ],
+      },
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    const nodeName = await screen.findByText("alpha")
+    const hardware = screen.getByText("Hardware")
+    const rangeControl = screen.getByText("Time range")
+    const resourceUsage = screen.getByRole("heading", { name: "Resource Usage" })
+    const diskHealth = screen.getByRole("heading", { name: "Disk Health" })
+    const throughput = screen.getByRole("heading", { name: "Throughput / Traffic" })
+    const systemPressure = screen.getByRole("heading", { name: "System Pressure" })
+    const memoryPressure = screen.getByRole("heading", { name: "Memory Pressure" })
+
+    expectBefore(nodeName, hardware)
+    expectBefore(hardware, rangeControl)
+    expectBefore(rangeControl, resourceUsage)
+    expectBefore(resourceUsage, diskHealth)
+    expectBefore(diskHealth, throughput)
+    expectBefore(throughput, systemPressure)
+    expectBefore(systemPressure, memoryPressure)
   })
 
 

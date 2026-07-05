@@ -32,6 +32,7 @@ type Props = {
   netSpeedFormatter?: ValueFormatter
   netSpeedAxisTickFormatter?: ValueFormatter
   networkSummary?: ReactNode
+  afterResourceUsage?: ReactNode
 }
 
 export function MetricTabs({
@@ -62,6 +63,7 @@ export function MetricTabs({
   netSpeedFormatter,
   netSpeedAxisTickFormatter,
   networkSummary,
+  afterResourceUsage,
 }: Props) {
   const { t, language } = useLanguage()
 
@@ -104,6 +106,85 @@ export function MetricTabs({
           <MetricsChart data={cpuData} label={t("nodeDetail.cpuUsage")} color="#4f78bf" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />
           <MetricsChart data={memData} label={t("nodeDetail.memoryUsage")} color="#4b8b6a" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />
           <MetricsChart data={diskData} label={t("nodeDetail.diskUsage")} color="#8b6d3f" xAxisTickFormatter={xAxisTickFormatter} tooltipLabelFormatter={tooltipLabelFormatter} />
+        </div>
+      </section>
+
+      {afterResourceUsage}
+
+      <section className="space-y-3" aria-labelledby="throughput-heading">
+        <div className="flex items-center justify-between">
+          <h3 id="throughput-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {t("nodeDetail.throughputTraffic")}
+          </h3>
+        </div>
+        <div className="space-y-4">
+          <section className="space-y-4" aria-label={t("nodeDetail.networkTraffic")}>
+            {networkSummary}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <MetricsChart
+                data={netRxData}
+                label={t("nodeDetail.inboundTraffic")}
+                color="#4f78bf"
+                domain={[0, "auto"]}
+                valueFormatter={netValueFormatter}
+                axisTickFormatter={netAxisTickFormatter}
+                xAxisTickFormatter={xAxisTickFormatter}
+                tooltipLabelFormatter={tooltipLabelFormatter}
+              />
+              <MetricsChart
+                data={netTxData}
+                label={t("nodeDetail.outboundTraffic")}
+                color="#4b8b6a"
+                domain={[0, "auto"]}
+                valueFormatter={netValueFormatter}
+                axisTickFormatter={netAxisTickFormatter}
+                xAxisTickFormatter={xAxisTickFormatter}
+                tooltipLabelFormatter={tooltipLabelFormatter}
+              />
+              <MetricsChart
+                data={netRxSpeedData}
+                label={t("nodeDetail.inboundSpeed")}
+                color="#4f78bf"
+                domain={[0, "auto"]}
+                valueFormatter={netSpeedFormatter}
+                axisTickFormatter={netSpeedAxisTickFormatter}
+                xAxisTickFormatter={xAxisTickFormatter}
+                tooltipLabelFormatter={tooltipLabelFormatter}
+              />
+              <MetricsChart
+                data={netTxSpeedData}
+                label={t("nodeDetail.outboundSpeed")}
+                color="#4b8b6a"
+                domain={[0, "auto"]}
+                valueFormatter={netSpeedFormatter}
+                axisTickFormatter={netSpeedAxisTickFormatter}
+                xAxisTickFormatter={xAxisTickFormatter}
+                tooltipLabelFormatter={tooltipLabelFormatter}
+              />
+            </div>
+          </section>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" aria-label={t("nodeDetail.diskIo")}>
+            <MetricsChart
+              data={diskReadSpeedData}
+              label={t("nodeDetail.diskReadSpeed")}
+              color="#8b6d3f"
+              domain={[0, "auto"]}
+              valueFormatter={netSpeedFormatter}
+              axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={diskWriteSpeedData}
+              label={t("nodeDetail.diskWriteSpeed")}
+              color="#b45d4f"
+              domain={[0, "auto"]}
+              valueFormatter={netSpeedFormatter}
+              axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+          </div>
         </div>
       </section>
 
@@ -238,83 +319,6 @@ export function MetricTabs({
             xAxisTickFormatter={xAxisTickFormatter}
             tooltipLabelFormatter={tooltipLabelFormatter}
           />
-        </div>
-      </section>
-
-      <section className="space-y-3" aria-labelledby="throughput-heading">
-        <div className="flex items-center justify-between">
-          <h3 id="throughput-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {t("nodeDetail.throughputTraffic")}
-          </h3>
-        </div>
-        <div className="space-y-4">
-          <section className="space-y-4" aria-label={t("nodeDetail.networkTraffic")}>
-            {networkSummary}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <MetricsChart
-                data={netRxData}
-                label={t("nodeDetail.inboundTraffic")}
-                color="#4f78bf"
-                domain={[0, "auto"]}
-                valueFormatter={netValueFormatter}
-                axisTickFormatter={netAxisTickFormatter}
-                xAxisTickFormatter={xAxisTickFormatter}
-                tooltipLabelFormatter={tooltipLabelFormatter}
-              />
-              <MetricsChart
-                data={netTxData}
-                label={t("nodeDetail.outboundTraffic")}
-                color="#4b8b6a"
-                domain={[0, "auto"]}
-                valueFormatter={netValueFormatter}
-                axisTickFormatter={netAxisTickFormatter}
-                xAxisTickFormatter={xAxisTickFormatter}
-                tooltipLabelFormatter={tooltipLabelFormatter}
-              />
-              <MetricsChart
-                data={netRxSpeedData}
-                label={t("nodeDetail.inboundSpeed")}
-                color="#4f78bf"
-                domain={[0, "auto"]}
-                valueFormatter={netSpeedFormatter}
-                axisTickFormatter={netSpeedAxisTickFormatter}
-                xAxisTickFormatter={xAxisTickFormatter}
-                tooltipLabelFormatter={tooltipLabelFormatter}
-              />
-              <MetricsChart
-                data={netTxSpeedData}
-                label={t("nodeDetail.outboundSpeed")}
-                color="#4b8b6a"
-                domain={[0, "auto"]}
-                valueFormatter={netSpeedFormatter}
-                axisTickFormatter={netSpeedAxisTickFormatter}
-                xAxisTickFormatter={xAxisTickFormatter}
-                tooltipLabelFormatter={tooltipLabelFormatter}
-              />
-            </div>
-          </section>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" aria-label={t("nodeDetail.diskIo")}>
-            <MetricsChart
-              data={diskReadSpeedData}
-              label={t("nodeDetail.diskReadSpeed")}
-              color="#8b6d3f"
-              domain={[0, "auto"]}
-              valueFormatter={netSpeedFormatter}
-              axisTickFormatter={netSpeedAxisTickFormatter}
-              xAxisTickFormatter={xAxisTickFormatter}
-              tooltipLabelFormatter={tooltipLabelFormatter}
-            />
-            <MetricsChart
-              data={diskWriteSpeedData}
-              label={t("nodeDetail.diskWriteSpeed")}
-              color="#b45d4f"
-              domain={[0, "auto"]}
-              valueFormatter={netSpeedFormatter}
-              axisTickFormatter={netSpeedAxisTickFormatter}
-              xAxisTickFormatter={xAxisTickFormatter}
-              tooltipLabelFormatter={tooltipLabelFormatter}
-            />
-          </div>
         </div>
       </section>
     </section>

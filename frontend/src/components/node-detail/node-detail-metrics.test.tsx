@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { Node } from "../../lib/api"
 import { NodeHero } from "./NodeHero"
 import { MetricTabs } from "./MetricTabs"
@@ -185,5 +186,32 @@ describe("node detail metrics", () => {
     expect(screen.getByText(/Cloud\/virtual disk/)).toBeInTheDocument()
     expect(screen.getAllByText("Mounts /").length).toBeGreaterThan(0)
     expect(screen.getByText("Read-only")).toBeInTheDocument()
+  })
+
+  it("collapses disk health details by default when only virtual disks are unsupported", async () => {
+    const user = userEvent.setup()
+    render(
+      <DiskHealthPanel
+        disks={[
+          {
+            name: "vda",
+            path: "/dev/vda",
+            type: "virtual",
+            status: "unsupported",
+            support_status: "unsupported",
+            size_bytes: 21474836480,
+            mounts: [{ mount: "/", fs_type: "ext4", read_only: false }],
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole("heading", { name: "Disk Health" })).toBeInTheDocument()
+    expect(screen.queryByText("vda")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /Disk Health/i }))
+
+    expect(screen.getByText("vda")).toBeInTheDocument()
+    expect(screen.getByText("Physical health unavailable")).toBeInTheDocument()
   })
 })

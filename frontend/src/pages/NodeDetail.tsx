@@ -416,7 +416,6 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         <>
           <NodeHero node={node} showIP={accessMode !== "guest"} uptimeSeconds={heroUptimeSeconds} />
           <HardwarePassport hardware={node?.hardware} os={node?.os} arch={node?.arch} />
-          <DiskHealthPanel disks={node?.disk_health ?? []} />
           <>
             <section className="panel-card enterprise-surface rounded-[24px] p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -467,6 +466,7 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
               netSpeedFormatter={formatBytesPerSecond}
               netSpeedAxisTickFormatter={formatCompactBytesPerSecond}
               networkSummary={networkSummary}
+              afterResourceUsage={<DiskHealthPanel disks={node?.disk_health ?? []} />}
               diskData={diskData}
               diskReadSpeedData={diskReadSpeedData}
               diskWriteSpeedData={diskWriteSpeedData}
