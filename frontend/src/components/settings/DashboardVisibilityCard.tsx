@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { useLanguage } from "../../i18n/language"
-import { api } from "../../lib/api"
+import { api, type DashboardSettings } from "../../lib/api"
 import { Button } from "../ui/button"
+
+const DEFAULT_SETTINGS: DashboardSettings = {
+  show_dashboard_card_ip: true,
+  show_system_pressure: true,
+  show_memory_pressure: true,
+}
 
 export function DashboardVisibilityCard() {
   const { t } = useLanguage()
-  const [showDashboardCardIP, setShowDashboardCardIP] = useState(false)
-  const [savedShowDashboardCardIP, setSavedShowDashboardCardIP] = useState<boolean | null>(null)
+  const [settings, setSettings] = useState<DashboardSettings>(DEFAULT_SETTINGS)
+  const [savedSettings, setSavedSettings] = useState<DashboardSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,9 +29,13 @@ export function DashboardVisibilityCard() {
         if (cancelled) {
           return
         }
-        const nextValue = Boolean(response.show_dashboard_card_ip)
-        setShowDashboardCardIP(nextValue)
-        setSavedShowDashboardCardIP(nextValue)
+        const nextValue: DashboardSettings = {
+          show_dashboard_card_ip: Boolean(response.show_dashboard_card_ip),
+          show_system_pressure: response.show_system_pressure !== false,
+          show_memory_pressure: response.show_memory_pressure !== false,
+        }
+        setSettings(nextValue)
+        setSavedSettings(nextValue)
       } catch {
         if (!cancelled) {
           setError(t("settingsPage.dashboardVisibilityUpdateFailed"))
@@ -43,11 +53,26 @@ export function DashboardVisibilityCard() {
     }
   }, [t])
 
-  const hasChanges = savedShowDashboardCardIP !== null && showDashboardCardIP !== savedShowDashboardCardIP
-  const statusLabel = useMemo(
-    () => (showDashboardCardIP ? t("settingsPage.dashboardVisibilityVisible") : t("settingsPage.dashboardVisibilityHidden")),
-    [showDashboardCardIP, t],
+  const hasChanges =
+    savedSettings !== null &&
+    (settings.show_dashboard_card_ip !== savedSettings.show_dashboard_card_ip ||
+      settings.show_system_pressure !== savedSettings.show_system_pressure ||
+      settings.show_memory_pressure !== savedSettings.show_memory_pressure)
+
+  const enabledCount = useMemo(
+    () =>
+      Number(settings.show_dashboard_card_ip) +
+      Number(settings.show_system_pressure) +
+      Number(settings.show_memory_pressure),
+    [settings],
   )
+  const statusLabel = t("settingsPage.dashboardVisibilityEnabledCount", { count: enabledCount, total: 3 })
+
+  const updateSetting = (key: keyof DashboardSettings, checked: boolean) => {
+    setSettings((current) => ({ ...current, [key]: checked }))
+    setError(null)
+    setSuccess(null)
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -56,10 +81,14 @@ export function DashboardVisibilityCard() {
     setSuccess(null)
 
     try {
-      const response = await api.updateDashboardSettings({ show_dashboard_card_ip: showDashboardCardIP })
-      const nextValue = Boolean(response.show_dashboard_card_ip)
-      setShowDashboardCardIP(nextValue)
-      setSavedShowDashboardCardIP(nextValue)
+      const response = await api.updateDashboardSettings(settings)
+      const nextValue: DashboardSettings = {
+        show_dashboard_card_ip: Boolean(response.show_dashboard_card_ip),
+        show_system_pressure: response.show_system_pressure !== false,
+        show_memory_pressure: response.show_memory_pressure !== false,
+      }
+      setSettings(nextValue)
+      setSavedSettings(nextValue)
       setSuccess(t("settingsPage.dashboardVisibilitySaved"))
     } catch {
       setError(t("settingsPage.dashboardVisibilityUpdateFailed"))
@@ -67,6 +96,12 @@ export function DashboardVisibilityCard() {
       setSaving(false)
     }
   }
+
+  const toggles: Array<{ key: keyof DashboardSettings; labelKey: string }> = [
+    { key: "show_dashboard_card_ip", labelKey: "settingsPage.dashboardVisibilityShowIp" },
+    { key: "show_system_pressure", labelKey: "settingsPage.dashboardVisibilityShowSystemPressure" },
+    { key: "show_memory_pressure", labelKey: "settingsPage.dashboardVisibilityShowMemoryPressure" },
+  ]
 
   return (
     <section className="panel-card enterprise-surface rounded-[28px] px-5 py-5">
@@ -84,22 +119,23 @@ export function DashboardVisibilityCard() {
         <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{t("Loading")}...</p>
       ) : (
         <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
-          <label className="enterprise-inner-surface flex min-h-11 cursor-pointer items-center justify-between rounded-2xl border px-4 py-3">
-            <span className="pr-4 text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t("settingsPage.dashboardVisibilityShowIp")}
-            </span>
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              aria-label={t("settingsPage.dashboardVisibilityShowIp")}
-              checked={showDashboardCardIP}
-              onChange={(event) => {
-                setShowDashboardCardIP(event.target.checked)
-                setError(null)
-                setSuccess(null)
-              }}
-            />
-          </label>
+          <div className="space-y-3">
+            {toggles.map((item) => (
+              <label
+                key={item.key}
+                className="enterprise-inner-surface flex min-h-11 cursor-pointer items-center justify-between rounded-2xl border px-4 py-3"
+              >
+                <span className="pr-4 text-sm font-medium text-slate-700 dark:text-slate-200">{t(item.labelKey)}</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  aria-label={t(item.labelKey)}
+                  checked={settings[item.key]}
+                  onChange={(event) => updateSetting(item.key, event.target.checked)}
+                />
+              </label>
+            ))}
+          </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -110,7 +146,11 @@ export function DashboardVisibilityCard() {
               {saving ? t("settingsPage.dashboardVisibilitySaving") : t("settingsPage.dashboardVisibilitySave")}
             </Button>
             {success && <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{success}</p>}
-            {error && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">{error}</p>}
+            {error && (
+              <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">
+                {error}
+              </p>
+            )}
           </div>
         </form>
       )}

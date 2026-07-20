@@ -290,6 +290,8 @@ export type MetricsRetentionSettings = {
 
 export type DashboardSettings = {
   show_dashboard_card_ip: boolean
+  show_system_pressure: boolean
+  show_memory_pressure: boolean
 }
 
 export type ThemeSettings = {

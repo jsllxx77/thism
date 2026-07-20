@@ -429,19 +429,33 @@ export function Dashboard({ onSelectNode, refreshNonce = 0, accessMode = "admin"
             </div>
           ) : (
             <div key={resultMotionKey} className="motion-results-region motion-card-grid theme-dashboard-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredNodes.map((node) => (
-                <NodeCard
-                  key={node.id}
-                  node={node}
-                  cpu={live[node.id]?.cpu}
-                  memUsed={live[node.id]?.memUsed}
-                  memTotal={live[node.id]?.memTotal}
-                  netRxSpeed={live[node.id]?.netRxSpeed}
-                  netTxSpeed={live[node.id]?.netTxSpeed}
-                  showIP={accessMode !== "guest" && showDashboardCardIP}
-                  onSelectNode={onSelectNode}
-                />
-              ))}
+              {filteredNodes.map((node) => {
+                const liveMetrics = live[node.id]
+                const netRxTotal =
+                  typeof liveMetrics?.lastNet?.rxBytes === "number"
+                    ? liveMetrics.lastNet.rxBytes
+                    : node.latest_metrics?.net_rx
+                const netTxTotal =
+                  typeof liveMetrics?.lastNet?.txBytes === "number"
+                    ? liveMetrics.lastNet.txBytes
+                    : node.latest_metrics?.net_tx
+
+                return (
+                  <NodeCard
+                    key={node.id}
+                    node={node}
+                    cpu={liveMetrics?.cpu}
+                    memUsed={liveMetrics?.memUsed}
+                    memTotal={liveMetrics?.memTotal}
+                    netRxSpeed={liveMetrics?.netRxSpeed}
+                    netTxSpeed={liveMetrics?.netTxSpeed}
+                    netRxTotal={netRxTotal}
+                    netTxTotal={netTxTotal}
+                    showIP={accessMode !== "guest" && showDashboardCardIP}
+                    onSelectNode={onSelectNode}
+                  />
+                )
+              })}
             </div>
           )}
         </>

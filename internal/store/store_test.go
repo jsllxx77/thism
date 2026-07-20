@@ -1050,8 +1050,18 @@ func TestStoreDashboardSettingsDefaultsAndRoundTrip(t *testing.T) {
 	if !defaults.ShowDashboardCardIP {
 		t.Fatal("expected dashboard card IP visibility to default to true")
 	}
+	if !defaults.ShowSystemPressure {
+		t.Fatal("expected system pressure visibility to default to true")
+	}
+	if !defaults.ShowMemoryPressure {
+		t.Fatal("expected memory pressure visibility to default to true")
+	}
 
-	if err := s.UpsertDashboardSettings(models.DashboardSettings{ShowDashboardCardIP: false}); err != nil {
+	if err := s.UpsertDashboardSettings(models.DashboardSettings{
+		ShowDashboardCardIP: false,
+		ShowSystemPressure:  false,
+		ShowMemoryPressure:  true,
+	}); err != nil {
 		t.Fatalf("UpsertDashboardSettings: %v", err)
 	}
 
@@ -1061,6 +1071,12 @@ func TestStoreDashboardSettingsDefaultsAndRoundTrip(t *testing.T) {
 	}
 	if stored.ShowDashboardCardIP {
 		t.Fatal("expected stored dashboard card IP visibility to round-trip as false")
+	}
+	if stored.ShowSystemPressure {
+		t.Fatal("expected stored system pressure visibility to round-trip as false")
+	}
+	if !stored.ShowMemoryPressure {
+		t.Fatal("expected stored memory pressure visibility to round-trip as true")
 	}
 }
 

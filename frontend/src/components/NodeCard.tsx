@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
-import { formatBytesPerSecond } from "../lib/units"
+import { formatBytes, formatBytesPerSecond } from "../lib/units"
 import { CountryFlag } from "./CountryFlag"
 import { NodeTagChips } from "./NodeTagChips"
 import { Badge } from "./ui/badge"
@@ -15,6 +15,10 @@ type Props = {
   memTotal?: number
   netRxSpeed?: number
   netTxSpeed?: number
+  /** Cumulative bytes received since boot (system counter). */
+  netRxTotal?: number
+  /** Cumulative bytes sent since boot (system counter). */
+  netTxTotal?: number
   showIP?: boolean
   onClick?: () => void
   onSelectNode?: (id: string) => void
@@ -107,7 +111,19 @@ function RelativeLastSeenLabel({ lastSeen, offline = false }: { lastSeen: number
   )
 }
 
-export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, netRxSpeed, netTxSpeed, showIP = true, onClick, onSelectNode }: Props) {
+export const NodeCard = memo(function NodeCard({
+  node,
+  cpu,
+  memUsed,
+  memTotal,
+  netRxSpeed,
+  netTxSpeed,
+  netRxTotal,
+  netTxTotal,
+  showIP = true,
+  onClick,
+  onSelectNode,
+}: Props) {
   const { t } = useLanguage()
   const hasCpu = typeof cpu === "number"
   const hasMemory = typeof memUsed === "number" && typeof memTotal === "number" && memTotal > 0
@@ -117,6 +133,10 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
   const hasNetTxSpeed = showNetSpeed && typeof netTxSpeed === "number" && Number.isFinite(netTxSpeed) && netTxSpeed >= 0
   const netRxLabel = hasNetRxSpeed ? formatBytesPerSecond(netRxSpeed) : "—"
   const netTxLabel = hasNetTxSpeed ? formatBytesPerSecond(netTxSpeed) : "—"
+  const hasNetRxTotal = typeof netRxTotal === "number" && Number.isFinite(netRxTotal) && netRxTotal >= 0
+  const hasNetTxTotal = typeof netTxTotal === "number" && Number.isFinite(netTxTotal) && netTxTotal >= 0
+  const netRxTotalLabel = hasNetRxTotal ? formatBytes(netRxTotal) : "—"
+  const netTxTotalLabel = hasNetTxTotal ? formatBytes(netTxTotal) : "—"
   const cpuLabel = hasCpu ? `${cpu.toFixed(1)}%` : t("common.unavailable")
   const memLabel = memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`
   const cpuFlash = useValueFlash(hasCpu ? Number(cpu.toFixed(1)) : null)
@@ -200,6 +220,26 @@ export const NodeCard = memo(function NodeCard({ node, cpu, memUsed, memTotal, n
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.outboundSpeed")}</span>
                 <span className={metricValueClass(false, "dashboard-net-speed-value")}>↑ {netTxLabel}</span>
+              </div>
+            </div>
+
+            <div className={`space-y-1 ${(hasNetRxTotal || hasNetTxTotal) ? "" : "opacity-60"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.cumulativeTraffic")}</span>
+                <span
+                  className={metricValueClass(false, "dashboard-net-total-value text-right")}
+                  title={
+                    hasNetRxTotal || hasNetTxTotal
+                      ? `↓ ${netRxTotalLabel} / ↑ ${netTxTotalLabel}`
+                      : undefined
+                  }
+                >
+                  ↓ {netRxTotalLabel}
+                  <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden>
+                    ·
+                  </span>
+                  ↑ {netTxTotalLabel}
+                </span>
               </div>
             </div>
           </div>

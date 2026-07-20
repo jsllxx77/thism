@@ -146,6 +146,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [dockerSnapshot, setDockerSnapshot] = useState<DockerSnapshot | null>(null)
   const [range, setRange] = useState(3600)
   const [metricsRetentionDays, setMetricsRetentionDays] = useState(DEFAULT_METRICS_RETENTION_DAYS)
+  const [showSystemPressure, setShowSystemPressure] = useState(true)
+  const [showMemoryPressure, setShowMemoryPressure] = useState(true)
   const [desktopSectionsOpen, setDesktopSectionsOpen] = useState(isDesktopViewport)
   const [loadingDetail, setLoadingDetail] = useState(true)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -194,6 +196,32 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
     }
 
     void loadMetricsRetention()
+
+    return () => {
+      cancelled = true
+    }
+  }, [refreshNonce])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadDisplayOptions = async () => {
+      try {
+        const response = await api.dashboardSettings()
+        if (cancelled) {
+          return
+        }
+        setShowSystemPressure(response.show_system_pressure !== false)
+        setShowMemoryPressure(response.show_memory_pressure !== false)
+      } catch {
+        if (!cancelled) {
+          setShowSystemPressure(true)
+          setShowMemoryPressure(true)
+        }
+      }
+    }
+
+    void loadDisplayOptions()
 
     return () => {
       cancelled = true
@@ -470,6 +498,8 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
               diskData={diskData}
               diskReadSpeedData={diskReadSpeedData}
               diskWriteSpeedData={diskWriteSpeedData}
+              showSystemPressure={showSystemPressure}
+              showMemoryPressure={showMemoryPressure}
             />
             <LatencyMonitorChart monitors={latencyMonitors} results={latencyResults} range={range} />
           </>

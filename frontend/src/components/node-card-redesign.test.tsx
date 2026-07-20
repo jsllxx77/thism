@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { act } from "react"
 import type { Node } from "../lib/api"
@@ -97,6 +97,33 @@ describe("node card redesign", () => {
 
     expect(screen.getByText(/1\.0 KB\/s/)).toBeInTheDocument()
     expect(screen.getByText(/2\.0 KB\/s/)).toBeInTheDocument()
+  })
+
+  it("renders cumulative traffic totals when provided", () => {
+    render(
+      <NodeCard
+        node={createNode()}
+        cpu={12.3}
+        memUsed={512}
+        memTotal={1024}
+        netRxTotal={12 * 1024 ** 3}
+        netTxTotal={2 * 1024 ** 3}
+      />,
+    )
+
+    const row = screen.getByText("Total Traffic").closest("div")
+    expect(row).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText(/↓ 12\.0 GB/)).toBeInTheDocument()
+    expect(within(row as HTMLElement).getByText(/↑ 2\.0 GB/)).toBeInTheDocument()
+  })
+
+  it("shows cumulative traffic placeholders when totals are unavailable", () => {
+    render(<NodeCard node={createNode()} cpu={12.3} memUsed={512} memTotal={1024} />)
+
+    const row = screen.getByText("Total Traffic").closest("div")
+    expect(row).toBeInTheDocument()
+    const value = (row as HTMLElement).querySelector(".dashboard-net-total-value")
+    expect(value?.textContent?.replace(/\s+/g, "")).toBe("↓—·↑—")
   })
 
   it("keeps network speed updates visually stable without flash animation", () => {

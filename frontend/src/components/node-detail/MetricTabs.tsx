@@ -33,6 +33,8 @@ type Props = {
   netSpeedAxisTickFormatter?: ValueFormatter
   networkSummary?: ReactNode
   afterResourceUsage?: ReactNode
+  showSystemPressure?: boolean
+  showMemoryPressure?: boolean
 }
 
 export function MetricTabs({
@@ -64,6 +66,8 @@ export function MetricTabs({
   netSpeedAxisTickFormatter,
   networkSummary,
   afterResourceUsage,
+  showSystemPressure = true,
+  showMemoryPressure = true,
 }: Props) {
   const { t, language } = useLanguage()
 
@@ -188,139 +192,143 @@ export function MetricTabs({
         </div>
       </section>
 
-      <section className="space-y-3" aria-labelledby="system-pressure-heading">
-        <div className="flex items-center justify-between">
-          <h3 id="system-pressure-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {t("nodeDetail.systemPressure")}
-          </h3>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <MetricsChart
-            data={load1Data}
-            label={t("nodeDetail.loadAverage1m")}
-            color="#6f7f95"
-            domain={[0, "auto"]}
-            unit=""
-            valueFormatter={loadFormatter}
-            axisTickFormatter={loadFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={cpuIOWaitData}
-            label={t("nodeDetail.cpuIOWait")}
-            color="#b45d4f"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={cpuStealData}
-            label={t("nodeDetail.cpuSteal")}
-            color="#8b6d3f"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={pressureCPUSomeData}
-            label={t("nodeDetail.cpuPressure")}
-            color="#4f78bf"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={pressureIOSomeData}
-            label={t("nodeDetail.ioPressure")}
-            color="#7f6bb2"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={pressureIOFullData}
-            label={t("nodeDetail.ioFullPressure")}
-            color="#4b8b6a"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-        </div>
-      </section>
+      {showSystemPressure ? (
+        <section className="space-y-3" aria-labelledby="system-pressure-heading">
+          <div className="flex items-center justify-between">
+            <h3 id="system-pressure-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {t("nodeDetail.systemPressure")}
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <MetricsChart
+              data={load1Data}
+              label={t("nodeDetail.loadAverage1m")}
+              color="#6f7f95"
+              domain={[0, "auto"]}
+              unit=""
+              valueFormatter={loadFormatter}
+              axisTickFormatter={loadFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={cpuIOWaitData}
+              label={t("nodeDetail.cpuIOWait")}
+              color="#b45d4f"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={cpuStealData}
+              label={t("nodeDetail.cpuSteal")}
+              color="#8b6d3f"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={pressureCPUSomeData}
+              label={t("nodeDetail.cpuPressure")}
+              color="#4f78bf"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={pressureIOSomeData}
+              label={t("nodeDetail.ioPressure")}
+              color="#7f6bb2"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={pressureIOFullData}
+              label={t("nodeDetail.ioFullPressure")}
+              color="#4b8b6a"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+          </div>
+        </section>
+      ) : null}
 
-      <section className="space-y-3" aria-labelledby="memory-pressure-heading">
-        <div className="flex items-center justify-between">
-          <h3 id="memory-pressure-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {t("nodeDetail.memoryPressure")}
-          </h3>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <MetricsChart
-            data={pressureMemorySomeData}
-            label={t("nodeDetail.memorySomePressure")}
-            color="#4b8b6a"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={pressureMemoryFullData}
-            label={t("nodeDetail.memoryFullPressure")}
-            color="#8b6d3f"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={swapData}
-            label={t("nodeDetail.swapUsage")}
-            color="#4f78bf"
-            valueFormatter={percentFormatter}
-            axisTickFormatter={percentFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={swapInSpeedData}
-            label={t("nodeDetail.swapInSpeed")}
-            color="#6f7f95"
-            domain={[0, "auto"]}
-            valueFormatter={netSpeedFormatter}
-            axisTickFormatter={netSpeedAxisTickFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={swapOutSpeedData}
-            label={t("nodeDetail.swapOutSpeed")}
-            color="#b45d4f"
-            domain={[0, "auto"]}
-            valueFormatter={netSpeedFormatter}
-            axisTickFormatter={netSpeedAxisTickFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-          <MetricsChart
-            data={oomKillsData}
-            label={t("nodeDetail.oomKills")}
-            color="#111827"
-            domain={[0, "auto"]}
-            unit=""
-            valueFormatter={countFormatter}
-            axisTickFormatter={countFormatter}
-            xAxisTickFormatter={xAxisTickFormatter}
-            tooltipLabelFormatter={tooltipLabelFormatter}
-          />
-        </div>
-      </section>
+      {showMemoryPressure ? (
+        <section className="space-y-3" aria-labelledby="memory-pressure-heading">
+          <div className="flex items-center justify-between">
+            <h3 id="memory-pressure-heading" className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {t("nodeDetail.memoryPressure")}
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <MetricsChart
+              data={pressureMemorySomeData}
+              label={t("nodeDetail.memorySomePressure")}
+              color="#4b8b6a"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={pressureMemoryFullData}
+              label={t("nodeDetail.memoryFullPressure")}
+              color="#8b6d3f"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={swapData}
+              label={t("nodeDetail.swapUsage")}
+              color="#4f78bf"
+              valueFormatter={percentFormatter}
+              axisTickFormatter={percentFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={swapInSpeedData}
+              label={t("nodeDetail.swapInSpeed")}
+              color="#6f7f95"
+              domain={[0, "auto"]}
+              valueFormatter={netSpeedFormatter}
+              axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={swapOutSpeedData}
+              label={t("nodeDetail.swapOutSpeed")}
+              color="#b45d4f"
+              domain={[0, "auto"]}
+              valueFormatter={netSpeedFormatter}
+              axisTickFormatter={netSpeedAxisTickFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+            <MetricsChart
+              data={oomKillsData}
+              label={t("nodeDetail.oomKills")}
+              color="#111827"
+              domain={[0, "auto"]}
+              unit=""
+              valueFormatter={countFormatter}
+              axisTickFormatter={countFormatter}
+              xAxisTickFormatter={xAxisTickFormatter}
+              tooltipLabelFormatter={tooltipLabelFormatter}
+            />
+          </div>
+        </section>
+      ) : null}
     </section>
   )
 }

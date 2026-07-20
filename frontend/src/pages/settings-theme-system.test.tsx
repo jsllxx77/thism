@@ -157,8 +157,8 @@ describe("settings theme system", () => {
     agentReleaseMock.mockResolvedValue({ target_version: "abc", download_url: "https://example.com/agent", sha256: "sha", check_interval_seconds: 1800 })
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
-    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
-    updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true, show_system_pressure: true, show_memory_pressure: true })
+    updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true, show_system_pressure: true, show_memory_pressure: true })
     themeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: false })
     updateThemeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: true })
     notificationSettingsMock.mockResolvedValue({

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
 import { AlertTriangle, CheckCircle2, ChevronDown, HardDrive, HelpCircle, ShieldAlert, ShieldCheck, XCircle } from "lucide-react"
 import type { DiskHealthStats, DiskHealthStatus, DiskHealthSupportStatus } from "../../lib/api"
 import { useLanguage } from "../../i18n/language"
@@ -31,10 +31,6 @@ function formatMounts(disk: DiskHealthStats): string {
 
 function effectiveSupportStatus(disk: DiskHealthStats): DiskHealthSupportStatus {
   return disk.support_status ?? (disk.status === "unsupported" ? "unsupported" : "unknown")
-}
-
-function shouldCollapseByDefault(disks: DiskHealthStats[]): boolean {
-  return disks.length > 0 && disks.every((disk) => disk.type === "virtual" && effectiveSupportStatus(disk) === "unsupported")
 }
 
 function statusTone(status: DiskHealthStatus) {
@@ -104,12 +100,7 @@ function supportTone(status?: DiskHealthSupportStatus) {
 export function DiskHealthPanel({ disks = [] }: Props) {
   const { t } = useLanguage()
   const contentId = useId()
-  const defaultOpen = !shouldCollapseByDefault(disks)
-  const [open, setOpen] = useState(defaultOpen)
-
-  useEffect(() => {
-    setOpen(defaultOpen)
-  }, [defaultOpen])
+  const [open, setOpen] = useState(false)
 
   return (
     <section className="panel-card enterprise-surface rounded-[24px] p-4" aria-labelledby="disk-health-heading">

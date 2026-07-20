@@ -38,7 +38,7 @@ describe("dashboard page states", () => {
   beforeEach(() => {
     nodesMock.mockReset()
     dashboardSettingsMock.mockReset()
-    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true, show_system_pressure: true, show_memory_pressure: true })
     wsHandler = null
   })
 
@@ -200,7 +200,7 @@ describe("dashboard page states", () => {
   })
 
   it("shows node IP on admin cards when dashboard visibility allows it", async () => {
-    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true, show_system_pressure: true, show_memory_pressure: true })
     nodesMock.mockResolvedValue({
       nodes: [
         {
@@ -223,7 +223,7 @@ describe("dashboard page states", () => {
   })
 
   it("hides node IP on admin cards when dashboard visibility disables it", async () => {
-    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: false })
+    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: false, show_system_pressure: true, show_memory_pressure: true })
     nodesMock.mockResolvedValue({
       nodes: [
         {

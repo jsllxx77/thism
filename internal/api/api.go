@@ -1808,17 +1808,30 @@ func handleUpdateDashboardSettings(w http.ResponseWriter, r *http.Request, s *st
 
 	var reqBody struct {
 		ShowDashboardCardIP *bool `json:"show_dashboard_card_ip"`
+		ShowSystemPressure  *bool `json:"show_system_pressure"`
+		ShowMemoryPressure  *bool `json:"show_memory_pressure"`
 	}
 	if !decodeJSONBody(w, r, &reqBody) {
 		return
 	}
-	if reqBody.ShowDashboardCardIP == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "show_dashboard_card_ip is required"})
+	if reqBody.ShowDashboardCardIP == nil && reqBody.ShowSystemPressure == nil && reqBody.ShowMemoryPressure == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one display option is required"})
 		return
 	}
 
-	settings := models.DashboardSettings{
-		ShowDashboardCardIP: *reqBody.ShowDashboardCardIP,
+	settings, err := s.GetDashboardSettings()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if reqBody.ShowDashboardCardIP != nil {
+		settings.ShowDashboardCardIP = *reqBody.ShowDashboardCardIP
+	}
+	if reqBody.ShowSystemPressure != nil {
+		settings.ShowSystemPressure = *reqBody.ShowSystemPressure
+	}
+	if reqBody.ShowMemoryPressure != nil {
+		settings.ShowMemoryPressure = *reqBody.ShowMemoryPressure
 	}
 	if err := s.UpsertDashboardSettings(settings); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

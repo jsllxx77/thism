@@ -61,8 +61,16 @@ describe("settings page states", () => {
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
-    dashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: true })
-    updateDashboardSettingsMock.mockResolvedValue({ show_dashboard_card_ip: false })
+    dashboardSettingsMock.mockResolvedValue({
+      show_dashboard_card_ip: true,
+      show_system_pressure: true,
+      show_memory_pressure: true,
+    })
+    updateDashboardSettingsMock.mockResolvedValue({
+      show_dashboard_card_ip: false,
+      show_system_pressure: true,
+      show_memory_pressure: true,
+    })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
@@ -215,21 +223,31 @@ describe("settings page states", () => {
     vi.useRealTimers()
   })
 
-  it("loads and saves dashboard card IP visibility", async () => {
+  it("loads and saves display options including pressure sections", async () => {
     const user = userEvent.setup()
     nodesMock.mockResolvedValue({ nodes: [] })
 
     renderSettings("/settings?section=monitoring")
 
-    const checkbox = await screen.findByRole("checkbox", { name: "Show IP addresses on dashboard node cards" })
-    expect(checkbox).toBeChecked()
+    expect(await screen.findByRole("heading", { name: "Display Options" })).toBeInTheDocument()
+    const ipCheckbox = await screen.findByRole("checkbox", { name: "Show IP addresses on dashboard node cards" })
+    const systemPressureCheckbox = screen.getByRole("checkbox", { name: "Show system pressure on node detail" })
+    const memoryPressureCheckbox = screen.getByRole("checkbox", { name: "Show memory pressure on node detail" })
+    expect(ipCheckbox).toBeChecked()
+    expect(systemPressureCheckbox).toBeChecked()
+    expect(memoryPressureCheckbox).toBeChecked()
 
-    await user.click(checkbox)
-    await user.click(screen.getByRole("button", { name: "Save dashboard visibility" }))
+    await user.click(ipCheckbox)
+    await user.click(systemPressureCheckbox)
+    await user.click(screen.getByRole("button", { name: "Save display options" }))
 
     await waitFor(() => {
-      expect(updateDashboardSettingsMock).toHaveBeenCalledWith({ show_dashboard_card_ip: false })
+      expect(updateDashboardSettingsMock).toHaveBeenCalledWith({
+        show_dashboard_card_ip: false,
+        show_system_pressure: false,
+        show_memory_pressure: true,
+      })
     })
-    expect(await screen.findByText("Dashboard card visibility updated.")).toBeInTheDocument()
+    expect(await screen.findByText("Display options updated.")).toBeInTheDocument()
   })
 })

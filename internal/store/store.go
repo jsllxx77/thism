@@ -759,6 +759,8 @@ func defaultNotificationSettings() models.NotificationSettings {
 func defaultDashboardSettings() models.DashboardSettings {
 	return models.DashboardSettings{
 		ShowDashboardCardIP: true,
+		ShowSystemPressure:  true,
+		ShowMemoryPressure:  true,
 	}
 }
 
@@ -1560,6 +1562,8 @@ func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
 
 	var decoded struct {
 		ShowDashboardCardIP *bool `json:"show_dashboard_card_ip"`
+		ShowSystemPressure  *bool `json:"show_system_pressure"`
+		ShowMemoryPressure  *bool `json:"show_memory_pressure"`
 	}
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return defaultDashboardSettings(), nil
@@ -1568,6 +1572,12 @@ func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
 	settings := defaultDashboardSettings()
 	if decoded.ShowDashboardCardIP != nil {
 		settings.ShowDashboardCardIP = *decoded.ShowDashboardCardIP
+	}
+	if decoded.ShowSystemPressure != nil {
+		settings.ShowSystemPressure = *decoded.ShowSystemPressure
+	}
+	if decoded.ShowMemoryPressure != nil {
+		settings.ShowMemoryPressure = *decoded.ShowMemoryPressure
 	}
 	return settings, nil
 }

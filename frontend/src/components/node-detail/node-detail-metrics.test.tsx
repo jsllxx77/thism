@@ -160,15 +160,51 @@ describe("node detail metrics", () => {
     expect(screen.getByText("Swap In Speed")).toBeInTheDocument()
     expect(screen.getByText("Swap Out Speed")).toBeInTheDocument()
     expect(screen.getByText("OOM Kills")).toBeInTheDocument()
-    expect(screen.getByText("Memory Pressure")).toBeInTheDocument()
     const resourceSection = container.querySelector("section[aria-labelledby='resource-usage-heading'] .grid") as HTMLElement | null
     expect(resourceSection?.className).toContain("lg:grid-cols-3")
   })
 
-  it("renders disk health details", () => {
+  it("can hide system and memory pressure sections", () => {
+    const points = [
+      { ts: 1700000000, value: 30 },
+      { ts: 1700000300, value: 44 },
+    ]
+
+    render(
+      <MetricTabs
+        range={3600}
+        cpuData={points}
+        memData={points}
+        netRxData={points}
+        netTxData={points}
+        netRxSpeedData={points}
+        netTxSpeedData={points}
+        diskData={points}
+        diskReadSpeedData={points}
+        diskWriteSpeedData={points}
+        load1Data={points}
+        swapData={points}
+        showSystemPressure={false}
+        showMemoryPressure={false}
+      />,
+    )
+
+    expect(screen.queryByRole("heading", { name: "System Pressure" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Memory Pressure" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Load Average (1m)")).not.toBeInTheDocument()
+    expect(screen.queryByText("Swap Usage")).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Resource Usage" })).toBeInTheDocument()
+  })
+
+  it("renders disk health details after expand", async () => {
+    const user = userEvent.setup()
     render(<DiskHealthPanel disks={node.disk_health ?? []} />)
 
     expect(screen.getByRole("heading", { name: "Disk Health" })).toBeInTheDocument()
+    expect(screen.queryByText("nvme0n1")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /Disk Health/i }))
+
     expect(screen.getByText("nvme0n1")).toBeInTheDocument()
     expect(screen.getByText("Fast NVMe")).toBeInTheDocument()
     expect(screen.getByText("OK")).toBeInTheDocument()
@@ -188,7 +224,7 @@ describe("node detail metrics", () => {
     expect(screen.getByText("Read-only")).toBeInTheDocument()
   })
 
-  it("collapses disk health details by default when only virtual disks are unsupported", async () => {
+  it("collapses disk health details by default", async () => {
     const user = userEvent.setup()
     render(
       <DiskHealthPanel

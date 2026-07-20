@@ -3083,12 +3083,20 @@ func TestDashboardSettingsDefaultsToShowIP(t *testing.T) {
 
 	var body struct {
 		ShowDashboardCardIP bool `json:"show_dashboard_card_ip"`
+		ShowSystemPressure  bool `json:"show_system_pressure"`
+		ShowMemoryPressure  bool `json:"show_memory_pressure"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if !body.ShowDashboardCardIP {
 		t.Fatal("expected dashboard card IP visibility to default to true")
+	}
+	if !body.ShowSystemPressure {
+		t.Fatal("expected system pressure visibility to default to true")
+	}
+	if !body.ShowMemoryPressure {
+		t.Fatal("expected memory pressure visibility to default to true")
 	}
 }
 
@@ -3099,7 +3107,7 @@ func TestDashboardSettingsRoundTripEndpoints(t *testing.T) {
 	go h.Run()
 	router := api.NewRouter(s, h, "test-admin-token", nil)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/dashboard", bytes.NewBufferString(`{"show_dashboard_card_ip":false}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/dashboard", bytes.NewBufferString(`{"show_dashboard_card_ip":false,"show_system_pressure":false,"show_memory_pressure":true}`))
 	putReq.Header.Set("Authorization", "Bearer test-admin-token")
 	putReq.Header.Set("Content-Type", "application/json")
 	putResp := httptest.NewRecorder()
@@ -3120,12 +3128,20 @@ func TestDashboardSettingsRoundTripEndpoints(t *testing.T) {
 
 	var body struct {
 		ShowDashboardCardIP bool `json:"show_dashboard_card_ip"`
+		ShowSystemPressure  bool `json:"show_system_pressure"`
+		ShowMemoryPressure  bool `json:"show_memory_pressure"`
 	}
 	if err := json.Unmarshal(getResp.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if body.ShowDashboardCardIP {
 		t.Fatal("expected dashboard card IP visibility to persist as false")
+	}
+	if body.ShowSystemPressure {
+		t.Fatal("expected system pressure visibility to persist as false")
+	}
+	if !body.ShowMemoryPressure {
+		t.Fatal("expected memory pressure visibility to persist as true")
 	}
 }
 

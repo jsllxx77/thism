@@ -104,6 +104,7 @@ const legacyMessageKeyMap: Record<string, string> = {
   "Offline Alerts": "dashboard.stats.offlineAlerts",
   "CPU": "dashboard.nodeCard.cpu",
   "MEM": "dashboard.nodeCard.memory",
+  "Total Traffic": "dashboard.nodeCard.cumulativeTraffic",
   "Control Plane": "settingsPage.eyebrow",
   "Manage node enrollment, registry actions, and administrator credentials from the same engineering-passport shell used across the dashboard.": "settingsPage.subtitle",
   "Node registry": "settingsPage.chipRegistry",
