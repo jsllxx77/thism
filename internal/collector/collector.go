@@ -1611,6 +1611,8 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 	}
 
 	// Disk — iterate partitions, skip any that fail Usage().
+	// Device is included so server-side aggregation can de-dupe bind mounts of
+	// the same underlying block device (they report identical capacity).
 	partitions, err := diskPartitionsFunc(false)
 	if err == nil {
 		for _, p := range partitions {
@@ -1619,9 +1621,10 @@ func (c *Collector) Collect() (*models.MetricsPayload, error) {
 				continue
 			}
 			payload.Disk = append(payload.Disk, models.DiskStats{
-				Mount: p.Mountpoint,
-				Used:  usage.Used,
-				Total: usage.Total,
+				Mount:  p.Mountpoint,
+				Device: p.Device,
+				Used:   usage.Used,
+				Total:  usage.Total,
 			})
 		}
 	}
@@ -1754,7 +1757,16 @@ func collectHardwareProfile() *models.NodeHardware {
 	}
 
 	if partitions, err := diskPartitionsFunc(false); err == nil {
+		// Count each block device once. Bind mounts re-export the same
+		// filesystem total and would otherwise inflate DiskTotal.
+		seenDevices := make(map[string]struct{}, len(partitions))
 		for _, partition := range partitions {
+			if partition.Device != "" {
+				if _, seen := seenDevices[partition.Device]; seen {
+					continue
+				}
+				seenDevices[partition.Device] = struct{}{}
+			}
 			usage, err := diskUsageFunc(partition.Mountpoint)
 			if err != nil || usage == nil {
 				continue

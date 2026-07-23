@@ -91,6 +91,28 @@ func TestMetricsPayloadJSON(t *testing.T) {
 	}
 }
 
+func TestAggregateDiskTotalsDedupesSameDevice(t *testing.T) {
+	used, total := models.AggregateDiskTotals([]models.DiskStats{
+		{Mount: "/", Device: "/dev/sda2", Used: 90, Total: 200},
+		{Mount: "/boot/efi", Device: "/dev/sda1", Used: 1, Total: 1},
+		{Mount: "/opt/hermes-agent", Device: "/dev/sda2", Used: 90, Total: 200},
+		{Mount: "/opt/hermes-script", Device: "/dev/sda2", Used: 90, Total: 200},
+	})
+	if used != 91 || total != 201 {
+		t.Fatalf("expected bind mounts of the same device to count once, got used=%d total=%d", used, total)
+	}
+}
+
+func TestAggregateDiskTotalsCountsMountsWithoutDevice(t *testing.T) {
+	used, total := models.AggregateDiskTotals([]models.DiskStats{
+		{Mount: "/", Used: 50, Total: 100},
+		{Mount: "/data", Used: 20, Total: 40},
+	})
+	if used != 70 || total != 140 {
+		t.Fatalf("expected legacy mounts without device to sum fully, got used=%d total=%d", used, total)
+	}
+}
+
 func TestMetricsPayloadEmptyDiskHealthEncodesEmptyArray(t *testing.T) {
 	payload := models.MetricsPayload{
 		Type:       "metrics",

@@ -42,7 +42,10 @@ func TestCollectHardwareProfile(t *testing.T) {
 		return &host.InfoStat{VirtualizationSystem: "kvm", VirtualizationRole: "guest"}, nil
 	}
 	diskPartitionsFunc = func(all bool) ([]disk.PartitionStat, error) {
-		return []disk.PartitionStat{{Mountpoint: "/"}, {Mountpoint: "/data"}}, nil
+		return []disk.PartitionStat{
+			{Device: "/dev/sda2", Mountpoint: "/"},
+			{Device: "/dev/sdb1", Mountpoint: "/data"},
+		}, nil
 	}
 	diskUsageFunc = func(path string) (*disk.UsageStat, error) {
 		if path == "/" {
@@ -69,6 +72,57 @@ func TestCollectHardwareProfile(t *testing.T) {
 	}
 	if profile.VirtualizationSystem != "kvm" || profile.VirtualizationRole != "guest" {
 		t.Fatalf("expected virtualization kvm/guest, got %q/%q", profile.VirtualizationSystem, profile.VirtualizationRole)
+	}
+}
+
+func TestCollectHardwareProfileDedupesBindMountsOfSameDevice(t *testing.T) {
+	originalCPUInfoFunc := cpuInfoFunc
+	originalCPUCountsFunc := cpuCountsFunc
+	originalVirtualMemoryFunc := virtualMemoryFunc
+	originalHostInfoFunc := hostInfoFunc
+	originalDiskPartitionsFunc := diskPartitionsFunc
+	originalDiskUsageFunc := diskUsageFunc
+	defer func() {
+		cpuInfoFunc = originalCPUInfoFunc
+		cpuCountsFunc = originalCPUCountsFunc
+		virtualMemoryFunc = originalVirtualMemoryFunc
+		hostInfoFunc = originalHostInfoFunc
+		diskPartitionsFunc = originalDiskPartitionsFunc
+		diskUsageFunc = originalDiskUsageFunc
+	}()
+
+	cpuInfoFunc = func() ([]cpu.InfoStat, error) { return nil, errors.New("unused") }
+	cpuCountsFunc = func(logical bool) (int, error) { return 0, errors.New("unused") }
+	virtualMemoryFunc = func() (*mem.VirtualMemoryStat, error) { return nil, errors.New("unused") }
+	hostInfoFunc = func() (*host.InfoStat, error) { return nil, errors.New("unused") }
+	diskPartitionsFunc = func(all bool) ([]disk.PartitionStat, error) {
+		return []disk.PartitionStat{
+			{Device: "/dev/sda2", Mountpoint: "/"},
+			{Device: "/dev/sda1", Mountpoint: "/boot/efi"},
+			{Device: "/dev/sda2", Mountpoint: "/opt/hermes-agent"},
+			{Device: "/dev/sda2", Mountpoint: "/opt/hermes-script"},
+		}, nil
+	}
+	diskUsageFunc = func(path string) (*disk.UsageStat, error) {
+		switch path {
+		case "/":
+			return &disk.UsageStat{Total: 209711013888}, nil
+		case "/boot/efi":
+			return &disk.UsageStat{Total: 536576000}, nil
+		case "/opt/hermes-agent", "/opt/hermes-script":
+			return &disk.UsageStat{Total: 209711013888}, nil
+		default:
+			return nil, errors.New("unexpected mount")
+		}
+	}
+
+	profile := collectHardwareProfile()
+	if profile == nil {
+		t.Fatal("expected hardware profile")
+	}
+	const want = uint64(209711013888 + 536576000)
+	if profile.DiskTotal != want {
+		t.Fatalf("expected bind mounts of /dev/sda2 to count once (want %d), got %d", want, profile.DiskTotal)
 	}
 }
 

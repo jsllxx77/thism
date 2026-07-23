@@ -214,12 +214,7 @@ func memoryPercent(metrics *models.MetricsPayload) float64 {
 }
 
 func diskPercent(metrics *models.MetricsPayload) float64 {
-	var used uint64
-	var total uint64
-	for _, disk := range metrics.Disk {
-		used += disk.Used
-		total += disk.Total
-	}
+	used, total := models.AggregateDiskTotals(metrics.Disk)
 	if total == 0 {
 		return 0
 	}

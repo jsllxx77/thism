@@ -23,6 +23,8 @@ type Props = {
 }
 
 type LiveDiskStats = {
+  mount?: string
+  device?: string
   used?: number
   total?: number
 }
@@ -99,8 +101,16 @@ function aggregateLiveDiskTotals(disks?: ReadonlyArray<LiveDiskStats>): { diskUs
   let diskUsed = 0
   let diskTotal = 0
   let hasValue = false
+  const seenDevices = new Set<string>()
 
   for (const disk of disks) {
+    const device = typeof disk?.device === "string" ? disk.device.trim() : ""
+    if (device) {
+      if (seenDevices.has(device)) {
+        continue
+      }
+      seenDevices.add(device)
+    }
     if (isFiniteNumber(disk?.used)) {
       diskUsed += disk.used
       hasValue = true

@@ -2251,13 +2251,7 @@ func decodeDiskHealth(raw string) []models.DiskHealthStats {
 }
 
 func aggregateDiskTotals(disks []models.DiskStats) (uint64, uint64) {
-	var used uint64
-	var total uint64
-	for _, disk := range disks {
-		used += disk.Used
-		total += disk.Total
-	}
-	return used, total
+	return models.AggregateDiskTotals(disks)
 }
 
 // Keep this lookup index-friendly: /api/nodes calls it for every node shown on

@@ -174,9 +174,30 @@ type MemStats struct {
 }
 
 type DiskStats struct {
-	Mount string `json:"mount"`
-	Used  uint64 `json:"used"`
-	Total uint64 `json:"total"`
+	Mount  string `json:"mount"`
+	Device string `json:"device,omitempty"`
+	Used   uint64 `json:"used"`
+	Total  uint64 `json:"total"`
+}
+
+// AggregateDiskTotals sums used/total across mounts, counting each block
+// device only once. Bind mounts of the same underlying device (for example
+// / and a bind of the same filesystem) report identical capacity and must
+// not inflate node-level disk totals. Mounts without a device identity are
+// still counted individually for backward compatibility with older agents.
+func AggregateDiskTotals(disks []DiskStats) (used, total uint64) {
+	seenDevices := make(map[string]struct{}, len(disks))
+	for _, disk := range disks {
+		if disk.Device != "" {
+			if _, seen := seenDevices[disk.Device]; seen {
+				continue
+			}
+			seenDevices[disk.Device] = struct{}{}
+		}
+		used += disk.Used
+		total += disk.Total
+	}
+	return used, total
 }
 
 const (
