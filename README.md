@@ -38,6 +38,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Configurable metrics retention, defaulting to 30 days with longer reporting options
 - Runtime shadcn/ui theme packages and full frontend skin packages installable from GitHub
 - Prebuilt GHCR image plus Docker Compose deployment path
+- Offline GeoIP country codes (IP2Location / MaxMind) fetched at deploy time, not vendored in git
 
 ## Quick Start
 
@@ -96,6 +97,22 @@ The default compose deployment stores application data in a named Docker volume 
 The `.env` file contains runtime settings and secret-file paths. The API token and web login credentials live in `secrets/thism_token`, `secrets/thism_admin_user`, and `secrets/thism_admin_pass`.
 
 Use `cat secrets/thism_admin_user` and `cat secrets/thism_admin_pass` to read the web login credentials.
+
+### Offline GeoIP databases (required on fresh hosts)
+
+The git repo does **not** ship MaxMind / IP2Location database files. After cloning or compose install, fetch offline DBs on the host:
+
+```bash
+export IP2LOCATION_TOKEN='...'
+export MAXMIND_LICENSE_KEY='...'   # https://www.maxmind.com/en/geolite2/signup
+sudo -E ./deploy/fetch-geoip-dbs.sh
+# or: make fetch-geoip
+```
+
+See `docs/geoip.md`. Runtime dual-source env vars:
+
+- `THISM_GEOIP_DB` (primary)
+- `THISM_GEOIP_DB_FALLBACK` (secondary)
 
 ## Add and Install an Agent
 

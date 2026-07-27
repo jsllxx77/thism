@@ -17,6 +17,40 @@ func TestOpenCountryResolverReturnsNilWhenGeoIPDatabaseIsUnavailable(t *testing.
 	}
 }
 
+func TestOpenCountryResolverWithFallbackUsesSecondaryWhenPrimaryMissing(t *testing.T) {
+	fallbackCandidates := []string{
+		geoDefaultIP2LocationPathForTest(),
+		geoDefaultMaxMindPathForTest(),
+	}
+	var fallback string
+	for _, candidate := range fallbackCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			fallback = candidate
+			break
+		}
+	}
+	if fallback == "" {
+		t.Skip("no local geo database available for fallback test")
+	}
+
+	missingPrimary := filepath.Join(t.TempDir(), "missing-primary.mmdb")
+	resolver := openCountryResolverWithFallback(missingPrimary, fallback)
+	if resolver == nil {
+		t.Fatal("expected fallback geo database to keep country resolver enabled")
+	}
+	if closer, ok := resolver.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
+}
+
+func geoDefaultIP2LocationPathForTest() string {
+	return "/opt/1panel/geo/IP2LOCATION-LITE-DB1.IPV6.BIN"
+}
+
+func geoDefaultMaxMindPathForTest() string {
+	return "/opt/1panel/geo/GeoIP.mmdb"
+}
+
 func TestNewHTTPServerConfiguresTimeouts(t *testing.T) {
 	server := newHTTPServer(":12026", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

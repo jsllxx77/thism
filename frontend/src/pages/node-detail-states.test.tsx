@@ -10,6 +10,7 @@ const servicesMock = vi.fn()
 const dockerMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const latencyResultsMock = vi.fn()
+const dashboardSettingsMock = vi.fn()
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -20,6 +21,7 @@ vi.mock("../lib/api", () => ({
     docker: (...args: unknown[]) => dockerMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     latencyResults: (...args: unknown[]) => latencyResultsMock(...args),
+    dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
   },
 }))
 
@@ -53,6 +55,7 @@ describe("node detail page states", () => {
     dockerMock.mockReset()
     metricsRetentionMock.mockReset()
     latencyResultsMock.mockReset()
+    dashboardSettingsMock.mockReset()
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -69,6 +72,11 @@ describe("node detail page states", () => {
     })
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     latencyResultsMock.mockResolvedValue({ monitors: [], results: [] })
+    dashboardSettingsMock.mockResolvedValue({
+      show_dashboard_card_ip: true,
+      show_system_pressure: true,
+      show_memory_pressure: true,
+    })
   })
 
   it("shows a loading state while node detail data is pending", async () => {
@@ -387,7 +395,7 @@ describe("node detail page states", () => {
     const resourceUsage = screen.getByRole("heading", { name: "Resource Usage" })
     const diskHealth = screen.getByRole("heading", { name: "Disk Health" })
     const throughput = screen.getByRole("heading", { name: "Throughput / Traffic" })
-    const systemPressure = screen.getByRole("heading", { name: "System Pressure" })
+    const systemPressure = await screen.findByRole("heading", { name: "System Pressure" })
     const memoryPressure = screen.getByRole("heading", { name: "Memory Pressure" })
 
     expectBefore(nodeName, hardware)
@@ -399,6 +407,39 @@ describe("node detail page states", () => {
     expectBefore(systemPressure, memoryPressure)
   })
 
+  it("hides system and memory pressure sections when display options disable them", async () => {
+    dashboardSettingsMock.mockResolvedValue({
+      show_dashboard_card_ip: true,
+      show_system_pressure: false,
+      show_memory_pressure: false,
+    })
+    nodeMock.mockResolvedValue({
+      node: {
+        id: "node-1",
+        name: "alpha",
+        ip: "1.1.1.1",
+        os: "linux",
+        arch: "amd64",
+        created_at: 0,
+        last_seen: 0,
+        online: true,
+      },
+    })
+    metricsMock.mockResolvedValue({ metrics: [] })
+    processesMock.mockResolvedValue([])
+    servicesMock.mockResolvedValue({ services: [] })
+    dockerMock.mockResolvedValue({ docker_available: false, containers: [] })
+
+    render(<NodeDetail nodeId="node-1" />)
+
+    expect(await screen.findByText("alpha")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Resource Usage" })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(dashboardSettingsMock).toHaveBeenCalled()
+    })
+    expect(screen.queryByRole("heading", { name: "System Pressure" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Memory Pressure" })).not.toBeInTheDocument()
+  })
 
   it("shows a 30d metric range when retention is set to 30 days", async () => {
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })

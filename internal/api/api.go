@@ -422,6 +422,13 @@ func NewRouterWithAuthAndGeo(s *store.Store, h *hub.Hub, auth AuthConfig, fronte
 }
 
 func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler, countryResolver geo.CountryResolver, frontendSkins frontendSkinService) http.Handler {
+	return NewRouterWithAuthGeoManagerAndFrontendSkins(s, h, auth, frontendHandler, countryResolver, nil, frontendSkins)
+}
+
+func NewRouterWithAuthGeoManagerAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthConfig, frontendHandler http.Handler, countryResolver geo.CountryResolver, geoManager *geo.Manager, frontendSkins frontendSkinService) http.Handler {
+	if countryResolver == nil && geoManager != nil {
+		countryResolver = geoManager
+	}
 	authState := newAuthManager(auth, s)
 
 	// Load persisted credentials if present, otherwise bootstrap from startup
@@ -527,6 +534,10 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 			handleGetPublicURL(w, req, s)
 		})
 
+		r.Get("/api/settings/geoip", func(w http.ResponseWriter, req *http.Request) {
+			handleGetGeoIPSettings(w, req, geoManager)
+		})
+
 		r.Get("/api/reports/availability", func(w http.ResponseWriter, req *http.Request) {
 			handleGetAvailabilityReport(w, req, s)
 		})
@@ -564,6 +575,14 @@ func NewRouterWithAuthGeoAndFrontendSkins(s *store.Store, h *hub.Hub, auth AuthC
 
 		r.Put("/api/settings/public-url", func(w http.ResponseWriter, req *http.Request) {
 			handleUpdatePublicURL(w, req, s)
+		})
+
+		r.Put("/api/settings/geoip", func(w http.ResponseWriter, req *http.Request) {
+			handleUpdateGeoIPSettings(w, req, s, geoManager)
+		})
+
+		r.Post("/api/settings/geoip/update", func(w http.ResponseWriter, req *http.Request) {
+			handleRefreshGeoIPDatabase(w, req, geoManager)
 		})
 
 		r.Get("/api/settings/latency-monitors", func(w http.ResponseWriter, req *http.Request) {
@@ -1897,20 +1916,63 @@ func handleUpdatePublicURL(w http.ResponseWriter, r *http.Request, s *store.Stor
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
 		return
 	}
-
 	var reqBody struct {
 		PublicURL string `json:"public_url"`
 	}
 	if !decodeJSONBody(w, r, &reqBody) {
 		return
 	}
-
-	publicURL, err := s.SetPublicURL(reqBody.PublicURL)
+	value, err := s.SetPublicURL(reqBody.PublicURL)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"public_url": publicURL})
+	writeJSON(w, http.StatusOK, map[string]string{"public_url": value})
+}
+
+func handleGetGeoIPSettings(w http.ResponseWriter, _ *http.Request, geoManager *geo.Manager) {
+	if geoManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "geoip manager unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, geoManager.View())
+}
+
+func handleUpdateGeoIPSettings(w http.ResponseWriter, r *http.Request, s *store.Store, geoManager *geo.Manager) {
+	if geoManager == nil || s == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "geoip manager unavailable"})
+		return
+	}
+	var reqBody models.GeoIPSettingsUpdate
+	if !decodeJSONBody(w, r, &reqBody) {
+		return
+	}
+	view, err := geoManager.UpdateSettings(reqBody)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.UpsertGeoIPSettings(geoManager.Settings()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func handleRefreshGeoIPDatabase(w http.ResponseWriter, r *http.Request, geoManager *geo.Manager) {
+	if geoManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "geoip manager unavailable"})
+		return
+	}
+	view, err := geoManager.RefreshDatabase(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": err.Error(),
+			"geoip": view,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func handleListFrontendSkins(w http.ResponseWriter, _ *http.Request, s *store.Store, skinService frontendSkinService) {

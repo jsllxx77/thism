@@ -24,12 +24,57 @@ import (
 )
 
 func openCountryResolver(dbPath string) geo.CountryResolver {
-	countryResolver, err := geo.NewResolver(dbPath)
+	return openCountryResolverWithFallback(dbPath, "")
+}
+
+func openCountryResolverWithFallback(primaryPath, fallbackPath string) geo.CountryResolver {
+	primaryPath = strings.TrimSpace(primaryPath)
+	fallbackPath = strings.TrimSpace(fallbackPath)
+
+	var (
+		countryResolver geo.CountryResolver
+		err             error
+	)
+	switch {
+	case primaryPath != "" || fallbackPath != "":
+		countryResolver, err = geo.NewResolverWithFallback(primaryPath, fallbackPath)
+	default:
+		countryResolver, err = geo.OpenBestResolver()
+	}
 	if err != nil {
 		log.Printf("geoip: disabled country resolver: %v", err)
 		return nil
 	}
+	if resolver, ok := countryResolver.(*geo.Resolver); ok {
+		if sources := resolver.Sources(); len(sources) > 0 {
+			log.Printf("geoip: loaded database sources: %s", strings.Join(sources, ", "))
+		}
+	}
 	return countryResolver
+}
+
+func openGeoIPManager(s *store.Store, dir string) *geo.Manager {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		dir = geo.DefaultDir
+	}
+	manager := geo.NewManager(dir)
+	if s != nil {
+		if settings, err := s.GetGeoIPSettings(); err != nil {
+			log.Printf("geoip: failed to load settings: %v", err)
+		} else {
+			settings.Dir = dir
+			if err := manager.ApplySettings(settings); err != nil {
+				log.Printf("geoip: disabled country resolver: %v", err)
+			}
+		}
+	} else if err := manager.ApplySettings(manager.Settings()); err != nil {
+		log.Printf("geoip: disabled country resolver: %v", err)
+	}
+	if view := manager.View(); view.Enabled {
+		log.Printf("geoip: provider=%s path=%s version=%s", view.Provider, view.DatabasePath, view.DatabaseVersion)
+	}
+	return manager
 }
 
 // envOr returns the value of the named environment variable when set,
@@ -87,7 +132,9 @@ func main() {
 	adminToken := flag.String("token", mustEnvOrFile("THISM_TOKEN", "THISM_TOKEN_FILE", ""), "Admin token for API auth (env: THISM_TOKEN or THISM_TOKEN_FILE)")
 	adminUser := flag.String("admin-user", mustEnvOrFile("THISM_ADMIN_USER", "THISM_ADMIN_USER_FILE", ""), "Admin username for login page authentication (env: THISM_ADMIN_USER or THISM_ADMIN_USER_FILE)")
 	adminPass := flag.String("admin-pass", mustEnvOrFile("THISM_ADMIN_PASS", "THISM_ADMIN_PASS_FILE", ""), "Admin password for login page authentication (env: THISM_ADMIN_PASS or THISM_ADMIN_PASS_FILE)")
-	geoIPDBPath := flag.String("geoip-db", envOr("THISM_GEOIP_DB", geo.DefaultDBPath), "Path to local GeoIP mmdb database")
+	geoIPDir := flag.String("geoip-dir", envOr("THISM_GEOIP_DIR", geo.DefaultDir), "Directory for offline GeoIP databases")
+	geoIPDBPath := flag.String("geoip-db", os.Getenv("THISM_GEOIP_DB"), "Legacy single GeoIP database path override. Empty = use settings-managed provider")
+	geoIPDBFallback := flag.String("geoip-db-fallback", os.Getenv("THISM_GEOIP_DB_FALLBACK"), "Optional legacy fallback GeoIP database path")
 	frontendSkinsDir := flag.String("frontend-skins-dir", os.Getenv("THISM_FRONTEND_SKINS_DIR"), "Directory for installed frontend skin packages (env: THISM_FRONTEND_SKINS_DIR)")
 	flag.Parse()
 
@@ -119,17 +166,25 @@ func main() {
 		log.Fatalf("failed to open frontend skin manager: %v", err)
 	}
 
-	countryResolver := openCountryResolver(*geoIPDBPath)
-	if closer, ok := countryResolver.(interface{ Close() error }); ok {
-		defer closer.Close()
+	var countryResolver geo.CountryResolver
+	var geoManager *geo.Manager
+	if strings.TrimSpace(*geoIPDBPath) != "" || strings.TrimSpace(*geoIPDBFallback) != "" {
+		countryResolver = openCountryResolverWithFallback(*geoIPDBPath, *geoIPDBFallback)
+		if closer, ok := countryResolver.(interface{ Close() error }); ok {
+			defer closer.Close()
+		}
+	} else {
+		geoManager = openGeoIPManager(s, *geoIPDir)
+		defer geoManager.Close()
+		countryResolver = geoManager
 	}
 
 	frontendHandler := frontend.HandlerWithSkins(frontend.Handler(), skinManager, s)
-	router := api.NewRouterWithAuthGeoAndFrontendSkins(s, h, api.AuthConfig{
+	router := api.NewRouterWithAuthGeoManagerAndFrontendSkins(s, h, api.AuthConfig{
 		AdminToken: *adminToken,
 		Username:   *adminUser,
 		Password:   *adminPass,
-	}, frontendHandler, countryResolver, skinManager)
+	}, frontendHandler, countryResolver, geoManager, skinManager)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

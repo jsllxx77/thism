@@ -6,12 +6,16 @@ services:
       - "${THISM_PORT:-8080}:8080"
     volumes:
       - thism-data:/data
+      # Host-side offline GeoIP DBs from deploy/fetch-geoip-dbs.sh
+      - ${THISM_GEOIP_HOST_DIR:-/opt/1panel/geo}:/geo:ro
     environment:
       THISM_PORT: "8080"
       THISM_DB: /data/thism.db
       THISM_TOKEN_FILE: /run/secrets/thism_token
       THISM_ADMIN_USER_FILE: /run/secrets/thism_admin_user
       THISM_ADMIN_PASS_FILE: /run/secrets/thism_admin_pass
+      THISM_GEOIP_DB: ${THISM_GEOIP_DB:-/geo/IP2LOCATION-LITE-DB1.IPV6.BIN}
+      THISM_GEOIP_DB_FALLBACK: ${THISM_GEOIP_DB_FALLBACK:-/geo/GeoIP.mmdb}
     secrets:
       - thism_token
       - thism_admin_user

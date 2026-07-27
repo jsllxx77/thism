@@ -288,6 +288,28 @@ export type MetricsRetentionSettings = {
   options: number[]
 }
 
+export type GeoIPSettings = {
+  provider: "maxmind" | "ip2location" | string
+  ip2location_token_set: boolean
+  maxmind_license_key_set: boolean
+  enabled: boolean
+  database_path?: string
+  database_exists: boolean
+  database_size_bytes?: number
+  database_modified_at?: number
+  database_version?: string
+  last_error?: string
+  supported_providers?: string[]
+}
+
+export type GeoIPSettingsUpdate = {
+  provider: "maxmind" | "ip2location" | string
+  ip2location_token?: string
+  maxmind_license_key?: string
+  clear_ip2location_token?: boolean
+  clear_maxmind_license_key?: boolean
+}
+
 export type DashboardSettings = {
   show_dashboard_card_ip: boolean
   show_system_pressure: boolean
@@ -498,6 +520,16 @@ export const api = {
     req<MetricsRetentionSettings>("/api/settings/metrics-retention", {
       method: "PUT",
       body: JSON.stringify({ retention_days: retentionDays }),
+    }),
+  geoIPSettings: () => req<GeoIPSettings>("/api/settings/geoip"),
+  updateGeoIPSettings: (payload: GeoIPSettingsUpdate) =>
+    req<GeoIPSettings>("/api/settings/geoip", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  updateGeoIPDatabase: () =>
+    req<GeoIPSettings>("/api/settings/geoip/update", {
+      method: "POST",
     }),
   latencyMonitors: () => req<{ monitors: LatencyMonitor[] }>("/api/settings/latency-monitors"),
   createLatencyMonitor: (payload: LatencyMonitorUpsertPayload) =>

@@ -38,6 +38,7 @@
 - 可配置指标保留时长，默认 30 天，并支持更长报告窗口
 - 支持从 GitHub 安装运行时 shadcn/ui 主题包和完整前端皮肤包
 - 提供预构建 GHCR 镜像与 Docker Compose 部署方式
+- 支持离线 GeoIP 国家码（IP2Location / MaxMind），部署时通过脚本拉取，不把数据库提交进 Git
 
 ## 快速开始
 
@@ -96,6 +97,22 @@ docker compose up -d
 `.env` 文件里保存运行配置和 secret 文件路径。API Token 和 Web 登录凭据分别保存在 `secrets/thism_token`、`secrets/thism_admin_user`、`secrets/thism_admin_pass`。
 
 可以用 `cat secrets/thism_admin_user` 和 `cat secrets/thism_admin_pass` 查看 Web 登录账号密码。
+
+### 离线 GeoIP 数据源（新机器必做）
+
+Git 仓库**不包含** MaxMind / IP2Location 数据库文件。新主机从 GitHub 部署后，用密钥在本机拉取离线库：
+
+```bash
+export IP2LOCATION_TOKEN='...'
+export MAXMIND_LICENSE_KEY='...'   # https://www.maxmind.com/en/geolite2/signup
+sudo -E ./deploy/fetch-geoip-dbs.sh
+# 或: make fetch-geoip
+```
+
+详情见 `docs/geoip.md`。server 支持双源：
+
+- `THISM_GEOIP_DB`（主）
+- `THISM_GEOIP_DB_FALLBACK`（备）
 
 ## 添加并安装 Agent
 

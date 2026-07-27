@@ -10,6 +10,9 @@ const createAgentUpdateJobMock = vi.fn()
 const getAgentUpdateJobMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const geoIPSettingsMock = vi.fn()
+const updateGeoIPSettingsMock = vi.fn()
+const updateGeoIPDatabaseMock = vi.fn()
 const publicURLSettingsMock = vi.fn()
 const updatePublicURLSettingsMock = vi.fn()
 
@@ -22,6 +25,9 @@ vi.mock("../../lib/api", () => ({
     getAgentUpdateJob: (...args: unknown[]) => getAgentUpdateJobMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    geoIPSettings: (...args: unknown[]) => geoIPSettingsMock(...args),
+    updateGeoIPSettings: (...args: unknown[]) => updateGeoIPSettingsMock(...args),
+    updateGeoIPDatabase: (...args: unknown[]) => updateGeoIPDatabaseMock(...args),
     publicURLSettings: (...args: unknown[]) => publicURLSettingsMock(...args),
     updatePublicURLSettings: (...args: unknown[]) => updatePublicURLSettingsMock(...args),
   },
@@ -41,11 +47,17 @@ describe("agent auto update status card", () => {
     getAgentUpdateJobMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    geoIPSettingsMock.mockReset()
+    updateGeoIPSettingsMock.mockReset()
+    updateGeoIPDatabaseMock.mockReset()
     publicURLSettingsMock.mockReset()
     updatePublicURLSettingsMock.mockReset()
     nodesMock.mockResolvedValue({ nodes: [] })
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    geoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPDatabaseMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
     publicURLSettingsMock.mockResolvedValue({ public_url: "" })
     updatePublicURLSettingsMock.mockResolvedValue({ public_url: "" })
     createAgentUpdateJobMock.mockResolvedValue({

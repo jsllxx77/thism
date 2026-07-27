@@ -9,6 +9,9 @@ const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const geoIPSettingsMock = vi.fn()
+const updateGeoIPSettingsMock = vi.fn()
+const updateGeoIPDatabaseMock = vi.fn()
 const dashboardSettingsMock = vi.fn()
 const updateDashboardSettingsMock = vi.fn()
 const notificationSettingsMock = vi.fn()
@@ -22,6 +25,9 @@ vi.mock("../lib/api", () => ({
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    geoIPSettings: (...args: unknown[]) => geoIPSettingsMock(...args),
+    updateGeoIPSettings: (...args: unknown[]) => updateGeoIPSettingsMock(...args),
+    updateGeoIPDatabase: (...args: unknown[]) => updateGeoIPDatabaseMock(...args),
     dashboardSettings: (...args: unknown[]) => dashboardSettingsMock(...args),
     updateDashboardSettings: (...args: unknown[]) => updateDashboardSettingsMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
@@ -53,6 +59,9 @@ describe("settings page states", () => {
     agentReleaseMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    geoIPSettingsMock.mockReset()
+    updateGeoIPSettingsMock.mockReset()
+    updateGeoIPDatabaseMock.mockReset()
     dashboardSettingsMock.mockReset()
     updateDashboardSettingsMock.mockReset()
     notificationSettingsMock.mockReset()
@@ -61,6 +70,9 @@ describe("settings page states", () => {
     agentReleaseMock.mockImplementation((_os: string, arch: string) => Promise.resolve({ target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd", download_url: `https://example.com/${arch}`, sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64", check_interval_seconds: 1800 }))
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
+    geoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPDatabaseMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
     dashboardSettingsMock.mockResolvedValue({
       show_dashboard_card_ip: true,
       show_system_pressure: true,
@@ -223,9 +235,10 @@ describe("settings page states", () => {
     vi.useRealTimers()
   })
 
-  it("loads and saves display options including pressure sections", async () => {
+  it("loads and auto-saves display options including pressure sections", async () => {
     const user = userEvent.setup()
     nodesMock.mockResolvedValue({ nodes: [] })
+    updateDashboardSettingsMock.mockImplementation(async (payload: unknown) => payload)
 
     renderSettings("/settings?section=monitoring")
 
@@ -237,17 +250,17 @@ describe("settings page states", () => {
     expect(systemPressureCheckbox).toBeChecked()
     expect(memoryPressureCheckbox).toBeChecked()
 
-    await user.click(ipCheckbox)
     await user.click(systemPressureCheckbox)
-    await user.click(screen.getByRole("button", { name: "Save display options" }))
 
     await waitFor(() => {
       expect(updateDashboardSettingsMock).toHaveBeenCalledWith({
-        show_dashboard_card_ip: false,
+        show_dashboard_card_ip: true,
         show_system_pressure: false,
         show_memory_pressure: true,
       })
     })
     expect(await screen.findByText("Display options updated.")).toBeInTheDocument()
+    expect(systemPressureCheckbox).not.toBeChecked()
+    expect(screen.queryByRole("button", { name: "Save display options" })).not.toBeInTheDocument()
   })
 })

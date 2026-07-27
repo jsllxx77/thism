@@ -1,7 +1,8 @@
 .PHONY: \
 	build build-server build-agent build-agent-all build-frontend test clean \
 	dev-ui dev-server dev-rebuild dev-restart \
-	build-sign-tool release-keygen sign-dist validate-release-public-key
+	build-sign-tool release-keygen sign-dist validate-release-public-key \
+	fetch-geoip
 
 GO ?= go
 SUDO ?= sudo
@@ -93,6 +94,13 @@ dev-restart: dev-rebuild
 
 test:
 	GOCACHE=$(GOCACHE_DIR) $(GO) test $(GO_PACKAGES)
+
+# Offline GeoIP bootstrap -------------------------------------------------
+# Downloads IP2Location + MaxMind databases into GEOIP_DIR without putting
+# credentials or vendor DB files into git. See docs/geoip.md.
+GEOIP_DIR ?= /opt/1panel/geo
+fetch-geoip:
+	GEOIP_DIR="$(GEOIP_DIR)" ./deploy/fetch-geoip-dbs.sh
 
 # Release signing -----------------------------------------------------------
 # RELEASE_PUBLIC_KEY=<base64> is the Ed25519 public key the agent should pin.

@@ -5,6 +5,7 @@ import { DashboardVisibilityCard } from "../components/settings/DashboardVisibil
 import { FrontendSkinSystemCard } from "../components/settings/FrontendSkinSystemCard"
 import { LatencyMonitorsCard } from "../components/settings/LatencyMonitorsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
+import { GeoIPCard } from "../components/settings/GeoIPCard"
 import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
 import { PublicURLCard } from "../components/settings/PublicURLCard"
@@ -344,6 +345,7 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
         <TabsContent value="monitoring" {...getTabsContentProps("monitoring")} hidden={activeSection !== "monitoring"} className="space-y-6">
           <MetricsRetentionCard />
+          <GeoIPCard />
           <DashboardVisibilityCard />
           <LatencyMonitorsCard nodes={effectiveNodes} />
         </TabsContent>

@@ -8,6 +8,9 @@ const changePasswordMock = vi.fn()
 const agentReleaseMock = vi.fn()
 const metricsRetentionMock = vi.fn()
 const updateMetricsRetentionMock = vi.fn()
+const geoIPSettingsMock = vi.fn()
+const updateGeoIPSettingsMock = vi.fn()
+const updateGeoIPDatabaseMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 
@@ -18,6 +21,9 @@ vi.mock("../../lib/api", () => ({
     agentRelease: (...args: unknown[]) => agentReleaseMock(...args),
     metricsRetention: (...args: unknown[]) => metricsRetentionMock(...args),
     updateMetricsRetention: (...args: unknown[]) => updateMetricsRetentionMock(...args),
+    geoIPSettings: (...args: unknown[]) => geoIPSettingsMock(...args),
+    updateGeoIPSettings: (...args: unknown[]) => updateGeoIPSettingsMock(...args),
+    updateGeoIPDatabase: (...args: unknown[]) => updateGeoIPDatabaseMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: () => Promise.resolve({ version: "1.0.0", commit: "abc", build_time: "2026-03-19T00:00:00Z" }),
@@ -31,6 +37,9 @@ describe("metrics retention settings", () => {
     agentReleaseMock.mockReset()
     metricsRetentionMock.mockReset()
     updateMetricsRetentionMock.mockReset()
+    geoIPSettingsMock.mockReset()
+    updateGeoIPSettingsMock.mockReset()
+    updateGeoIPDatabaseMock.mockReset()
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
 
@@ -45,6 +54,9 @@ describe("metrics retention settings", () => {
     )
     metricsRetentionMock.mockResolvedValue({ retention_days: 30, options: [30, 90, 180, 365] })
     updateMetricsRetentionMock.mockResolvedValue({ retention_days: 90, options: [30, 90, 180, 365] })
+    geoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPSettingsMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
+    updateGeoIPDatabaseMock.mockResolvedValue({ provider: "maxmind", ip2location_token_set: false, maxmind_license_key_set: false, enabled: true, database_exists: true, supported_providers: ["maxmind", "ip2location"] })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",

@@ -156,8 +156,9 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
   const [dockerSnapshot, setDockerSnapshot] = useState<DockerSnapshot | null>(null)
   const [range, setRange] = useState(3600)
   const [metricsRetentionDays, setMetricsRetentionDays] = useState(DEFAULT_METRICS_RETENTION_DAYS)
-  const [showSystemPressure, setShowSystemPressure] = useState(true)
-  const [showMemoryPressure, setShowMemoryPressure] = useState(true)
+  // Start hidden until display options load so a disabled setting never flashes on.
+  const [showSystemPressure, setShowSystemPressure] = useState(false)
+  const [showMemoryPressure, setShowMemoryPressure] = useState(false)
   const [desktopSectionsOpen, setDesktopSectionsOpen] = useState(isDesktopViewport)
   const [loadingDetail, setLoadingDetail] = useState(true)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -221,9 +222,11 @@ export function NodeDetail({ nodeId, refreshNonce = 0, accessMode = "admin" }: P
         if (cancelled) {
           return
         }
+        // Explicit false hides the section; missing/undefined keeps the product default (show).
         setShowSystemPressure(response.show_system_pressure !== false)
         setShowMemoryPressure(response.show_memory_pressure !== false)
       } catch {
+        // On fetch failure fall back to product defaults (sections visible).
         if (!cancelled) {
           setShowSystemPressure(true)
           setShowMemoryPressure(true)

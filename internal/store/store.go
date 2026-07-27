@@ -44,6 +44,7 @@ const notificationSettingsKey = "notification_settings"
 const frontendSkinSettingKey = "frontend_skin_id"
 const themeSettingsKey = "theme_settings"
 const publicURLSettingKey = "public_url"
+const geoIPSettingsKey = "geoip_settings"
 const DefaultFrontendSkinID = "classic"
 const DefaultThemeName = "classic"
 const adminSessionTTL = 30 * 24 * time.Hour
@@ -733,6 +734,58 @@ ON CONFLICT(key) DO UPDATE SET
 		return "", err
 	}
 	return value, nil
+}
+
+func defaultGeoIPSettings() models.GeoIPSettings {
+	return models.GeoIPSettings{
+		Provider: models.GeoIPProviderMaxMind,
+	}
+}
+
+func normalizeGeoIPSettings(settings models.GeoIPSettings) models.GeoIPSettings {
+	settings.Provider = strings.ToLower(strings.TrimSpace(settings.Provider))
+	switch settings.Provider {
+	case models.GeoIPProviderIP2Location:
+		// ok
+	default:
+		settings.Provider = models.GeoIPProviderMaxMind
+	}
+	settings.IP2LocationToken = strings.TrimSpace(settings.IP2LocationToken)
+	settings.MaxMindLicenseKey = strings.TrimSpace(settings.MaxMindLicenseKey)
+	settings.Dir = strings.TrimSpace(settings.Dir)
+	return settings
+}
+
+func (s *Store) GetGeoIPSettings() (models.GeoIPSettings, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, geoIPSettingsKey).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return defaultGeoIPSettings(), nil
+	}
+	if err != nil {
+		return models.GeoIPSettings{}, err
+	}
+	var settings models.GeoIPSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return defaultGeoIPSettings(), nil
+	}
+	return normalizeGeoIPSettings(settings), nil
+}
+
+func (s *Store) UpsertGeoIPSettings(settings models.GeoIPSettings) error {
+	settings = normalizeGeoIPSettings(settings)
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO app_settings (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+	value = excluded.value,
+	updated_at = excluded.updated_at
+`, geoIPSettingsKey, string(raw), time.Now().Unix())
+	return err
 }
 
 func defaultNotificationSettings() models.NotificationSettings {

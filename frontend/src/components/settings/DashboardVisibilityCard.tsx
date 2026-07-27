@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLanguage } from "../../i18n/language"
 import { api, type DashboardSettings } from "../../lib/api"
-import { Button } from "../ui/button"
 
 const DEFAULT_SETTINGS: DashboardSettings = {
   show_dashboard_card_ip: true,
@@ -9,14 +8,24 @@ const DEFAULT_SETTINGS: DashboardSettings = {
   show_memory_pressure: true,
 }
 
+function normalizeSettings(response: DashboardSettings): DashboardSettings {
+  return {
+    show_dashboard_card_ip: Boolean(response.show_dashboard_card_ip),
+    show_system_pressure: response.show_system_pressure !== false,
+    show_memory_pressure: response.show_memory_pressure !== false,
+  }
+}
+
 export function DashboardVisibilityCard() {
   const { t } = useLanguage()
   const [settings, setSettings] = useState<DashboardSettings>(DEFAULT_SETTINGS)
-  const [savedSettings, setSavedSettings] = useState<DashboardSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const saveGenerationRef = useRef(0)
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
 
   useEffect(() => {
     let cancelled = false
@@ -29,13 +38,8 @@ export function DashboardVisibilityCard() {
         if (cancelled) {
           return
         }
-        const nextValue: DashboardSettings = {
-          show_dashboard_card_ip: Boolean(response.show_dashboard_card_ip),
-          show_system_pressure: response.show_system_pressure !== false,
-          show_memory_pressure: response.show_memory_pressure !== false,
-        }
+        const nextValue = normalizeSettings(response)
         setSettings(nextValue)
-        setSavedSettings(nextValue)
       } catch {
         if (!cancelled) {
           setError(t("settingsPage.dashboardVisibilityUpdateFailed"))
@@ -53,12 +57,6 @@ export function DashboardVisibilityCard() {
     }
   }, [t])
 
-  const hasChanges =
-    savedSettings !== null &&
-    (settings.show_dashboard_card_ip !== savedSettings.show_dashboard_card_ip ||
-      settings.show_system_pressure !== savedSettings.show_system_pressure ||
-      settings.show_memory_pressure !== savedSettings.show_memory_pressure)
-
   const enabledCount = useMemo(
     () =>
       Number(settings.show_dashboard_card_ip) +
@@ -69,32 +67,56 @@ export function DashboardVisibilityCard() {
   const statusLabel = t("settingsPage.dashboardVisibilityEnabledCount", { count: enabledCount, total: 3 })
 
   const updateSetting = (key: keyof DashboardSettings, checked: boolean) => {
-    setSettings((current) => ({ ...current, [key]: checked }))
-    setError(null)
-    setSuccess(null)
-  }
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSaving(true)
-    setError(null)
-    setSuccess(null)
-
-    try {
-      const response = await api.updateDashboardSettings(settings)
-      const nextValue: DashboardSettings = {
-        show_dashboard_card_ip: Boolean(response.show_dashboard_card_ip),
-        show_system_pressure: response.show_system_pressure !== false,
-        show_memory_pressure: response.show_memory_pressure !== false,
-      }
-      setSettings(nextValue)
-      setSavedSettings(nextValue)
-      setSuccess(t("settingsPage.dashboardVisibilitySaved"))
-    } catch {
-      setError(t("settingsPage.dashboardVisibilityUpdateFailed"))
-    } finally {
-      setSaving(false)
+    const previous = settingsRef.current
+    if (previous[key] === checked) {
+      return
     }
+
+    const nextValue: DashboardSettings = { ...previous, [key]: checked }
+    const generation = ++saveGenerationRef.current
+    setSettings(nextValue)
+    settingsRef.current = nextValue
+    setError(null)
+    setSuccess(null)
+    setSaving(true)
+
+    void (async () => {
+      try {
+        const response = await api.updateDashboardSettings(nextValue)
+        if (generation !== saveGenerationRef.current) {
+          return
+        }
+        const saved = normalizeSettings(response)
+        setSettings(saved)
+        settingsRef.current = saved
+        setSuccess(t("settingsPage.dashboardVisibilitySaved"))
+      } catch {
+        if (generation !== saveGenerationRef.current) {
+          return
+        }
+        // Resync from server so a failed write never leaves a divergent local toggle state.
+        try {
+          const response = await api.dashboardSettings()
+          if (generation !== saveGenerationRef.current) {
+            return
+          }
+          const saved = normalizeSettings(response)
+          setSettings(saved)
+          settingsRef.current = saved
+        } catch {
+          if (generation !== saveGenerationRef.current) {
+            return
+          }
+          setSettings(previous)
+          settingsRef.current = previous
+        }
+        setError(t("settingsPage.dashboardVisibilityUpdateFailed"))
+      } finally {
+        if (generation === saveGenerationRef.current) {
+          setSaving(false)
+        }
+      }
+    })()
   }
 
   const toggles: Array<{ key: keyof DashboardSettings; labelKey: string }> = [
@@ -118,7 +140,7 @@ export function DashboardVisibilityCard() {
       {loading ? (
         <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{t("Loading")}...</p>
       ) : (
-        <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
+        <div className="mt-4 space-y-4">
           <div className="space-y-3">
             {toggles.map((item) => (
               <label
@@ -137,22 +159,16 @@ export function DashboardVisibilityCard() {
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="submit"
-              disabled={saving || !hasChanges}
-              className="enterprise-accent-button h-10 rounded-xl px-4 text-sm font-medium"
-            >
-              {saving ? t("settingsPage.dashboardVisibilitySaving") : t("settingsPage.dashboardVisibilitySave")}
-            </Button>
-            {success && <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{success}</p>}
+          <div className="flex flex-wrap items-center gap-3 min-h-5">
+            {saving && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("settingsPage.dashboardVisibilitySaving")}</p>}
+            {!saving && success && <p className="text-xs font-medium text-emerald-600 dark:text-emerald-300">{success}</p>}
             {error && (
               <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-300">
                 {error}
               </p>
             )}
           </div>
-        </form>
+        </div>
       )}
     </section>
   )
