@@ -52,7 +52,7 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 ### Security
 
 - Agent self-update binaries are now verified with Ed25519 signatures alongside the existing SHA-256 hash; the verifier public key is pinned into the agent at build time via `-X github.com/thism-dev/thism/internal/security/release.PublicKeyBase64`, and agents without a pinned key now fail closed (refuse to apply any binary update). Includes a new `thism-sign` CLI for offline key generation and binary signing, and corresponding `make release-keygen` / `make sign-dist` targets.
-- Removed the hard-coded the hard-coded development admin token development admin token from the Makefile and the dev systemd unit. The Makefile dev targets now require a `TOKEN=` value, and the dev systemd unit now requires `/etc/default/thism-dev-server` to be provided rather than falling back to a baked-in default.
+- Removed the hard-coded development admin token from the Makefile and the dev systemd unit. The Makefile dev targets now require a `TOKEN=` value, and the dev systemd unit now requires `/etc/default/thism-dev-server` to be provided rather than falling back to a baked-in default.
 - SQLite database file (and its `-wal` / `-shm` sidecars) are now created with mode `0600` on every store open, preventing other local users from reading admin password hashes, integration tokens, and node metadata.
 
 ### Added
