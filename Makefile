@@ -98,7 +98,7 @@ test:
 # Offline GeoIP bootstrap -------------------------------------------------
 # Downloads IP2Location + MaxMind databases into GEOIP_DIR without putting
 # credentials or vendor DB files into git. See docs/geoip.md.
-GEOIP_DIR ?= /opt/1panel/geo
+GEOIP_DIR ?= /var/lib/thism/geo
 fetch-geoip:
 	GEOIP_DIR="$(GEOIP_DIR)" ./deploy/fetch-geoip-dbs.sh
 

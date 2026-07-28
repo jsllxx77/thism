@@ -14,6 +14,7 @@ frontend/node_modules/
 AGENTS.md
 skills-lock.json
 docs/plans/
+memory/
 .codex
 .omx/
 release.priv.b64

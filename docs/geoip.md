@@ -53,7 +53,7 @@ This installs:
 - `$GEOIP_DIR/IP2LOCATION-LITE-DB1.IPV6.BIN`
 - `$GEOIP_DIR/GeoIP.mmdb`
 
-Default `GEOIP_DIR` is `/opt/1panel/geo`.
+Default `GEOIP_DIR` is `/var/lib/thism/geo`.
 
 ## Runtime wiring
 
@@ -70,10 +70,9 @@ Behavior:
 2. Lookups use the primary first
 3. If primary returns empty, fallback is tried
 4. If flags/env are empty, common paths are auto-detected:
-   - `/opt/1panel/geo/IP2LOCATION-LITE-DB1.IPV6.BIN`
-   - `/opt/1panel/geo/GeoIP.mmdb`
-   - `./geo/...`
    - `/var/lib/thism/geo/...`
+   - `/opt/1panel/geo/...` (legacy compatibility)
+   - `./geo/...`
 
 Missing databases only disable country enrichment; the server still starts.
 
@@ -83,7 +82,7 @@ Mount a host geo directory into the container and point env vars at it, for exam
 
 ```yaml
 volumes:
-  - /opt/1panel/geo:/geo:ro
+  - /var/lib/thism/geo:/geo:ro
 environment:
   THISM_GEOIP_DB: /geo/IP2LOCATION-LITE-DB1.IPV6.BIN
   THISM_GEOIP_DB_FALLBACK: /geo/GeoIP.mmdb

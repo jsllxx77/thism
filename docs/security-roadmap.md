@@ -43,7 +43,7 @@ For history, the following audit findings were resolved in v0.6.0 – v0.6.2. Se
 - Agent self-update downloads now refuse HTTP redirects.
 - Agent HTTP self-update and WSS connections can pin the server certificate SPKI SHA-256 at build time via `SERVER_TLS_SPKI_SHA256`.
 - `.dockerignore` excludes local runtime state, databases, secrets, dependency folders, and build output from Docker contexts.
-- Removed hard-coded `thism2026` admin token from Makefile / dev systemd unit / CONTRIBUTING (v0.6.0).
+- Removed hard-coded the hard-coded development admin token admin token from Makefile / dev systemd unit / CONTRIBUTING (v0.6.0).
 - Ed25519-signed agent self-update with pinned public key at build time, `thism-sign` CLI, and signed agents shipped in the upstream GHCR image (v0.6.0 → v0.6.1).
 - SQLite database (`thism.db` + `-wal` / `-shm` sidecars) chmod'd to 0600 on every open (v0.6.0).
 - CI signing pipeline gated on `THISM_RELEASE_PUBLIC_KEY` / `THISM_RELEASE_PRIVATE_KEY` repository secrets; release fails fast when secrets are missing (v0.6.1).

@@ -43,7 +43,7 @@
 - Agent 自更新下载现在拒绝 HTTP redirect。
 - Agent HTTP 自更新与 WSS 连接支持通过 `SERVER_TLS_SPKI_SHA256` 在编译期固化 server 证书 SPKI SHA-256 pin。
 - `.dockerignore` 已排除本地运行状态、数据库、密钥、依赖目录和构建产物，避免进入 Docker context。
-- 移除 Makefile / dev systemd unit / CONTRIBUTING 中硬编码的 `thism2026` admin token（v0.6.0）。
+- 移除 Makefile / dev systemd unit / CONTRIBUTING 中硬编码的开发管理员令牌（v0.6.0）。
 - Agent 自更新二进制加 Ed25519 签名校验，公钥编译时固化，`thism-sign` CLI，上游 GHCR 镜像携带签名 agent（v0.6.0 → v0.6.1）。
 - 每次打开数据库时把 `thism.db`（含 `-wal`/`-shm` 兄弟文件）chmod 0600（v0.6.0）。
 - CI 签名流水线依赖 `THISM_RELEASE_PUBLIC_KEY` / `THISM_RELEASE_PRIVATE_KEY` 仓库 secret；缺 secret 时 release 直接失败（v0.6.1）。

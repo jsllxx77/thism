@@ -14,8 +14,11 @@ import (
 	maxminddb "github.com/oschwald/maxminddb-golang/v2"
 )
 
-// Default directory used by local 1Panel-style deployments.
-const DefaultDir = "/opt/1panel/geo"
+// DefaultDir is the platform-neutral location for managed GeoIP data.
+const DefaultDir = "/var/lib/thism/geo"
+
+// LegacyDir keeps compatibility with historical 1Panel-style deployments.
+const LegacyDir = "/opt/1panel/geo"
 
 // DefaultDBPath points at the default MaxMind GeoLite2 City database.
 const DefaultDBPath = DefaultDir + "/GeoIP.mmdb"
@@ -24,7 +27,10 @@ const DefaultDBPath = DefaultDir + "/GeoIP.mmdb"
 const DefaultIP2LocationPath = DefaultDir + "/IP2LOCATION-LITE-DB1.IPV6.BIN"
 
 // LegacyMaxMindDBPath keeps the historical MaxMind path name used by local installs.
-const LegacyMaxMindDBPath = DefaultDBPath
+const LegacyMaxMindDBPath = LegacyDir + "/GeoIP.mmdb"
+
+// LegacyIP2LocationPath keeps the historical IP2Location path used by local installs.
+const LegacyIP2LocationPath = LegacyDir + "/IP2LOCATION-LITE-DB1.IPV6.BIN"
 
 // DefaultIP2LocationName and DefaultMaxMindName are the canonical filenames
 // written by deploy/fetch-geoip-dbs.sh and the settings-page updater.
@@ -149,14 +155,11 @@ func OpenBestResolver(explicitPaths ...string) (*Resolver, error) {
 func DefaultCandidatePaths() []string {
 	return []string{
 		DefaultDBPath,
-		LegacyMaxMindDBPath,
-		filepath.Join(DefaultDir, DefaultMaxMindName),
-		filepath.Join(DefaultDir, DefaultIP2LocationName),
 		DefaultIP2LocationPath,
+		LegacyMaxMindDBPath,
+		LegacyIP2LocationPath,
 		filepath.Join("geo", DefaultMaxMindName),
 		filepath.Join("geo", DefaultIP2LocationName),
-		filepath.Join("/var/lib/thism/geo", DefaultMaxMindName),
-		filepath.Join("/var/lib/thism/geo", DefaultIP2LocationName),
 		DefaultMaxMindName,
 		DefaultIP2LocationName,
 	}

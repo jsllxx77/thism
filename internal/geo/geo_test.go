@@ -24,12 +24,12 @@ func TestValidateResolver(t *testing.T) {
 
 func TestNormalizeCountryCode(t *testing.T) {
 	cases := map[string]string{
-		"hk":  "HK",
+		"hk":   "HK",
 		" US ": "US",
-		"-":   "",
-		"--":  "",
-		"ZZ":  "",
-		"USA": "",
+		"-":    "",
+		"--":   "",
+		"ZZ":   "",
+		"USA":  "",
 		"This parameter is unavailable for selected data file. Please upgrade the data file.": "",
 		"": "",
 	}
@@ -45,11 +45,24 @@ func TestDetectDBFormat(t *testing.T) {
 		"/opt/1panel/geo/GeoIP.mmdb":                    dbFormatMaxMind,
 		"/opt/1panel/geo/IP2LOCATION-LITE-DB1.IPV6.BIN": dbFormatIP2Location,
 		"/tmp/IP2LOCATION-LITE-DB1.BIN":                 dbFormatIP2Location,
-		"/tmp/something.unknown":                       dbFormatUnknown,
+		"/tmp/something.unknown":                        dbFormatUnknown,
 	}
 	for path, want := range cases {
 		if got := detectDBFormat(path); got != want {
 			t.Fatalf("detectDBFormat(%q)=%v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestDefaultCandidatePathsPreferGenericDirAndKeepLegacyFallback(t *testing.T) {
+	paths := DefaultCandidatePaths()
+	want := []string{DefaultDBPath, DefaultIP2LocationPath, LegacyMaxMindDBPath, LegacyIP2LocationPath}
+	if len(paths) < len(want) {
+		t.Fatalf("DefaultCandidatePaths() returned %d paths, want at least %d", len(paths), len(want))
+	}
+	for index, path := range want {
+		if paths[index] != path {
+			t.Fatalf("DefaultCandidatePaths()[%d] = %q, want %q", index, paths[index], path)
 		}
 	}
 }
