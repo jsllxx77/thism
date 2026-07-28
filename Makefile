@@ -6,7 +6,7 @@
 
 GO ?= go
 SUDO ?= sudo
-GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/frontend/node_modules/')
+GO_PACKAGES = $(shell $(GO) list ./... | grep -v '/frontend/node_modules/')
 GOCACHE_DIR ?= /tmp/go-build
 PORT ?= 12026
 TOKEN ?=
@@ -30,7 +30,7 @@ build-frontend:
 build-server: build-frontend
 	GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(LDFLAGS)" -o bin/thism-server ./cmd/server
 
-build-agent:
+build-agent: build-frontend
 	GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o bin/thism-agent ./cmd/agent
 	printf "%s\n" "$(VERSION)" > bin/thism-agent.version
 
@@ -46,7 +46,7 @@ validate-release-public-key:
 		exit 1; \
 	fi
 
-build-agent-all: validate-release-public-key
+build-agent-all: build-frontend validate-release-public-key
 	GOOS=linux GOARCH=amd64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o dist/thism-agent-linux-amd64 ./cmd/agent
 	printf "%s\n" "$(VERSION)" > dist/thism-agent-linux-amd64.version
 	GOOS=linux GOARCH=arm64 GOCACHE=$(GOCACHE_DIR) $(GO) build -ldflags "$(AGENT_LDFLAGS)" -o dist/thism-agent-linux-arm64 ./cmd/agent
