@@ -6,8 +6,8 @@ services:
       - "${THISM_PORT:-8080}:8080"
     volumes:
       - thism-data:/data
-      # Host-side offline GeoIP DBs from deploy/fetch-geoip-dbs.sh
-      - ${THISM_GEOIP_HOST_DIR:-/var/lib/thism/geo}:/geo:ro
+      # Writable host-side GeoIP DBs managed by the settings page or fetch script
+      - ${THISM_GEOIP_HOST_DIR:-/var/lib/thism/geo}:/geo
     environment:
       THISM_PORT: "8080"
       THISM_DB: /data/thism.db

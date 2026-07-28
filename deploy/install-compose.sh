@@ -12,6 +12,7 @@ THISM_ADMIN_PASS="${THISM_ADMIN_PASS:-}"
 THISM_TOKEN_SECRET_FILE="${THISM_TOKEN_SECRET_FILE:-./secrets/thism_token}"
 THISM_ADMIN_USER_SECRET_FILE="${THISM_ADMIN_USER_SECRET_FILE:-./secrets/thism_admin_user}"
 THISM_ADMIN_PASS_SECRET_FILE="${THISM_ADMIN_PASS_SECRET_FILE:-./secrets/thism_admin_pass}"
+THISM_GEOIP_HOST_DIR="${THISM_GEOIP_HOST_DIR:-/var/lib/thism/geo}"
 
 RAW_BASE="https://raw.githubusercontent.com/${THISM_GITHUB_REPO}/${THISM_REF}/deploy"
 
@@ -66,6 +67,54 @@ display_secret_path() {
   esac
 }
 
+resolve_host_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    ./*) printf '%s/%s\n' "$THISM_INSTALL_DIR" "${1#./}" ;;
+    *) printf '%s/%s\n' "$THISM_INSTALL_DIR" "$1" ;;
+  esac
+}
+
+prepare_geoip_dir() {
+  local configured_path="$1"
+  local host_path
+  local identity
+  local container_uid
+  local container_gid
+
+  case "/$configured_path/" in
+    *"/../"*) echo "Refusing GeoIP host directory with a parent traversal: $configured_path" >&2; exit 1 ;;
+  esac
+
+  host_path="$(resolve_host_path "$configured_path")"
+  case "$host_path" in
+    ""|/) echo "Refusing to use an unsafe GeoIP host directory: $host_path" >&2; exit 1 ;;
+  esac
+
+  identity="$(docker run --rm --entrypoint sh "$THISM_IMAGE" -c 'printf "%s:%s\n" "$(id -u)" "$(id -g)"')"
+  case "$identity" in
+    *:*) ;;
+    *) echo "Unable to determine the runtime UID/GID for $THISM_IMAGE" >&2; exit 1 ;;
+  esac
+  container_uid="${identity%%:*}"
+  container_gid="${identity##*:}"
+  case "$container_uid" in
+    ""|*[!0-9]*) echo "Invalid runtime UID reported by $THISM_IMAGE: $identity" >&2; exit 1 ;;
+  esac
+  case "$container_gid" in
+    ""|*[!0-9]*) echo "Invalid runtime GID reported by $THISM_IMAGE: $identity" >&2; exit 1 ;;
+  esac
+
+  docker run --rm --user 0:0 --entrypoint sh \
+    -v "$host_path:/geo" "$THISM_IMAGE" \
+    -c "chown $container_uid:$container_gid /geo && chmod 0755 /geo"
+
+  if ! docker run --rm --entrypoint sh -v "$host_path:/geo" "$THISM_IMAGE" -c 'test -w /geo'; then
+    echo "GeoIP directory is not writable by the ThisM container: $host_path" >&2
+    exit 1
+  fi
+}
+
 require_cmd curl
 require_cmd docker
 require_cmd mktemp
@@ -78,6 +127,7 @@ fi
 mkdir -p "$THISM_INSTALL_DIR"
 chmod 700 "$THISM_INSTALL_DIR"
 cd "$THISM_INSTALL_DIR"
+THISM_INSTALL_DIR="$(pwd -P)"
 umask 077
 
 tmp_env="$(mktemp)"
@@ -98,6 +148,7 @@ THISM_ADMIN_USER="${THISM_ADMIN_USER:-admin}"
 THISM_TOKEN_SECRET_FILE="${THISM_TOKEN_SECRET_FILE:-./secrets/thism_token}"
 THISM_ADMIN_USER_SECRET_FILE="${THISM_ADMIN_USER_SECRET_FILE:-./secrets/thism_admin_user}"
 THISM_ADMIN_PASS_SECRET_FILE="${THISM_ADMIN_PASS_SECRET_FILE:-./secrets/thism_admin_pass}"
+THISM_GEOIP_HOST_DIR="${THISM_GEOIP_HOST_DIR:-/var/lib/thism/geo}"
 
 if [ -z "$THISM_TOKEN" ] && [ ! -s "$THISM_TOKEN_SECRET_FILE" ]; then
   THISM_TOKEN="$(random_secret)"
@@ -121,11 +172,13 @@ THISM_PORT=$THISM_PORT
 THISM_TOKEN_SECRET_FILE=$THISM_TOKEN_SECRET_FILE
 THISM_ADMIN_USER_SECRET_FILE=$THISM_ADMIN_USER_SECRET_FILE
 THISM_ADMIN_PASS_SECRET_FILE=$THISM_ADMIN_PASS_SECRET_FILE
+THISM_GEOIP_HOST_DIR=$THISM_GEOIP_HOST_DIR
 EOF
 mv "$tmp_env" .env
 trap - EXIT
 
 docker compose pull
+prepare_geoip_dir "$THISM_GEOIP_HOST_DIR"
 docker compose up -d
 
 echo
@@ -137,4 +190,5 @@ echo "  Admin user: $(display_secret_path "$THISM_ADMIN_USER_SECRET_FILE")"
 echo "  Admin password: $(display_secret_path "$THISM_ADMIN_PASS_SECRET_FILE")"
 echo "  API token: $(display_secret_path "$THISM_TOKEN_SECRET_FILE")"
 echo
+echo "GeoIP data directory: $(resolve_host_path "$THISM_GEOIP_HOST_DIR")"
 echo "Runtime settings are stored in: $THISM_INSTALL_DIR/.env"

@@ -82,13 +82,22 @@ Mount a host geo directory into the container and point env vars at it, for exam
 
 ```yaml
 volumes:
-  - /var/lib/thism/geo:/geo:ro
+  - /var/lib/thism/geo:/geo
 environment:
   THISM_GEOIP_DB: /geo/IP2LOCATION-LITE-DB1.IPV6.BIN
   THISM_GEOIP_DB_FALLBACK: /geo/GeoIP.mmdb
 ```
 
-Fetch the files on the host with `deploy/fetch-geoip-dbs.sh` before `docker compose up`.
+The mount must be writable if database updates will be triggered from the settings page. The one-command `install-compose.sh` installer detects the image UID/GID and prepares `THISM_GEOIP_HOST_DIR` automatically. For a manual Compose deployment, prepare the directory for the official image user before startup:
+
+```bash
+IMAGE=ghcr.io/jsllxx77/thism:latest
+GEO_UID="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+GEO_GID="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+sudo install -d -m 0755 -o "$GEO_UID" -g "$GEO_GID" /var/lib/thism/geo
+```
+
+You can prefetch the files with `deploy/fetch-geoip-dbs.sh`, or enter provider credentials in Settings → Monitoring and update them from the UI after startup.
 
 ## License reminders
 

@@ -38,7 +38,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Configurable metrics retention, defaulting to 30 days with longer reporting options
 - Runtime shadcn/ui theme packages and full frontend skin packages installable from GitHub
 - Prebuilt GHCR image plus Docker Compose deployment path
-- Offline GeoIP country codes (IP2Location / MaxMind) fetched at deploy time, not vendored in git
+- Offline GeoIP country codes (IP2Location / MaxMind) managed from Settings or fetched separately, not vendored in git
 
 ## Quick Start
 
@@ -53,7 +53,8 @@ The installer will:
 1. Create a deployment directory
 2. Download `compose.yaml` and `.env.example`
 3. Generate a random admin password and API token as Docker secret files on first run
-4. Start `thism-server` from `ghcr.io/jsllxx77/thism:latest`
+4. Prepare the writable GeoIP data directory for the container's runtime UID/GID
+5. Start `thism-server` from `ghcr.io/jsllxx77/thism:latest`
 
 Prerequisites:
 

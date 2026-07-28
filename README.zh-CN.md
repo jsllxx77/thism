@@ -38,7 +38,7 @@
 - 可配置指标保留时长，默认 30 天，并支持更长报告窗口
 - 支持从 GitHub 安装运行时 shadcn/ui 主题包和完整前端皮肤包
 - 提供预构建 GHCR 镜像与 Docker Compose 部署方式
-- 支持离线 GeoIP 国家码（IP2Location / MaxMind），部署时通过脚本拉取，不把数据库提交进 Git
+- 支持离线 GeoIP 国家码（IP2Location / MaxMind），可在设置页管理或单独下载，不把数据库提交进 Git
 
 ## 快速开始
 
@@ -53,7 +53,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/jsllxx77/thism/main/deploy/i
 1. 创建部署目录
 2. 下载 `compose.yaml` 和 `.env.example`
 3. 首次运行时把随机管理员密码和 API Token 生成为 Docker secret 文件
-4. 从 `ghcr.io/jsllxx77/thism:latest` 启动 `thism-server`
+4. 按容器实际运行 UID/GID 准备可写的 GeoIP 数据目录
+5. 从 `ghcr.io/jsllxx77/thism:latest` 启动 `thism-server`
 
 前提条件：
 
