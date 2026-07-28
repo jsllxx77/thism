@@ -16,7 +16,7 @@ The git repo ships **code**, not the vendor database files.
 - Redistribution is restricted by vendor licenses
 - Download credentials must stay private
 
-A fresh host therefore needs a one-time (or periodic) fetch step.
+A fresh host therefore needs a one-time database acquisition step, either from the Settings UI or with the fetch script below. The server still starts when no database is installed.
 
 ## Settings UI
 
@@ -57,22 +57,25 @@ Default `GEOIP_DIR` is `/var/lib/thism/geo`.
 
 ## Runtime wiring
 
-`thism-server` accepts:
+For Settings-managed provider selection and database updates, set the writable directory instead of individual database paths:
+
+| Variable / flag | Purpose |
+|---|---|
+| `THISM_GEOIP_DIR` / `--geoip-dir` | Writable directory for provider-managed databases |
+
+The legacy fixed-path mode remains available for existing deployments:
 
 | Variable / flag | Purpose |
 |---|---|
 | `THISM_GEOIP_DB` / `--geoip-db` | Primary database path |
 | `THISM_GEOIP_DB_FALLBACK` / `--geoip-db-fallback` | Optional second database |
 
+Setting either legacy path override bypasses the Settings-managed provider and updater.
+
 Behavior:
 
-1. If both paths are set and readable, both are loaded
-2. Lookups use the primary first
-3. If primary returns empty, fallback is tried
-4. If flags/env are empty, common paths are auto-detected:
-   - `/var/lib/thism/geo/...`
-   - `/opt/1panel/geo/...` (legacy compatibility)
-   - `./geo/...`
+- Managed mode loads the selected provider from `THISM_GEOIP_DIR`. With the default `/var/lib/thism/geo` directory, a missing selected database falls back to the matching file under `/opt/1panel/geo` for compatibility. Database updates still write to the new managed directory.
+- Legacy fixed-path mode loads both readable paths, checks the primary first, and tries the fallback when the primary returns no country code.
 
 Missing databases only disable country enrichment; the server still starts.
 
@@ -84,8 +87,7 @@ Mount a host geo directory into the container and point env vars at it, for exam
 volumes:
   - /var/lib/thism/geo:/geo
 environment:
-  THISM_GEOIP_DB: /geo/IP2LOCATION-LITE-DB1.IPV6.BIN
-  THISM_GEOIP_DB_FALLBACK: /geo/GeoIP.mmdb
+  THISM_GEOIP_DIR: /geo
 ```
 
 The mount must be writable if database updates will be triggered from the settings page. The one-command `install-compose.sh` installer detects the image UID/GID and prepares `THISM_GEOIP_HOST_DIR` automatically. For a manual Compose deployment, prepare the directory for the official image user before startup:

@@ -13,10 +13,12 @@
 
 ```bash
 make build
+mkdir -p geo
 
 THISM_TOKEN=your-admin-token \
 THISM_ADMIN_USER=admin \
 THISM_ADMIN_PASS=strong-password \
+THISM_GEOIP_DIR="$PWD/geo" \
 ./bin/thism-server --port 8080 --db ./thism.db
 ```
 
@@ -40,8 +42,14 @@ printf '%s\n' 'admin' > secrets/thism_admin_user
 printf '%s\n' 'strong-password' > secrets/thism_admin_pass
 chmod 444 secrets/thism_*
 
+IMAGE=ghcr.io/jsllxx77/thism:latest
+GEO_UID="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+GEO_GID="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+sudo install -d -m 0755 -o "$GEO_UID" -g "$GEO_GID" /var/lib/thism/geo
+
 docker run --name thism-server -p 8080:8080 \
   -v thism-data:/data \
+  -v /var/lib/thism/geo:/geo \
   --mount type=bind,src="$PWD/secrets/thism_token",dst=/run/secrets/thism_token,readonly \
   --mount type=bind,src="$PWD/secrets/thism_admin_user",dst=/run/secrets/thism_admin_user,readonly \
   --mount type=bind,src="$PWD/secrets/thism_admin_pass",dst=/run/secrets/thism_admin_pass,readonly \
@@ -50,13 +58,15 @@ docker run --name thism-server -p 8080:8080 \
   -e THISM_TOKEN_FILE=/run/secrets/thism_token \
   -e THISM_ADMIN_USER_FILE=/run/secrets/thism_admin_user \
   -e THISM_ADMIN_PASS_FILE=/run/secrets/thism_admin_pass \
-  ghcr.io/jsllxx77/thism:latest
+  -e THISM_GEOIP_DIR=/geo \
+  "$IMAGE"
 ```
 
 ## 从源码构建 Docker 镜像
 
 ```bash
 docker build -t thism-server .
+IMAGE=thism-server
 mkdir -p secrets
 chmod 700 secrets
 printf '%s\n' 'your-admin-token' > secrets/thism_token
@@ -64,8 +74,13 @@ printf '%s\n' 'admin' > secrets/thism_admin_user
 printf '%s\n' 'strong-password' > secrets/thism_admin_pass
 chmod 444 secrets/thism_*
 
+GEO_UID="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+GEO_GID="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+sudo install -d -m 0755 -o "$GEO_UID" -g "$GEO_GID" /var/lib/thism/geo
+
 docker run -p 8080:8080 \
   -v thism-data:/data \
+  -v /var/lib/thism/geo:/geo \
   --mount type=bind,src="$PWD/secrets/thism_token",dst=/run/secrets/thism_token,readonly \
   --mount type=bind,src="$PWD/secrets/thism_admin_user",dst=/run/secrets/thism_admin_user,readonly \
   --mount type=bind,src="$PWD/secrets/thism_admin_pass",dst=/run/secrets/thism_admin_pass,readonly \
@@ -74,5 +89,6 @@ docker run -p 8080:8080 \
   -e THISM_TOKEN_FILE=/run/secrets/thism_token \
   -e THISM_ADMIN_USER_FILE=/run/secrets/thism_admin_user \
   -e THISM_ADMIN_PASS_FILE=/run/secrets/thism_admin_pass \
-  thism-server
+  -e THISM_GEOIP_DIR=/geo \
+  "$IMAGE"
 ```

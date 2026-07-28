@@ -213,12 +213,26 @@ func (m *Manager) closeLocked() error {
 }
 
 func (m *Manager) pathForProviderLocked(provider string) string {
-	switch provider {
-	case models.GeoIPProviderIP2Location:
-		return filepath.Join(m.dir, DefaultIP2LocationName)
-	default:
-		return filepath.Join(m.dir, DefaultMaxMindName)
+	allowLegacyFallback := filepath.Clean(m.dir) == filepath.Clean(DefaultDir)
+	return managedDatabasePath(m.dir, LegacyDir, provider, allowLegacyFallback)
+}
+
+func managedDatabasePath(dir, legacyDir, provider string, allowLegacyFallback bool) string {
+	name := DefaultMaxMindName
+	if provider == models.GeoIPProviderIP2Location {
+		name = DefaultIP2LocationName
 	}
+
+	managedPath := filepath.Join(dir, name)
+	if _, err := os.Stat(managedPath); err == nil || !allowLegacyFallback {
+		return managedPath
+	}
+
+	legacyPath := filepath.Join(legacyDir, name)
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return managedPath
 }
 
 func (m *Manager) inspectPathLocked(path string) {

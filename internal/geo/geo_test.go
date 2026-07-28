@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -134,5 +135,33 @@ func TestManagerDefaultsToMaxMind(t *testing.T) {
 	_ = manager.ApplySettings(models.GeoIPSettings{Provider: models.GeoIPProviderMaxMind})
 	if got := manager.ResolveCountryCode("8.8.8.8"); got != "" && got != "US" {
 		t.Fatalf("unexpected country code %q", got)
+	}
+}
+
+func TestManagedDatabasePathFallsBackToLegacyOnlyWhenManagedFileIsMissing(t *testing.T) {
+	managedDir := t.TempDir()
+	legacyDir := t.TempDir()
+	managedPath := filepath.Join(managedDir, DefaultMaxMindName)
+	legacyPath := filepath.Join(legacyDir, DefaultMaxMindName)
+
+	if err := os.WriteFile(legacyPath, []byte("legacy"), 0o600); err != nil {
+		t.Fatalf("write legacy database placeholder: %v", err)
+	}
+	if got := managedDatabasePath(managedDir, legacyDir, models.GeoIPProviderMaxMind, true); got != legacyPath {
+		t.Fatalf("managedDatabasePath() = %q, want legacy path %q", got, legacyPath)
+	}
+
+	if err := os.WriteFile(managedPath, []byte("managed"), 0o600); err != nil {
+		t.Fatalf("write managed database placeholder: %v", err)
+	}
+	if got := managedDatabasePath(managedDir, legacyDir, models.GeoIPProviderMaxMind, true); got != managedPath {
+		t.Fatalf("managedDatabasePath() = %q, want managed path %q", got, managedPath)
+	}
+
+	if err := os.Remove(managedPath); err != nil {
+		t.Fatalf("remove managed database placeholder: %v", err)
+	}
+	if got := managedDatabasePath(managedDir, legacyDir, models.GeoIPProviderMaxMind, false); got != managedPath {
+		t.Fatalf("managedDatabasePath() without fallback = %q, want managed path %q", got, managedPath)
 	}
 }

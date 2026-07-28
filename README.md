@@ -89,7 +89,12 @@ printf '%s\n' "admin" > secrets/thism_admin_user
 printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_admin_pass
 chmod 444 secrets/thism_*
 
-# edit .env if you need a different image, host port, or secret file path
+IMAGE=ghcr.io/jsllxx77/thism:latest
+GEO_UID="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+GEO_GID="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+sudo install -d -m 0755 -o "$GEO_UID" -g "$GEO_GID" /var/lib/thism/geo
+
+# edit .env if you need a different image, host port, secret path, or GeoIP directory
 docker compose up -d
 ```
 
@@ -99,18 +104,22 @@ The `.env` file contains runtime settings and secret-file paths. The API token a
 
 Use `cat secrets/thism_admin_user` and `cat secrets/thism_admin_pass` to read the web login credentials.
 
-### Offline GeoIP databases (required on fresh hosts)
+### Optional offline GeoIP country enrichment
 
-The git repo does **not** ship MaxMind / IP2Location database files. After cloning or compose install, fetch offline DBs on the host:
+The server starts normally without a GeoIP database; only country-code enrichment stays disabled. To enable it, open **Settings → Monitoring → IP Geolocation Source**, select a provider, enter its credential, save the settings, and click **Update database**.
+
+You can also prefetch both databases from a source checkout:
 
 ```bash
+git clone --depth 1 https://github.com/jsllxx77/thism.git
+cd thism
 export IP2LOCATION_TOKEN='...'
 export MAXMIND_LICENSE_KEY='...'   # https://www.maxmind.com/en/geolite2/signup
 sudo -E ./deploy/fetch-geoip-dbs.sh
 # or: make fetch-geoip
 ```
 
-See `docs/geoip.md`. Runtime dual-source env vars:
+See `docs/geoip.md`. Use `THISM_GEOIP_DIR` to choose the writable managed database directory. The legacy path overrides below remain available for compatibility, but using either one disables Settings-managed provider selection and database updates:
 
 - `THISM_GEOIP_DB` (primary)
 - `THISM_GEOIP_DB_FALLBACK` (secondary)

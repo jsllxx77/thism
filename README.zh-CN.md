@@ -89,7 +89,12 @@ printf '%s\n' "admin" > secrets/thism_admin_user
 printf '%s\n' "$(openssl rand -hex 32)" > secrets/thism_admin_pass
 chmod 444 secrets/thism_*
 
-# 如需调整镜像、宿主端口或 secret 文件路径，请先编辑 .env
+IMAGE=ghcr.io/jsllxx77/thism:latest
+GEO_UID="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+GEO_GID="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+sudo install -d -m 0755 -o "$GEO_UID" -g "$GEO_GID" /var/lib/thism/geo
+
+# 如需调整镜像、宿主端口、secret 路径或 GeoIP 目录，请先编辑 .env
 docker compose up -d
 ```
 
@@ -99,18 +104,22 @@ docker compose up -d
 
 可以用 `cat secrets/thism_admin_user` 和 `cat secrets/thism_admin_pass` 查看 Web 登录账号密码。
 
-### 离线 GeoIP 数据源（新机器必做）
+### 可选的离线 GeoIP 国家/地区识别
 
-Git 仓库**不包含** MaxMind / IP2Location 数据库文件。新主机从 GitHub 部署后，用密钥在本机拉取离线库：
+没有 GeoIP 数据库时 server 仍会正常启动，只是不补充国家/地区代码。需要启用时，可进入 **设置 → 监控 → IP 定位数据源**，选择数据源、填写对应凭据、保存设置，然后点击 **更新数据库**。
+
+也可以在源码检出目录中预先下载两个数据库：
 
 ```bash
+git clone --depth 1 https://github.com/jsllxx77/thism.git
+cd thism
 export IP2LOCATION_TOKEN='...'
 export MAXMIND_LICENSE_KEY='...'   # https://www.maxmind.com/en/geolite2/signup
 sudo -E ./deploy/fetch-geoip-dbs.sh
 # 或: make fetch-geoip
 ```
 
-详情见 `docs/geoip.md`。server 支持双源：
+详情见 `docs/geoip.md`。使用 `THISM_GEOIP_DIR` 指定可写的托管数据库目录。以下旧版路径变量仅用于兼容；设置任意一个都会停用设置页的数据源选择和数据库更新：
 
 - `THISM_GEOIP_DB`（主）
 - `THISM_GEOIP_DB_FALLBACK`（备）
