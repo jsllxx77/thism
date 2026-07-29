@@ -20,7 +20,7 @@ export default defineConfig([
         'error',
         {
           allowConstantExport: true,
-          allowExportNames: ['useThemeMode', 'buttonVariants', 'badgeVariants', 'getPreferredLanguage', 'useLanguage', 'runThemeConformanceChecks'],
+          allowExportNames: ['useThemeMode', 'buttonVariants', 'badgeVariants', 'getPreferredLanguage', 'useLanguage', 'runThemeConformanceChecks', 'useThemePlugin', 'useThemeRegistry'],
         },
       ],
     },

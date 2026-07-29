@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react"
 import { Navigate, Route, Routes, useNavigate, useOutletContext, useParams } from "react-router-dom"
 import type { AccessMode } from "./lib/api"
 import { AppShell } from "./layout/AppShell"
+import { useThemeRegistry } from "./theme-plugin/runtime"
 import { Dashboard, type DashboardCache } from "./pages/Dashboard"
 
 const NodeDetail = lazy(async () => ({ default: (await import("./pages/NodeDetail")).NodeDetail }))
@@ -82,10 +83,15 @@ function ReportsRoute() {
   )
 }
 
+function PluginBackedAppShell() {
+  const RootShell = useThemeRegistry().shells.RootShell
+  return <RootShell><AppShell /></RootShell>
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
+      <Route element={<PluginBackedAppShell />}>
         <Route index element={<DashboardRoute />} />
         <Route path="/nodes/:nodeId" element={<NodeDetailRoute />} />
         <Route path="/reports" element={<ReportsRoute />} />
