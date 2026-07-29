@@ -1011,6 +1011,28 @@ func TestStoreThemeSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreThemePluginSettingsRoundTrip(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+	settings := models.ThemeSettings{Theme: "classic", PluginSettings: map[string]models.ThemePluginSettings{
+		"default-shadcn": {Version: "1.0.0", Values: map[string]json.RawMessage{"compact": json.RawMessage(`true`), "contentWidth": json.RawMessage(`1320`)}},
+	}}
+	if err := s.UpsertThemeSettings(settings); err != nil {
+		t.Fatalf("UpsertThemeSettings: %v", err)
+	}
+	stored, err := s.GetThemeSettings()
+	if err != nil {
+		t.Fatalf("GetThemeSettings: %v", err)
+	}
+	record := stored.PluginSettings["default-shadcn"]
+	if record.Version != "1.0.0" || string(record.Values["compact"]) != "true" || string(record.Values["contentWidth"]) != "1320" {
+		t.Fatalf("unexpected plugin settings: %#v", stored.PluginSettings)
+	}
+}
+
 func TestStoreNotificationSettingsDefaultDispatcherValues(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {

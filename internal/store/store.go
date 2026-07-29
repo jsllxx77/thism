@@ -614,6 +614,15 @@ func normalizeThemeSettings(settings models.ThemeSettings) models.ThemeSettings 
 	if settings.CustomThemes == nil {
 		settings.CustomThemes = []json.RawMessage{}
 	}
+	if settings.PluginSettings == nil {
+		settings.PluginSettings = map[string]models.ThemePluginSettings{}
+	}
+	for pluginID, record := range settings.PluginSettings {
+		if record.Values == nil {
+			record.Values = map[string]json.RawMessage{}
+			settings.PluginSettings[pluginID] = record
+		}
+	}
 	return settings
 }
 
@@ -622,9 +631,10 @@ func (s *Store) GetThemeSettings() (models.ThemeSettingsView, error) {
 	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, themeSettingsKey).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return models.ThemeSettingsView{
-			Theme:        DefaultThemeName,
-			CustomThemes: []json.RawMessage{},
-			Configured:   false,
+			Theme:          DefaultThemeName,
+			CustomThemes:   []json.RawMessage{},
+			PluginSettings: map[string]models.ThemePluginSettings{},
+			Configured:     false,
 		}, nil
 	}
 	if err != nil {
@@ -634,16 +644,18 @@ func (s *Store) GetThemeSettings() (models.ThemeSettingsView, error) {
 	var settings models.ThemeSettings
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
 		return models.ThemeSettingsView{
-			Theme:        DefaultThemeName,
-			CustomThemes: []json.RawMessage{},
-			Configured:   false,
+			Theme:          DefaultThemeName,
+			CustomThemes:   []json.RawMessage{},
+			PluginSettings: map[string]models.ThemePluginSettings{},
+			Configured:     false,
 		}, nil
 	}
 	settings = normalizeThemeSettings(settings)
 	return models.ThemeSettingsView{
-		Theme:        settings.Theme,
-		CustomThemes: settings.CustomThemes,
-		Configured:   true,
+		Theme:          settings.Theme,
+		CustomThemes:   settings.CustomThemes,
+		PluginSettings: settings.PluginSettings,
+		Configured:     true,
 	}, nil
 }
 

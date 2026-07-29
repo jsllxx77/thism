@@ -29,3 +29,14 @@ export type {
 } from "./contract"
 export { validateThemeBuild } from "./build"
 export type { ThemeBuildInput, ThemeBuildIssue, ThemeBuildIssueCode, ThemeBuildResult } from "./build"
+
+export { migrateThemeSettings, validateThemeSettingValue } from "./settings"
+export type {
+  ThemePluginSettingsRecord,
+  ThemeSettingValidationResult,
+  ThemeSettingValue,
+  ThemeSettingValues,
+  ThemeSettingsMigrationIssue,
+  ThemeSettingsMigrationIssueCode,
+  ThemeSettingsMigrationResult,
+} from "./settings"

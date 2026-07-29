@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react"
+import type { ThemePluginSettingsRecord } from "@thism/theme-sdk"
 
 export type BuiltInThemeName = "classic" | "ocean" | "graphite"
 export type AppThemeName = BuiltInThemeName | `custom:${string}`
@@ -144,6 +145,8 @@ export type AppThemeContextValue = {
   themes: readonly AppThemeDefinition[]
   importThemePackage: (source: string) => ImportedThemeDefinition
   removeTheme: (theme: AppThemeName) => void
+  pluginSettings: Record<string, ThemePluginSettingsRecord>
+  setPluginSettings: (pluginID: string, record: ThemePluginSettingsRecord) => void
 }
 
 export const AppThemeContext = createContext<AppThemeContextValue | undefined>(undefined)

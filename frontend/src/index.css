@@ -1519,3 +1519,19 @@ table td {
     transform: none !important;
   }
 }
+
+
+@layer thism-theme {
+  [data-thism-theme-root][data-thism-theme-compact="true"] {
+    --theme-card-padding: 0.75rem;
+    --theme-panel-padding: 0.75rem;
+    --theme-density-scale: 0.82;
+  }
+  [data-thism-theme-root] #main-content {
+    max-width: var(--thism-plugin-content-width, 1280px);
+    margin-inline: auto;
+  }
+  [data-thism-theme-root][data-thism-theme-navigation="topbar"] {
+    --thism-plugin-navigation-accent: hsl(var(--primary) / 0.08);
+  }
+}

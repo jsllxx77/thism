@@ -287,7 +287,12 @@ const defaultShadcnRegistry: ThemeRegistry = {
       primary: "217 91% 60%",
     },
   },
-  settings: [],
+  settings: [
+    { key: "compact", label: "Compact density", description: "Reduce spacing for information-dense screens.", type: "boolean", default: false },
+    { key: "navigation", label: "Navigation style", description: "Choose the primary navigation arrangement.", type: "enum", default: "sidebar", options: ["sidebar", "topbar"] },
+    { key: "contentWidth", label: "Content width", description: "Set the maximum application content width in pixels.", type: "number", default: 1280, minimum: 960, maximum: 1600, step: 40 },
+    { key: "brandLabel", label: "Brand label", description: "Set the short brand label exposed to the theme shell.", type: "string", default: "thisM", minimumLength: 2, maximumLength: 24, pattern: "^[A-Za-z0-9 -]+$" },
+  ],
 }
 
 export const DEFAULT_SHADCN_PLUGIN: ThemePluginModule = Object.freeze({

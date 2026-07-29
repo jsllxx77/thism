@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net"
@@ -1872,6 +1873,57 @@ func handleGetThemeSettings(w http.ResponseWriter, r *http.Request, s *store.Sto
 	writeJSON(w, http.StatusOK, settings)
 }
 
+func isSafeThemeSettingName(value string, maximum int) bool {
+	if value == "" || len(value) > maximum {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateThemePluginSettings(settings map[string]models.ThemePluginSettings) error {
+	if len(settings) > 32 {
+		return errors.New("plugin_settings exceeds the maximum of 32 themes")
+	}
+	for pluginID, record := range settings {
+		if !isSafeThemeSettingName(pluginID, 128) {
+			return fmt.Errorf("plugin_settings contains invalid plugin id %q", pluginID)
+		}
+		if version := strings.TrimSpace(record.Version); version == "" || len(version) > 64 {
+			return fmt.Errorf("plugin_settings.%s.version is required and must be at most 64 characters", pluginID)
+		}
+		if len(record.Values) > 64 {
+			return fmt.Errorf("plugin_settings.%s.values exceeds the maximum of 64 settings", pluginID)
+		}
+		for key, raw := range record.Values {
+			if !isSafeThemeSettingName(key, 128) {
+				return fmt.Errorf("plugin_settings.%s.values contains invalid key %q", pluginID, key)
+			}
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			var value any
+			if err := decoder.Decode(&value); err != nil {
+				return fmt.Errorf("plugin_settings.%s.values.%s is invalid JSON", pluginID, key)
+			}
+			switch typed := value.(type) {
+			case bool, json.Number:
+			case string:
+				if len(typed) > 4096 {
+					return fmt.Errorf("plugin_settings.%s.values.%s exceeds 4096 characters", pluginID, key)
+				}
+			default:
+				return fmt.Errorf("plugin_settings.%s.values.%s must be a boolean, number, or string", pluginID, key)
+			}
+		}
+	}
+	return nil
+}
+
 func handleUpdateThemeSettings(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	if s == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
@@ -1884,6 +1936,10 @@ func handleUpdateThemeSettings(w http.ResponseWriter, r *http.Request, s *store.
 	}
 	if strings.TrimSpace(reqBody.Theme) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "theme is required"})
+		return
+	}
+	if err := validateThemePluginSettings(reqBody.PluginSettings); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := s.UpsertThemeSettings(reqBody); err != nil {

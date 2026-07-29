@@ -316,9 +316,15 @@ export type DashboardSettings = {
   show_memory_pressure: boolean
 }
 
+export type ThemePluginSettingsRecord = {
+  version: string
+  values: Record<string, boolean | number | string>
+}
+
 export type ThemeSettings = {
   theme: AppThemeName
   custom_themes: AppThemePackage[]
+  plugin_settings?: Record<string, ThemePluginSettingsRecord>
   configured: boolean
 }
 

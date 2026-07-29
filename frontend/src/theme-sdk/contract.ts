@@ -216,6 +216,35 @@ function validateSettings(issues: ThemeContractIssue[], settings: unknown) {
     }
     if (!candidate.label || !["boolean", "enum", "number", "string"].includes(candidate.type ?? "")) {
       issues.push({ code: "invalid-setting", path, message: "Theme setting must have a label and supported type" })
+      return
+    }
+    if (candidate.type === "boolean" && typeof candidate.default !== "boolean") {
+      issues.push({ code: "invalid-setting", path: `${path}.default`, message: "Boolean setting default must be boolean" })
+    }
+    if (candidate.type === "enum") {
+      const options = Array.isArray(candidate.options) ? candidate.options : []
+      if (options.length === 0 || options.some((option) => typeof option !== "string") || new Set(options).size !== options.length || !options.includes(candidate.default as string)) {
+        issues.push({ code: "invalid-setting", path: `${path}.options`, message: "Enum options must be non-empty, unique strings and include the default" })
+      }
+    }
+    if (candidate.type === "number") {
+      const { default: defaultValue, minimum, maximum, step } = candidate
+      const validStep = step === undefined || (Number.isFinite(step) && step > 0)
+      const aligned = step === undefined || (typeof defaultValue === "number" && typeof minimum === "number" && Math.abs((defaultValue - minimum) / step - Math.round((defaultValue - minimum) / step)) < 1e-9)
+      if (![defaultValue, minimum, maximum].every((value) => typeof value === "number" && Number.isFinite(value)) || (minimum as number) > (maximum as number) || (defaultValue as number) < (minimum as number) || (defaultValue as number) > (maximum as number) || !validStep || !aligned) {
+        issues.push({ code: "invalid-setting", path, message: "Number setting must have finite ordered bounds and a valid aligned default" })
+      }
+    }
+    if (candidate.type === "string") {
+      const minimumLength = candidate.minimumLength ?? 0
+      let pattern: RegExp | null = null
+      try { pattern = candidate.pattern ? new RegExp(candidate.pattern) : null } catch { pattern = null }
+      const patternValid = !candidate.pattern || pattern !== null
+      const defaultValue = candidate.default
+      const matches = typeof defaultValue === "string" && (!pattern || pattern.test(defaultValue))
+      if (!Number.isInteger(minimumLength) || !Number.isInteger(candidate.maximumLength) || minimumLength < 0 || (candidate.maximumLength ?? -1) < minimumLength || typeof defaultValue !== "string" || defaultValue.length < minimumLength || defaultValue.length > (candidate.maximumLength ?? -1) || !patternValid || !matches) {
+        issues.push({ code: "invalid-setting", path, message: "String setting must have valid length constraints, pattern, and default" })
+      }
     }
   })
 }

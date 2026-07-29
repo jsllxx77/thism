@@ -3203,6 +3203,47 @@ func TestThemeSettingsRoundTripEndpoints(t *testing.T) {
 	}
 }
 
+func TestThemeSettingsPluginValuesRoundTrip(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+	payload := `{"theme":"classic","custom_themes":[],"plugin_settings":{"default-shadcn":{"version":"1.0.0","values":{"compact":true,"contentWidth":1320,"brandLabel":"Ops"}}}}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/theme", bytes.NewBufferString(payload))
+	putReq.Header.Set("Authorization", "Bearer test-admin-token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp := httptest.NewRecorder()
+	router.ServeHTTP(putResp, putReq)
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", putResp.Code, putResp.Body.String())
+	}
+	var body models.ThemeSettingsView
+	if err := json.Unmarshal(putResp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	record := body.PluginSettings["default-shadcn"]
+	if record.Version != "1.0.0" || string(record.Values["compact"]) != "true" || string(record.Values["contentWidth"]) != "1320" {
+		t.Fatalf("unexpected plugin settings: %#v", body.PluginSettings)
+	}
+}
+
+func TestThemeSettingsRejectNestedPluginValue(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "test-admin-token", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/theme", bytes.NewBufferString(`{"theme":"classic","plugin_settings":{"default-shadcn":{"version":"1.0.0","values":{"unsafe":{"nested":true}}}}}`))
+	req.Header.Set("Authorization", "Bearer test-admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestPublicURLSettingsRoundTripEndpoints(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
