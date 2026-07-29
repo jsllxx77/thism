@@ -2,7 +2,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@thism/theme-sdk": ["./src/theme-sdk/index.ts"],
+      "@thism/theme-sdk/testing": ["./src/theme-sdk/testing.ts"]
     }
   },
   "files": [],
