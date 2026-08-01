@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -457,6 +459,7 @@ func NewRouterWithAuthGeoManagerAndFrontendSkins(s *store.Store, h *hub.Hub, aut
 	}
 
 	r := chi.NewRouter()
+	r.Use(gzipCompression)
 	r.Use(secureHeaders)
 	r.Use(limitRequestBody(maxJSONBodyBytes, map[string]int64{
 		"/api/frontend-skins/install": maxFrontendSkinBodyBytes,
@@ -847,8 +850,114 @@ func redirectWithoutToken(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-func secureHeaders(next http.Handler) http.Handler {
+// gzipCompression transparently compresses text-like responses (JSON, JS,
+// CSS, HTML, SVG, XML) for clients that advertise gzip. Binary downloads
+// (e.g. agent binaries served as application/octet-stream), ranged requests,
+// and WebSocket upgrades are passed through untouched.
+func gzipCompression(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !acceptsGzip(r) || isWebsocketUpgrade(r) || r.Header.Get("Range") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if w.Header().Get("Content-Encoding") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz, status: http.StatusOK}, r)
+	})
+}
+
+func acceptsGzip(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept-Encoding")), "gzip")
+}
+
+func isWebsocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+func gzipableContentType(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if ct == "" {
+		return false
+	}
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	switch ct {
+	case "application/json", "application/javascript", "application/x-javascript", "application/xml",
+		"application/manifest+json", "application/wasm", "image/svg+xml":
+		return true
+	}
+	return false
+}
+
+// gzipResponseWriter decides lazily whether to compress: the decision must
+// wait until the handler has set Content-Type, so binary payloads are never
+// corrupted.
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz          *gzip.Writer
+	status      int
+	compressed  bool
+	wroteHeader bool
+}
+
+func (w *gzipResponseWriter) decide() {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if gzipableContentType(w.Header().Get("Content-Type")) {
+		w.compressed = true
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		w.Header().Del("Content-Length")
+	}
+	w.ResponseWriter.WriteHeader(w.status)
+}
+
+func (w *gzipResponseWriter) WriteHeader(status int) {
+	w.status = status
+	if !w.wroteHeader {
+		w.decide()
+	}
+}
+
+func (w *gzipResponseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.decide()
+	}
+	if w.compressed {
+		return w.gz.Write(p)
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *gzipResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.decide()
+	}
+	if w.compressed {
+		_ = w.gz.Flush()
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *gzipResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func secureHeaders(next http.Handler) http.Handler {	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce, _ := generateHexBytes(16)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -2964,10 +3073,22 @@ func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	)
 	metaResolution := "raw"
 	if use1m {
-		rows, err = s.QueryMetrics1m(nodeID, from, to)
+		// "auto" samples down to the chart point budget; an explicit "1m"
+		// returns every rollup row.
+		if resolution == "auto" {
+			rows, err = s.QueryMetrics1mSampled(nodeID, from, to, chartPointBudget(span))
+		} else {
+			rows, err = s.QueryMetrics1m(nodeID, from, to)
+		}
 		metaResolution = "1m"
 	} else {
-		rows, err = s.QueryMetrics(nodeID, from, to)
+		// "auto" samples down to the chart point budget; an explicit "raw"
+		// returns every sample row.
+		if resolution == "auto" {
+			rows, err = s.QueryMetricsSampled(nodeID, from, to, chartPointBudget(span))
+		} else {
+			rows, err = s.QueryMetrics(nodeID, from, to)
+		}
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -3036,10 +3157,10 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 			return
 		}
 		if needsRollup {
-			if err := s.RollupLatencyResults1m(from, to); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
+			// Never roll up synchronously inside the request path: the rollup
+			// scans and rewrites the whole window across all nodes and would
+			// block every other request on the single SQLite connection.
+			requestAsyncLatencyRollup(s, from, to)
 		}
 		if resolution == "auto" {
 			results, err = s.QueryLatencyResultsByNodeID1mSampled(nodeID, from, to, chartPointBudget(span))
@@ -3072,8 +3193,38 @@ func handleGetLatencyResults(w http.ResponseWriter, r *http.Request, s *store.St
 	})
 }
 
-func redactedLatencyMonitors(monitors []*models.LatencyMonitor) []*models.LatencyMonitor {
-	redacted := make([]*models.LatencyMonitor, 0, len(monitors))
+var (
+	latencyRollupMu      sync.Mutex
+	latencyRollupInFlight bool
+)
+
+// requestAsyncLatencyRollup runs RollupLatencyResults1m in a background
+// goroutine, deduplicating concurrent requests. Rollups scan and rewrite the
+// whole window across all nodes, so they must never run synchronously on the
+// request path: with a single SQLite connection they would block every other
+// API call for seconds.
+func requestAsyncLatencyRollup(s *store.Store, from, to int64) {
+	latencyRollupMu.Lock()
+	if latencyRollupInFlight {
+		latencyRollupMu.Unlock()
+		return
+	}
+	latencyRollupInFlight = true
+	latencyRollupMu.Unlock()
+
+	go func() {
+		defer func() {
+			latencyRollupMu.Lock()
+			latencyRollupInFlight = false
+			latencyRollupMu.Unlock()
+		}()
+		if err := s.RollupLatencyResults1m(from, to); err != nil {
+			log.Printf("latency rollup: on-demand background rollup failed: %v", err)
+		}
+	}()
+}
+
+func redactedLatencyMonitors(monitors []*models.LatencyMonitor) []*models.LatencyMonitor {	redacted := make([]*models.LatencyMonitor, 0, len(monitors))
 	for _, monitor := range monitors {
 		if monitor == nil {
 			continue

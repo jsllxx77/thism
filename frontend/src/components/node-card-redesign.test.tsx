@@ -150,6 +150,31 @@ describe("node card redesign", () => {
     }
   })
 
+  it("keeps CPU and memory values stable without flash animation", () => {
+    vi.useFakeTimers()
+
+    try {
+      const { rerender } = render(<NodeCard node={createNode()} cpu={12.3} memUsed={512} memTotal={1024} />)
+
+      const cpuValue = screen.getByText("12.3%")
+      expect(cpuValue).not.toHaveClass("metric-value--flash")
+
+      rerender(<NodeCard node={createNode()} cpu={21.7} memUsed={512} memTotal={1024} />)
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+
+      act(() => {
+        vi.advanceTimersByTime(360)
+      })
+
+      expect(screen.getByText("21.7%")).not.toHaveClass("metric-value--flash")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("can hide node IP for restricted views", () => {
     render(<NodeCard node={createNode()} showIP={false} />)
 

@@ -2187,3 +2187,121 @@ func dbFileSize(t *testing.T, path string) int64 {
 	}
 	return info.Size()
 }
+
+func TestQueryMetricsSampledKeepsNewestPoint(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: 1700000000}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	const sampleCount = 400
+	const baseTS = int64(1700000010)
+	for i := 0; i < sampleCount; i++ {
+		payload := &models.MetricsPayload{TS: baseTS + int64(i*10), CPU: float64(i)}
+		if err := s.InsertMetrics("node-1", payload); err != nil {
+			t.Fatalf("InsertMetrics %d: %v", i, err)
+		}
+	}
+
+	rows, err := s.QueryMetricsSampled("node-1", 1700000000, baseTS+int64(sampleCount-1)*10, 120)
+	if err != nil {
+		t.Fatalf("QueryMetricsSampled: %v", err)
+	}
+	if len(rows) > 120 {
+		t.Fatalf("expected at most 120 sampled rows, got %d", len(rows))
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected sampled rows")
+	}
+	if rows[len(rows)-1].TS != baseTS+int64(sampleCount-1)*10 {
+		t.Fatalf("expected newest raw sample to be kept, got %d", rows[len(rows)-1].TS)
+	}
+}
+
+func TestQueryMetrics1mSampledBounds(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: 1700000000}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	const baseTS = int64(1700000010)
+	for i := 0; i < 240; i++ {
+		payload := &models.MetricsPayload{TS: baseTS + int64(i*60), CPU: float64(i)}
+		if err := s.InsertMetrics("node-1", payload); err != nil {
+			t.Fatalf("InsertMetrics %d: %v", i, err)
+		}
+	}
+	if err := s.RollupMetrics1m(baseTS, baseTS+240*60); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	rows, err := s.QueryMetrics1mSampled("node-1", baseTS, baseTS+239*60, 100)
+	if err != nil {
+		t.Fatalf("QueryMetrics1mSampled: %v", err)
+	}
+	if len(rows) > 100 {
+		t.Fatalf("expected at most 100 sampled 1m rows, got %d", len(rows))
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected sampled 1m rows")
+	}
+	if rows[len(rows)-1].TS != (baseTS+239*60)/60*60 {
+		t.Fatalf("expected newest 1m bucket to be kept, got %d", rows[len(rows)-1].TS)
+	}
+}
+
+func TestNeedsLatencyResults1mRollupToleratesTrailingGap(t *testing.T) {
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: 1700000000}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	// Raw samples every minute from t=100 through t=1000, but the rollup only
+	// covers through the t=900 bucket (as if the background rollup is trailing
+	// by a minute or two).
+	for ts := int64(100); ts <= 1000; ts += 60 {
+		if err := s.InsertLatencyResult(&models.LatencyMonitorResult{MonitorID: "monitor-1", NodeID: "node-1", TS: ts, Success: true}); err != nil {
+			t.Fatalf("InsertLatencyResult: %v", err)
+		}
+	}
+	if err := s.RollupLatencyResults1m(60, 900); err != nil {
+		t.Fatalf("RollupLatencyResults1m: %v", err)
+	}
+
+	// A sub-2-minute trailing gap must not demand a synchronous rollup.
+	needed, err := s.NeedsLatencyResults1mRollup("node-1", 60, 1000)
+	if err != nil {
+		t.Fatalf("NeedsLatencyResults1mRollup: %v", err)
+	}
+	if needed {
+		t.Fatalf("expected trailing rollup gap under the grace period to be tolerated")
+	}
+
+	// Once raw data extends more than the grace period past the rollup, the
+	// window is considered uncovered again.
+	if err := s.InsertLatencyResult(&models.LatencyMonitorResult{MonitorID: "monitor-1", NodeID: "node-1", TS: 1081, Success: true}); err != nil {
+		t.Fatalf("InsertLatencyResult: %v", err)
+	}
+	needed, err = s.NeedsLatencyResults1mRollup("node-1", 60, 1081)
+	if err != nil {
+		t.Fatalf("NeedsLatencyResults1mRollup: %v", err)
+	}
+	if !needed {
+		t.Fatalf("expected rollup to be needed once the gap exceeds the grace period")
+	}
+}

@@ -38,6 +38,12 @@ const DefaultMetricsRetentionDays = 30
 // skew above the 6-hour query window.
 const RawMetricsRetentionDays = 2
 
+// latencyRollupGraceSeconds is how far the 1-minute latency rollup may trail
+// the newest raw samples before NeedsLatencyResults1mRollup considers the
+// window uncovered. The background rollup advances once per minute, so small
+// trailing gaps are normal and must not trigger on-demand rollups.
+const latencyRollupGraceSeconds = 120
+
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
@@ -1612,7 +1618,12 @@ WHERE node_id = ? AND ts BETWEEN ? AND ?
 
 	expectedMin := (rawMin.Int64 / 60) * 60
 	expectedMax := (rawMax.Int64 / 60) * 60
-	return rollupMin.Int64 > expectedMin || rollupMax.Int64 < expectedMax, nil
+	// The background rollup runs once per minute over a rolling window, so the
+	// newest raw samples always trail the rollup by up to a couple of minutes.
+	// Treat that trailing gap as covered; otherwise every long-range request
+	// would re-trigger a full-window rollup and block the single SQLite
+	// connection.
+	return rollupMin.Int64 > expectedMin+latencyRollupGraceSeconds || rollupMax.Int64 < expectedMax-latencyRollupGraceSeconds, nil
 }
 
 func (s *Store) GetDashboardSettings() (models.DashboardSettings, error) {
@@ -3008,6 +3019,37 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 	return err
 }
 
+func scanMetricsRow(rows *sql.Rows, r *MetricsRow) error {
+	return rows.Scan(
+		&r.TS,
+		&r.CPU,
+		&r.Load1,
+		&r.Load5,
+		&r.Load15,
+		&r.CPUIOWaitPercent,
+		&r.CPUStealPercent,
+		&r.PressureCPUSome,
+		&r.PressureMemorySome,
+		&r.PressureMemoryFull,
+		&r.PressureIOSome,
+		&r.PressureIOFull,
+		&r.MemUsed,
+		&r.MemTotal,
+		&r.SwapUsed,
+		&r.SwapTotal,
+		&r.SwapIn,
+		&r.SwapOut,
+		&r.OOMKills,
+		&r.DiskUsed,
+		&r.DiskTotal,
+		&r.DiskReadBytes,
+		&r.DiskWriteBytes,
+		&r.NetRx,
+		&r.NetTx,
+		&r.UptimeSeconds,
+	)
+}
+
 // QueryMetrics returns metrics rows for a node within the given time range,
 // ordered by ascending timestamp.
 func (s *Store) QueryMetrics(nodeID string, from, to int64) ([]*MetricsRow, error) {
@@ -3030,39 +3072,163 @@ FROM metrics WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 	var result []*MetricsRow
 	for rows.Next() {
 		var r MetricsRow
-		if err := rows.Scan(
-			&r.TS,
-			&r.CPU,
-			&r.Load1,
-			&r.Load5,
-			&r.Load15,
-			&r.CPUIOWaitPercent,
-			&r.CPUStealPercent,
-			&r.PressureCPUSome,
-			&r.PressureMemorySome,
-			&r.PressureMemoryFull,
-			&r.PressureIOSome,
-			&r.PressureIOFull,
-			&r.MemUsed,
-			&r.MemTotal,
-			&r.SwapUsed,
-			&r.SwapTotal,
-			&r.SwapIn,
-			&r.SwapOut,
-			&r.OOMKills,
-			&r.DiskUsed,
-			&r.DiskTotal,
-			&r.DiskReadBytes,
-			&r.DiskWriteBytes,
-			&r.NetRx,
-			&r.NetTx,
-			&r.UptimeSeconds,
-		); err != nil {
+		if err := scanMetricsRow(rows, &r); err != nil {
 			return nil, err
 		}
 		result = append(result, &r)
 	}
 	return result, rows.Err()
+}
+
+// QueryMetricsSampled returns up to maxTimestamps metrics rows for a node,
+// evenly spaced across the window, keeping the last sample of each bucket so
+// cumulative/rate calculations stay meaningful. Used for "auto" resolution
+// where the caller renders to a bounded chart budget.
+func (s *Store) QueryMetricsSampled(nodeID string, from, to int64, maxTimestamps int) ([]*MetricsRow, error) {
+	rows, err := s.db.Query(`
+WITH matching_ts AS (
+    SELECT DISTINCT ts
+    FROM metrics
+    WHERE node_id = ? AND ts BETWEEN ? AND ?
+),
+ranked_ts AS (
+    SELECT
+        ts,
+        ROW_NUMBER() OVER (ORDER BY ts) - 1 AS row_index,
+        COUNT(*) OVER () AS total_count
+    FROM matching_ts
+),
+bucketed_ts AS (
+    SELECT
+        ts,
+        CASE
+            WHEN total_count <= ? THEN row_index
+            ELSE row_index / ((total_count + ? - 1) / ?)
+        END AS bucket_index
+    FROM ranked_ts
+),
+selected_ts AS (
+    SELECT MAX(ts) AS ts
+    FROM bucketed_ts
+    GROUP BY bucket_index
+)
+SELECT m.ts, m.cpu_percent,
+       m.load1, m.load5, m.load15,
+       m.cpu_iowait_percent, m.cpu_steal_percent,
+       m.pressure_cpu_some, m.pressure_memory_some, m.pressure_memory_full, m.pressure_io_some, m.pressure_io_full,
+       m.mem_used, m.mem_total,
+       m.swap_used, m.swap_total, m.swap_in, m.swap_out, m.oom_kills,
+       m.disk_used, m.disk_total, m.disk_read_bytes, m.disk_write_bytes, m.net_rx, m.net_tx, m.uptime_seconds
+FROM selected_ts
+CROSS JOIN metrics m INDEXED BY idx_metrics_node_ts
+WHERE m.node_id = ? AND m.ts = selected_ts.ts
+ORDER BY m.ts`,
+		nodeID, from, to, maxTimestamps, maxTimestamps, maxTimestamps, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*MetricsRow
+	for rows.Next() {
+		var r MetricsRow
+		if err := scanMetricsRow(rows, &r); err != nil {
+			return nil, err
+		}
+		result = append(result, &r)
+	}
+	return result, rows.Err()
+}
+
+func scanMetricsRow1m(rows *sql.Rows, r *MetricsRow) error {
+	var memUsedAvg int64
+	var memTotalMax int64
+	var diskUsedAvg int64
+	var diskTotalMax int64
+	var diskReadMax int64
+	var diskWriteMax int64
+	var netRxMax int64
+	var netTxMax int64
+	var uptimeMax int64
+	var swapUsedAvg int64
+	var swapTotalMax int64
+	var swapInMax int64
+	var swapOutMax int64
+	var oomKillsMax int64
+	if err := rows.Scan(
+		&r.TS,
+		&r.CPU,
+		&r.Load1,
+		&r.Load5,
+		&r.Load15,
+		&r.CPUIOWaitPercent,
+		&r.CPUStealPercent,
+		&r.PressureCPUSome,
+		&r.PressureMemorySome,
+		&r.PressureMemoryFull,
+		&r.PressureIOSome,
+		&r.PressureIOFull,
+		&memUsedAvg,
+		&memTotalMax,
+		&swapUsedAvg,
+		&swapTotalMax,
+		&swapInMax,
+		&swapOutMax,
+		&oomKillsMax,
+		&diskUsedAvg,
+		&diskTotalMax,
+		&diskReadMax,
+		&diskWriteMax,
+		&netRxMax,
+		&netTxMax,
+		&uptimeMax,
+	); err != nil {
+		return err
+	}
+	if memUsedAvg > 0 {
+		r.MemUsed = uint64(memUsedAvg)
+	}
+	if memTotalMax > 0 {
+		r.MemTotal = uint64(memTotalMax)
+	}
+	if swapUsedAvg > 0 {
+		r.SwapUsed = uint64(swapUsedAvg)
+	}
+	if swapTotalMax > 0 {
+		r.SwapTotal = uint64(swapTotalMax)
+	}
+	if swapInMax > 0 {
+		r.SwapIn = uint64(swapInMax)
+	}
+	if swapOutMax > 0 {
+		r.SwapOut = uint64(swapOutMax)
+	}
+	if oomKillsMax > 0 {
+		r.OOMKills = uint64(oomKillsMax)
+	}
+	if diskUsedAvg > 0 {
+		r.DiskUsed = uint64(diskUsedAvg)
+	}
+	if diskTotalMax > 0 {
+		r.DiskTotal = uint64(diskTotalMax)
+	}
+	if diskReadMax > 0 {
+		r.DiskReadBytes = uint64(diskReadMax)
+	}
+	if diskWriteMax > 0 {
+		r.DiskWriteBytes = uint64(diskWriteMax)
+	}
+	if netRxMax > 0 {
+		r.NetRx = uint64(netRxMax)
+	}
+	if netTxMax > 0 {
+		r.NetTx = uint64(netTxMax)
+	}
+	if uptimeMax > 0 {
+		r.UptimeSeconds = uint64(uptimeMax)
+	}
+	return nil
 }
 
 func (s *Store) QueryMetrics1m(nodeID string, from, to int64) ([]*MetricsRow, error) {
@@ -3085,91 +3251,68 @@ FROM metrics_1m WHERE node_id = ? AND ts BETWEEN ? AND ? ORDER BY ts`,
 	var result []*MetricsRow
 	for rows.Next() {
 		var r MetricsRow
-		var memUsedAvg int64
-		var memTotalMax int64
-		var diskUsedAvg int64
-		var diskTotalMax int64
-		var diskReadMax int64
-		var diskWriteMax int64
-		var netRxMax int64
-		var netTxMax int64
-		var uptimeMax int64
-		var swapUsedAvg int64
-		var swapTotalMax int64
-		var swapInMax int64
-		var swapOutMax int64
-		var oomKillsMax int64
-		if err := rows.Scan(
-			&r.TS,
-			&r.CPU,
-			&r.Load1,
-			&r.Load5,
-			&r.Load15,
-			&r.CPUIOWaitPercent,
-			&r.CPUStealPercent,
-			&r.PressureCPUSome,
-			&r.PressureMemorySome,
-			&r.PressureMemoryFull,
-			&r.PressureIOSome,
-			&r.PressureIOFull,
-			&memUsedAvg,
-			&memTotalMax,
-			&swapUsedAvg,
-			&swapTotalMax,
-			&swapInMax,
-			&swapOutMax,
-			&oomKillsMax,
-			&diskUsedAvg,
-			&diskTotalMax,
-			&diskReadMax,
-			&diskWriteMax,
-			&netRxMax,
-			&netTxMax,
-			&uptimeMax,
-		); err != nil {
+		if err := scanMetricsRow1m(rows, &r); err != nil {
 			return nil, err
 		}
-		if memUsedAvg > 0 {
-			r.MemUsed = uint64(memUsedAvg)
-		}
-		if memTotalMax > 0 {
-			r.MemTotal = uint64(memTotalMax)
-		}
-		if swapUsedAvg > 0 {
-			r.SwapUsed = uint64(swapUsedAvg)
-		}
-		if swapTotalMax > 0 {
-			r.SwapTotal = uint64(swapTotalMax)
-		}
-		if swapInMax > 0 {
-			r.SwapIn = uint64(swapInMax)
-		}
-		if swapOutMax > 0 {
-			r.SwapOut = uint64(swapOutMax)
-		}
-		if oomKillsMax > 0 {
-			r.OOMKills = uint64(oomKillsMax)
-		}
-		if diskUsedAvg > 0 {
-			r.DiskUsed = uint64(diskUsedAvg)
-		}
-		if diskTotalMax > 0 {
-			r.DiskTotal = uint64(diskTotalMax)
-		}
-		if diskReadMax > 0 {
-			r.DiskReadBytes = uint64(diskReadMax)
-		}
-		if diskWriteMax > 0 {
-			r.DiskWriteBytes = uint64(diskWriteMax)
-		}
-		if netRxMax > 0 {
-			r.NetRx = uint64(netRxMax)
-		}
-		if netTxMax > 0 {
-			r.NetTx = uint64(netTxMax)
-		}
-		if uptimeMax > 0 {
-			r.UptimeSeconds = uint64(uptimeMax)
+		result = append(result, &r)
+	}
+	return result, rows.Err()
+}
+
+// QueryMetrics1mSampled returns up to maxTimestamps rows from the 1-minute
+// rollup table, evenly spaced across the window, keeping the last sample of
+// each bucket. Used for "auto" resolution on long ranges.
+func (s *Store) QueryMetrics1mSampled(nodeID string, from, to int64, maxTimestamps int) ([]*MetricsRow, error) {
+	rows, err := s.db.Query(`
+WITH matching_ts AS (
+    SELECT DISTINCT ts
+    FROM metrics_1m
+    WHERE node_id = ? AND ts BETWEEN ? AND ?
+),
+ranked_ts AS (
+    SELECT
+        ts,
+        ROW_NUMBER() OVER (ORDER BY ts) - 1 AS row_index,
+        COUNT(*) OVER () AS total_count
+    FROM matching_ts
+),
+bucketed_ts AS (
+    SELECT
+        ts,
+        CASE
+            WHEN total_count <= ? THEN row_index
+            ELSE row_index / ((total_count + ? - 1) / ?)
+        END AS bucket_index
+    FROM ranked_ts
+),
+selected_ts AS (
+    SELECT MAX(ts) AS ts
+    FROM bucketed_ts
+    GROUP BY bucket_index
+)
+SELECT m.ts, m.cpu_avg,
+       m.load1_avg, m.load5_avg, m.load15_avg,
+       m.cpu_iowait_avg, m.cpu_steal_avg,
+       m.pressure_cpu_some_avg, m.pressure_memory_some_avg, m.pressure_memory_full_avg, m.pressure_io_some_avg, m.pressure_io_full_avg,
+       m.mem_used_avg, m.mem_total_max,
+       m.swap_used_avg, m.swap_total_max, m.swap_in_max, m.swap_out_max, m.oom_kills_max,
+       m.disk_used_avg, m.disk_total_max, m.disk_read_max, m.disk_write_max, m.net_rx_max, m.net_tx_max, m.uptime_seconds_max
+FROM selected_ts
+CROSS JOIN metrics_1m m INDEXED BY idx_metrics_1m_node_ts
+WHERE m.node_id = ? AND m.ts = selected_ts.ts
+ORDER BY m.ts`,
+		nodeID, from, to, maxTimestamps, maxTimestamps, maxTimestamps, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*MetricsRow
+	for rows.Next() {
+		var r MetricsRow
+		if err := scanMetricsRow1m(rows, &r); err != nil {
+			return nil, err
 		}
 		result = append(result, &r)
 	}

@@ -3,6 +3,7 @@ package api_test
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -2147,6 +2148,12 @@ func TestGetLatencyResultsAutoUses1mResolutionForLargeRanges(t *testing.T) {
 		}
 	}
 
+	// Pre-roll the window synchronously; on-demand rollups run in the
+	// background and must not be depended on from request paths.
+	if err := s.RollupLatencyResults1m(1699970000, 1700000200); err != nil {
+		t.Fatalf("RollupLatencyResults1m: %v", err)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1699970000&to=1700000200", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	resp := httptest.NewRecorder()
@@ -2215,6 +2222,12 @@ func TestGetLatencyResultsAutoSamplesDenseLargeRanges(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("InsertLatencyResult %d: %v", i, err)
 		}
+	}
+
+	// Pre-roll the window synchronously; on-demand rollups run in the
+	// background and must not be depended on from request paths.
+	if err := s.RollupLatencyResults1m(1700000040, 1702592040); err != nil {
+		t.Fatalf("RollupLatencyResults1m: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/latency-results?from=1700000040&to=1702592040", nil)
@@ -3372,4 +3385,225 @@ func buildAPISkinArchive(t *testing.T, files map[string]string) []byte {
 		t.Fatalf("close zip: %v", err)
 	}
 	return buffer.Bytes()
+}
+
+func TestGetMetricsAutoResolutionSamplesRaw(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	const sampleCount = 400
+	const baseTS = int64(1700000010)
+	for i := 0; i < sampleCount; i++ {
+		payload := &models.MetricsPayload{TS: baseTS + int64(i*10), CPU: float64(i)}
+		if err := s.InsertMetrics("node-1", payload); err != nil {
+			t.Fatalf("InsertMetrics %d: %v", i, err)
+		}
+	}
+
+	// Auto resolution over a sub-6h window must sample the raw table down to
+	// the chart point budget (400 samples, budget 180) while keeping the
+	// newest point so rate/cumulative calculations stay meaningful.
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/metrics?from=1700000000&to=1700004100", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Metrics []store.MetricsRow `json:"metrics"`
+		Meta    struct {
+			Resolution string `json:"resolution"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode metrics response: %v", err)
+	}
+	if body.Meta.Resolution != "raw" {
+		t.Fatalf("expected raw resolution, got %#v", body.Meta)
+	}
+	if len(body.Metrics) == 0 || len(body.Metrics) > 180 {
+		t.Fatalf("expected auto sampling to cap raw points at chart budget, got %d", len(body.Metrics))
+	}
+	if body.Metrics[len(body.Metrics)-1].TS != baseTS+int64(sampleCount-1)*10 {
+		t.Fatalf("expected newest sample to be kept, got %d", body.Metrics[len(body.Metrics)-1].TS)
+	}
+
+	// Explicit raw resolution returns every sample.
+	rawReq := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/metrics?from=1700000000&to=1700004100&resolution=raw", nil)
+	rawReq.Header.Set("Authorization", "Bearer admin-token")
+	rawResp := httptest.NewRecorder()
+	router.ServeHTTP(rawResp, rawReq)
+	if rawResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for raw resolution, got %d: %s", rawResp.Code, rawResp.Body.String())
+	}
+	var rawBody struct {
+		Metrics []store.MetricsRow `json:"metrics"`
+	}
+	if err := json.Unmarshal(rawResp.Body.Bytes(), &rawBody); err != nil {
+		t.Fatalf("decode raw metrics response: %v", err)
+	}
+	if len(rawBody.Metrics) != sampleCount {
+		t.Fatalf("expected all %d raw samples, got %d", sampleCount, len(rawBody.Metrics))
+	}
+}
+
+func TestGetMetricsAutoResolutionSamplesRollup(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	// 5 hours of raw samples at 10s cadence rolls up to ~300 1m rows, which
+	// exceeds the 240-point budget for a >6h span, so auto must sample.
+	const baseTS = int64(1700000010)
+	for i := 0; i < 1800; i++ {
+		payload := &models.MetricsPayload{TS: baseTS + int64(i*10), CPU: float64(i)}
+		if err := s.InsertMetrics("node-1", payload); err != nil {
+			t.Fatalf("InsertMetrics %d: %v", i, err)
+		}
+	}
+	if err := s.RollupMetrics1m(baseTS-60, baseTS+1800*10+59); err != nil {
+		t.Fatalf("RollupMetrics1m: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/metrics?from=1700000000&to=1700022000", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Metrics []store.MetricsRow `json:"metrics"`
+		Meta    struct {
+			Resolution string `json:"resolution"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode metrics response: %v", err)
+	}
+	if body.Meta.Resolution != "1m" {
+		t.Fatalf("expected 1m resolution, got %#v", body.Meta)
+	}
+	if len(body.Metrics) == 0 || len(body.Metrics) > 240 {
+		t.Fatalf("expected auto sampling to cap 1m points at chart budget, got %d", len(body.Metrics))
+	}
+	if body.Metrics[len(body.Metrics)-1].TS != (baseTS+1800*10-1)/60*60 {
+		t.Fatalf("expected newest 1m bucket to be kept, got %d", body.Metrics[len(body.Metrics)-1].TS)
+	}
+
+	// Explicit 1m resolution returns every rollup row.
+	oneMinReq := httptest.NewRequest(http.MethodGet, "/api/nodes/node-1/metrics?from=1700000000&to=1700022000&resolution=1m", nil)
+	oneMinReq.Header.Set("Authorization", "Bearer admin-token")
+	oneMinResp := httptest.NewRecorder()
+	router.ServeHTTP(oneMinResp, oneMinReq)
+	if oneMinResp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for 1m resolution, got %d: %s", oneMinResp.Code, oneMinResp.Body.String())
+	}
+	var oneMinBody struct {
+		Metrics []store.MetricsRow `json:"metrics"`
+	}
+	if err := json.Unmarshal(oneMinResp.Body.Bytes(), &oneMinBody); err != nil {
+		t.Fatalf("decode 1m metrics response: %v", err)
+	}
+	if len(oneMinBody.Metrics) != 300 {
+		t.Fatalf("expected all 300 rollup rows, got %d", len(oneMinBody.Metrics))
+	}
+}
+
+func TestGzipCompressionOfJSONResponses(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	if err := s.UpsertNode(&models.Node{ID: "node-1", Name: "alpha", Token: "token-1", CreatedAt: time.Now().Unix()}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	if enc := resp.Header().Get("Content-Encoding"); enc != "gzip" {
+		t.Fatalf("expected Content-Encoding gzip, got %q", enc)
+	}
+	if resp.Header().Get("Vary") == "" {
+		t.Fatalf("expected Vary: Accept-Encoding header")
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(resp.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open gzip reader: %v", err)
+	}
+	defer zr.Close()
+	decompressed, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
+	var body struct {
+		Nodes []models.Node `json:"nodes"`
+	}
+	if err := json.Unmarshal(decompressed, &body); err != nil {
+		t.Fatalf("decode decompressed payload: %v", err)
+	}
+	if len(body.Nodes) != 1 {
+		t.Fatalf("expected 1 node in decompressed payload, got %d", len(body.Nodes))
+	}
+
+	plainReq := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	plainReq.Header.Set("Authorization", "Bearer admin-token")
+	plainResp := httptest.NewRecorder()
+	router.ServeHTTP(plainResp, plainReq)
+	if enc := plainResp.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("expected no Content-Encoding without Accept-Encoding, got %q", enc)
+	}
+}
+
+func TestGzipCompressionSkipsUpgradeAndRangeRequests(t *testing.T) {
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+	router := api.NewRouter(s, h, "admin-token", nil)
+
+	upgradeReq := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	upgradeReq.Header.Set("Authorization", "Bearer admin-token")
+	upgradeReq.Header.Set("Accept-Encoding", "gzip")
+	upgradeReq.Header.Set("Upgrade", "websocket")
+	upgradeReq.Header.Set("Connection", "Upgrade")
+	upgradeResp := httptest.NewRecorder()
+	router.ServeHTTP(upgradeResp, upgradeReq)
+	if enc := upgradeResp.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("expected no compression for WebSocket upgrade requests, got %q", enc)
+	}
+
+	rangeReq := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	rangeReq.Header.Set("Authorization", "Bearer admin-token")
+	rangeReq.Header.Set("Accept-Encoding", "gzip")
+	rangeReq.Header.Set("Range", "bytes=0-10")
+	rangeResp := httptest.NewRecorder()
+	router.ServeHTTP(rangeResp, rangeReq)
+	if enc := rangeResp.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("expected no compression for range requests, got %q", enc)
+	}
 }

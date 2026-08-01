@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { Cpu, MemoryStick } from "lucide-react"
 import { useLanguage } from "../i18n/language"
 import type { Node } from "../lib/api"
@@ -46,40 +46,8 @@ function MetricBar({ value, hasValue = true }: { value: number; hasValue?: boole
   )
 }
 
-function useValueFlash(value: string | number | null | undefined) {
-  const previous = useRef(value)
-  const [flash, setFlash] = useState(false)
-
-  useEffect(() => {
-    if (previous.current === value) {
-      return undefined
-    }
-
-    const hadPreviousValue = previous.current !== null && previous.current !== undefined
-    previous.current = value
-
-    if (!hadPreviousValue || value === null || value === undefined) {
-      return undefined
-    }
-
-    const startId = window.setTimeout(() => {
-      setFlash(true)
-    }, 0)
-    const endId = window.setTimeout(() => {
-      setFlash(false)
-    }, 360)
-
-    return () => {
-      window.clearTimeout(startId)
-      window.clearTimeout(endId)
-    }
-  }, [value])
-
-  return flash
-}
-
-function metricValueClass(flash: boolean, className = "") {
-  return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${flash ? "metric-value--flash" : ""} ${className}`.trim()
+function metricValueClass(className = "") {
+  return `metric-value tabular-nums text-slate-700 dark:text-slate-200 ${className}`.trim()
 }
 
 function RelativeLastSeenLabel({ lastSeen, offline = false }: { lastSeen: number; offline?: boolean }) {
@@ -139,8 +107,6 @@ export const NodeCard = memo(function NodeCard({
   const netTxTotalLabel = hasNetTxTotal ? formatBytes(netTxTotal) : "—"
   const cpuLabel = hasCpu ? `${cpu.toFixed(1)}%` : t("common.unavailable")
   const memLabel = memPct === null ? t("common.unavailable") : `${memPct.toFixed(1)}%`
-  const cpuFlash = useValueFlash(hasCpu ? Number(cpu.toFixed(1)) : null)
-  const memFlash = useValueFlash(memPct === null ? null : Number(memPct.toFixed(1)))
   const platformLabel = [node.os, node.arch].filter(Boolean).join("/") || t("common.unavailable")
   const subtitle = showIP ? `${node.ip || t("common.unavailable")} · ${platformLabel}` : platformLabel
   const tags = node.tags ?? []
@@ -197,7 +163,7 @@ export const NodeCard = memo(function NodeCard({
                 <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
                   <Cpu className="h-3 w-3" /> {t("dashboard.nodeCard.cpu")}
                 </span>
-                <span className={metricValueClass(cpuFlash)}>{cpuLabel}</span>
+                <span className={metricValueClass()}>{cpuLabel}</span>
               </div>
               <MetricBar value={hasCpu ? Number(cpu.toFixed(1)) : 0} hasValue={hasCpu} />
             </div>
@@ -207,7 +173,7 @@ export const NodeCard = memo(function NodeCard({
                 <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
                   <MemoryStick className="h-3 w-3" /> {t("dashboard.nodeCard.memory")}
                 </span>
-                <span className={metricValueClass(memFlash)}>{memLabel}</span>
+                <span className={metricValueClass()}>{memLabel}</span>
               </div>
               <MetricBar value={memPct === null ? 0 : Number(memPct.toFixed(1))} hasValue={memPct !== null} />
             </div>
@@ -215,11 +181,11 @@ export const NodeCard = memo(function NodeCard({
             <div className={`space-y-1 ${showNetSpeed ? "" : "opacity-60"}`}>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.inboundSpeed")}</span>
-                <span className={metricValueClass(false, "dashboard-net-speed-value")}>↓ {netRxLabel}</span>
+                <span className={metricValueClass("dashboard-net-speed-value")}>↓ {netRxLabel}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.outboundSpeed")}</span>
-                <span className={metricValueClass(false, "dashboard-net-speed-value")}>↑ {netTxLabel}</span>
+                <span className={metricValueClass("dashboard-net-speed-value")}>↑ {netTxLabel}</span>
               </div>
             </div>
 
@@ -227,7 +193,7 @@ export const NodeCard = memo(function NodeCard({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-500 dark:text-slate-400">{t("dashboard.nodeCard.cumulativeTraffic")}</span>
                 <span
-                  className={metricValueClass(false, "dashboard-net-total-value text-right")}
+                  className={metricValueClass("dashboard-net-total-value text-right")}
                   title={
                     hasNetRxTotal || hasNetTxTotal
                       ? `↓ ${netRxTotalLabel} / ↑ ${netTxTotalLabel}`
