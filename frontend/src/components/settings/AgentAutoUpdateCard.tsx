@@ -49,6 +49,10 @@ function needsUpdate(node: Node, manifest: AgentReleaseManifest): boolean {
   return reportedVersion !== targetVersion
 }
 
+function releaseIsSigned(manifest: AgentReleaseManifest): boolean {
+  return (manifest.signature ?? "").trim() !== ""
+}
+
 function updateJobFinished(job: UpdateJobResponse) {
   return job.job.status === "completed" || job.job.status === "failed" || job.job.status === "partial_failed"
 }
@@ -105,7 +109,7 @@ export function AgentAutoUpdateCard({ nodes, onUpdated }: Props) {
 
   const eligibleGroups = useMemo(() => supportedArchOrder.flatMap((arch) => {
     const manifest = releaseState[arch]
-    if (!manifest) {
+    if (!manifest || !releaseIsSigned(manifest)) {
       return []
     }
 
@@ -119,6 +123,20 @@ export function AgentAutoUpdateCard({ nodes, onUpdated }: Props) {
 
     return [{ arch, manifest, nodeIDs }]
   }), [nodes, releaseState])
+
+  const unsignedEligibleNodeCount = useMemo(
+    () => supportedArchOrder.reduce((count, arch) => {
+      const manifest = releaseState[arch]
+      if (!manifest || releaseIsSigned(manifest)) {
+        return count
+      }
+
+      return count + nodes.filter((node) =>
+        node.online && node.os === "linux" && normalizeArch(node.arch) === arch && needsUpdate(node, manifest),
+      ).length
+    }, 0),
+    [nodes, releaseState],
+  )
 
   const eligibleNodeCount = useMemo(
     () => eligibleGroups.reduce((sum, group) => sum + group.nodeIDs.length, 0),
@@ -243,6 +261,11 @@ export function AgentAutoUpdateCard({ nodes, onUpdated }: Props) {
         <div className="mt-4 space-y-3">
           {intervalLabel && (
             <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{intervalLabel}</p>
+          )}
+          {unsignedEligibleNodeCount > 0 && (
+            <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">
+              {t("settingsPage.autoUpdateUnsigned")}
+            </p>
           )}
           <div className="enterprise-inner-surface flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">

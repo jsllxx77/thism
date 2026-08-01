@@ -254,6 +254,7 @@ export const messagesEn = {
       autoUpdateUpdateNow: "Update now",
       autoUpdateUpdatingNow: "Dispatching...",
       autoUpdateNoEligibleNodes: "No eligible online agents are available right now.",
+      autoUpdateUnsigned: "Agent release artifacts are unsigned, so updates are unavailable. Sign the dist agent binaries before dispatching updates.",
       autoUpdateDispatchSuccess: "Queued updates for {count} nodes.",
       autoUpdateDispatchPartial: "Queued updates for {count} nodes. {failed} architecture group failed.",
       autoUpdateDispatchFailed: "Failed to dispatch updates right now.",

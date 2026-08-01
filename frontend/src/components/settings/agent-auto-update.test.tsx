@@ -144,6 +144,34 @@ describe("agent auto update status card", () => {
     expect(createAgentUpdateJobMock).not.toHaveBeenCalled()
   })
 
+  it("blocks immediate updates when release artifacts are unsigned", async () => {
+    const user = userEvent.setup()
+    nodesMock.mockResolvedValue({
+      nodes: [
+        { id: "node-1", name: "alpha", ip: "1.1.1.1", os: "linux", arch: "amd64", agent_version: "old-version", created_at: 0, last_seen: 0, online: true },
+      ],
+    })
+    agentReleaseMock.mockImplementation((_os: string, arch: string) =>
+      Promise.resolve({
+        target_version: arch === "amd64" ? "aaaa1111bbbb" : "cccc2222dddd",
+        download_url: `https://example.com/${arch}`,
+        sha256: arch === "amd64" ? "sha-amd64" : "sha-arm64",
+        signature: "",
+        check_interval_seconds: 1800,
+      }),
+    )
+
+    renderSettings()
+
+    const button = await screen.findByRole("button", { name: "Update now" })
+    expect(button).toBeDisabled()
+    expect(screen.getByRole("alert")).toHaveTextContent("Agent release artifacts are unsigned, so updates are unavailable. Sign the dist agent binaries before dispatching updates.")
+
+    await user.click(button)
+
+    expect(createAgentUpdateJobMock).not.toHaveBeenCalled()
+  })
+
   it("polls dispatched update jobs and shows node level failures", async () => {
     const user = userEvent.setup()
     nodesMock.mockResolvedValue({

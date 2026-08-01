@@ -254,6 +254,7 @@ export const messagesZhCN = {
       autoUpdateUpdateNow: "马上更新",
       autoUpdateUpdatingNow: "下发中...",
       autoUpdateNoEligibleNodes: "当前没有可立即更新的在线 agent。",
+      autoUpdateUnsigned: "agent 发布产物未签名，暂时无法升级。请先为 dist 中的 agent 文件生成 .sig 签名文件。",
       autoUpdateDispatchSuccess: "已为 {count} 个节点下发更新任务。",
       autoUpdateDispatchPartial: "已为 {count} 个节点下发更新任务，另有 {failed} 个架构分组下发失败。",
       autoUpdateDispatchFailed: "当前下发更新任务失败。",
