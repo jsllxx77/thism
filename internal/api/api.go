@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"html/template"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -598,6 +599,10 @@ func NewRouterWithAuthGeoManager(s *store.Store, h *hub.Hub, auth AuthConfig, fr
 
 		r.Post("/api/settings/theme/import", func(w http.ResponseWriter, req *http.Request) {
 			handleImportThemeArchive(w, req)
+		})
+
+		r.Post("/api/settings/theme/github-import", func(w http.ResponseWriter, req *http.Request) {
+			handleImportThemeFromGitHub(w, req)
 		})
 
 		r.Post("/api/nodes/register", func(w http.ResponseWriter, req *http.Request) {
@@ -2062,6 +2067,128 @@ func handleRefreshGeoIPDatabase(w http.ResponseWriter, r *http.Request, geoManag
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func handleImportThemeFromGitHub(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Repository string `json:"repository"`
+	}
+	if !decodeJSONBody(w, r, &body) {
+		return
+	}
+	parts, err := parseGitHubThemeRepository(body.Repository)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	releaseURL := "https://api.github.com/repos/" + parts[0] + "/" + parts[1] + "/releases/latest"
+	releaseRequest, err := http.NewRequestWithContext(r.Context(), http.MethodGet, releaseURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid GitHub theme repository"})
+		return
+	}
+	releaseRequest.Header.Set("Accept", "application/vnd.github+json")
+	releaseResponse, err := client.Do(releaseRequest)
+	if err != nil || !releaseResponseOk(releaseResponse) {
+		if releaseResponse != nil {
+			releaseResponse.Body.Close()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "unable to load the latest GitHub theme release"})
+		return
+	}
+	var release struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			URL                string `json:"url"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	err = json.NewDecoder(releaseResponse.Body).Decode(&release)
+	releaseResponse.Body.Close()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid GitHub release response"})
+		return
+	}
+	asset := selectThemeArchiveAsset(release.Assets)
+	if asset.Name == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no theme zip archive found in the latest GitHub release"})
+		return
+	}
+
+	downloadURL := asset.URL
+	if downloadURL == "" {
+		downloadURL = asset.BrowserDownloadURL
+	}
+	downloadRequest, err := http.NewRequestWithContext(r.Context(), http.MethodGet, downloadURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid GitHub theme asset URL"})
+		return
+	}
+	downloadRequest.Header.Set("Accept", "application/octet-stream")
+	downloadResponse, err := client.Do(downloadRequest)
+	if err != nil || !releaseResponseOk(downloadResponse) {
+		if downloadResponse != nil {
+			downloadResponse.Body.Close()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "unable to download the GitHub theme release archive"})
+		return
+	}
+	defer downloadResponse.Body.Close()
+	archive, err := io.ReadAll(io.LimitReader(downloadResponse.Body, maxThemeArchiveBodyBytes+1))
+	if err != nil || int64(len(archive)) > maxThemeArchiveBodyBytes {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "GitHub theme archive is too large or unreadable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"filename": asset.Name, "data": base64.StdEncoding.EncodeToString(archive)})
+}
+
+func parseGitHubThemeRepository(input string) ([2]string, error) {
+	var result [2]string
+	u, err := url.Parse(strings.TrimSpace(input))
+	if err != nil || u.Scheme != "https" || strings.ToLower(u.Hostname()) != "github.com" {
+		return result, errors.New("enter a GitHub theme repository URL")
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(parts[0]+parts[1], "?#") {
+		return result, errors.New("enter a GitHub theme repository URL")
+	}
+	parts[1] = strings.TrimSuffix(parts[1], ".git")
+	result[0], result[1] = parts[0], parts[1]
+	return result, nil
+}
+
+func releaseResponseOk(response *http.Response) bool {
+	return response != nil && response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices
+}
+
+func selectThemeArchiveAsset(assets []struct {
+	Name               string `json:"name"`
+	URL                string `json:"url"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}) (asset struct {
+	Name               string `json:"name"`
+	URL                string `json:"url"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}) {
+	bestPriority := 99
+	for _, candidate := range assets {
+		lower := strings.ToLower(candidate.Name)
+		if !strings.HasSuffix(lower, ".zip") {
+			continue
+		}
+		priority := 2
+		if strings.HasSuffix(lower, ".thism-theme.zip") {
+			priority = 0
+		} else if strings.HasSuffix(lower, ".theme.zip") {
+			priority = 1
+		}
+		if priority < bestPriority {
+			bestPriority, asset = priority, candidate
+		}
+	}
+	return asset
 }
 
 func handleImportThemeArchive(w http.ResponseWriter, r *http.Request) {

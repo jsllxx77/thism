@@ -141,6 +141,7 @@ export type AppThemeContextValue = {
   theme: AppThemeName
   themes: readonly AppThemeDefinition[]
   importThemePackage: (source: string) => ImportedThemeDefinition
+  setTheme: (theme: AppThemeName) => void
 }
 
 export const AppThemeContext = createContext<AppThemeContextValue | undefined>(undefined)

@@ -343,6 +343,7 @@ export const messagesEn = {
       themeImportOnlyHint: "Themes are changed by importing a new GitHub release or uploading another archive.",
       themeInstalledCount: "{count} themes",
       themeActiveBadge: "Active",
+      themeUseButton: "Use theme",
       themeSourceBuiltIn: "Built-in",
       themeSourceCustom: "Custom",
       themeBuiltInDescription: "Bundled with thisM and kept as the stable recovery baseline.",

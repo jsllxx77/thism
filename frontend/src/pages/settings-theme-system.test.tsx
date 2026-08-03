@@ -19,6 +19,7 @@ const updateDashboardSettingsMock = vi.fn()
 const themeSettingsMock = vi.fn()
 const updateThemeSettingsMock = vi.fn()
 const importThemeArchiveMock = vi.fn()
+const importThemeFromGitHubMock = vi.fn()
 const notificationSettingsMock = vi.fn()
 const updateNotificationSettingsMock = vi.fn()
 const versionMetaMock = vi.fn()
@@ -38,6 +39,7 @@ vi.mock("../lib/api", () => ({
     themeSettings: (...args: unknown[]) => themeSettingsMock(...args),
     updateThemeSettings: (...args: unknown[]) => updateThemeSettingsMock(...args),
     importThemeArchive: (...args: unknown[]) => importThemeArchiveMock(...args),
+    importThemeFromGitHub: (...args: unknown[]) => importThemeFromGitHubMock(...args),
     notificationSettings: (...args: unknown[]) => notificationSettingsMock(...args),
     updateNotificationSettings: (...args: unknown[]) => updateNotificationSettingsMock(...args),
     versionMeta: (...args: unknown[]) => versionMetaMock(...args),
@@ -126,6 +128,7 @@ describe("settings theme system", () => {
     themeSettingsMock.mockReset()
     updateThemeSettingsMock.mockReset()
     importThemeArchiveMock.mockReset()
+    importThemeFromGitHubMock.mockReset()
     notificationSettingsMock.mockReset()
     updateNotificationSettingsMock.mockReset()
     versionMetaMock.mockReset()
@@ -142,6 +145,7 @@ describe("settings theme system", () => {
     themeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: false })
     updateThemeSettingsMock.mockResolvedValue({ theme: "classic", custom_themes: [], configured: true })
     importThemeArchiveMock.mockResolvedValue({ theme: auroraThemePackage })
+    importThemeFromGitHubMock.mockResolvedValue({ filename: "aurora-command.thism-theme.zip", data: "AQID" })
     notificationSettingsMock.mockResolvedValue({
       enabled: false,
       channel: "telegram",
@@ -194,27 +198,15 @@ describe("settings theme system", () => {
     expect(await screen.findByText("Imported and applied Aurora Command.")).toBeInTheDocument()
   })
 
-  it("imports the latest GitHub release zip", async () => {
-    const fetchMock = vi.spyOn(window, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === "https://api.github.com/repos/acme/thism-themes/releases/latest") {
-        return new Response(JSON.stringify({
-          assets: [{ name: "aurora-command.thism-theme.zip", url: "https://api.github.com/assets/1", browser_download_url: "https://github.com/acme/theme.zip" }],
-        }))
-      }
-      if (url === "https://api.github.com/assets/1") return new Response(new Uint8Array([1, 2, 3]))
-      return new Response("not found", { status: 404 })
-    })
-
+  it("imports the latest GitHub release zip through the server proxy", async () => {
     const user = userEvent.setup()
     renderSettings()
     await user.type(await screen.findByLabelText("GitHub theme repository"), "https://github.com/acme/thism-themes")
     await user.click(screen.getByRole("button", { name: "Import release archive" }))
 
-    await waitFor(() => expect(importThemeArchiveMock).toHaveBeenCalledWith("aurora-command.thism-theme.zip", "AQID"))
+    await waitFor(() => expect(importThemeFromGitHubMock).toHaveBeenCalledWith("https://github.com/acme/thism-themes"))
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("custom:aurora-command"))
     expect(await screen.findByText("Imported and applied Aurora Command.")).toBeInTheDocument()
-    fetchMock.mockRestore()
   })
 
   it("reports invalid theme archives without changing the current theme", async () => {

@@ -328,6 +328,11 @@ export type ThemeArchiveImportResponse = {
   theme: AppThemePackage
 }
 
+export type ThemeArchiveSource = {
+  filename: string
+  data: string
+}
+
 export type PublicURLSettings = {
   public_url: string
 }
@@ -540,6 +545,11 @@ export const api = {
     req<ThemeArchiveImportResponse>("/api/settings/theme/import", {
       method: "POST",
       body: JSON.stringify({ name, data }),
+    }),
+  importThemeFromGitHub: (repository: string) =>
+    req<ThemeArchiveSource>("/api/settings/theme/github-import", {
+      method: "POST",
+      body: JSON.stringify({ repository }),
     }),
   publicURLSettings: () => req<PublicURLSettings>("/api/settings/public-url"),
   updatePublicURLSettings: (settings: PublicURLSettings) =>

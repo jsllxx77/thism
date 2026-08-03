@@ -8,7 +8,6 @@ import { useLanguage } from "../../i18n/language"
 import { cn } from "../../lib/utils"
 import { api } from "../../lib/api"
 import { type AppThemeDefinition, useAppTheme } from "../../theme/theme-context"
-import { loadThemePackageFromGitHub } from "../../theme/theme-repository"
 
 function getThemeLabel(theme: AppThemeDefinition, labels: Record<string, string>) {
   return theme.source === "built-in" ? labels[theme.labelKey] : theme.label
@@ -43,7 +42,7 @@ async function fileToBase64(file: File) {
 
 export function ThemeSystemCard() {
   const { messages, t } = useLanguage()
-  const { theme, themes, importThemePackage } = useAppTheme()
+  const { theme, themes, importThemePackage, setTheme } = useAppTheme()
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [repositoryUrl, setRepositoryUrl] = useState("")
@@ -91,7 +90,7 @@ export function ThemeSystemCard() {
     setImportingRepository(true)
 
     try {
-      const archive = await loadThemePackageFromGitHub(repositoryUrl)
+      const archive = await api.importThemeFromGitHub(repositoryUrl)
       await importArchive(archive.filename, archive.data)
       setRepositoryUrl("")
     } catch (repositoryError) {
@@ -156,6 +155,15 @@ export function ThemeSystemCard() {
                         <Badge variant="outline" className="border-border text-muted-foreground">
                           {option.source === "custom" ? t("settingsPage.themeSourceCustom") : t("settingsPage.themeSourceBuiltIn")}
                         </Badge>
+                        {!active && <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto h-8 rounded-lg px-3 text-xs"
+                          onClick={() => setTheme(option.name)}
+                        >
+                          {t("settingsPage.themeUseButton")}
+                        </Button>}
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {getThemeDescription(option, option.source === "custom" ? t("settingsPage.themeSourceCustom") : t("settingsPage.themeBuiltInDescription"))}

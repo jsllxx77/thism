@@ -343,6 +343,7 @@ export const messagesZhCN = {
       themeImportOnlyHint: "主题只能通过导入新的 GitHub Release 或上传其他压缩包更改。",
       themeInstalledCount: "{count} 个主题",
       themeActiveBadge: "当前",
+      themeUseButton: "使用主题",
       themeSourceBuiltIn: "内置",
       themeSourceCustom: "自定义",
       themeBuiltInDescription: "随 thisM 内置，并作为稳定的恢复基线保留。",

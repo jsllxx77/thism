@@ -91,7 +91,12 @@ export function AppThemeProvider({ children }: Props) {
     setThemeState(imported.name)
     return imported
   }, [])
-  const value = useMemo(() => ({ theme: effectiveTheme, themes, importThemePackage }),
-    [effectiveTheme, importThemePackage, themes])
+  const setTheme = useCallback((nextTheme: AppThemeName) => {
+    if (!themes.some((option) => option.name === nextTheme)) return
+    localThemeChanged.current = true
+    setThemeState(nextTheme)
+  }, [themes])
+  const value = useMemo(() => ({ theme: effectiveTheme, themes, importThemePackage, setTheme }),
+    [effectiveTheme, importThemePackage, setTheme, themes])
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>
 }
