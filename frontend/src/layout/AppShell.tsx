@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { BarChart3, FileText, Languages, LogIn, Moon, MoreHorizontal, Palette, RefreshCw, Settings2, Sun } from "lucide-react"
+import { BarChart3, FileText, Languages, LogIn, Moon, MoreHorizontal, RefreshCw, Settings2, Sun } from "lucide-react"
 import { api, type AccessMode } from "../lib/api"
 import { Button } from "../components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui/select"
 import { RouteContainer } from "./RouteContainer"
 import { useThemeMode } from "../theme/mode"
-import { type AppThemeDefinition, type AppThemeName, useAppTheme } from "../theme/theme-context"
 import { useLanguage } from "../i18n/language"
 import type { DashboardCache } from "../pages/Dashboard"
-
-function getThemeLabel(theme: AppThemeDefinition, labels: Record<string, string>) {
-  return theme.source === "built-in" ? labels[theme.labelKey] : theme.label
-}
 
 function ShellLoadingState() {
   return (
@@ -26,7 +20,6 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode, toggleMode } = useThemeMode()
-  const { theme, setTheme, themes } = useAppTheme()
   const { messages, labelForLanguageToggle, toggleLanguage } = useLanguage()
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
@@ -46,10 +39,6 @@ export function AppShell() {
       : onRootPage
         ? messages.shell.pageTitles.dashboard
         : messages.shell.pageTitles.notFound
-  const currentTheme = themes.find((option) => option.name === theme) ?? themes[0]
-  const currentThemeLabel = getThemeLabel(currentTheme, messages.shell.themePicker)
-  const selectTheme = (value: string) => setTheme(value as AppThemeName)
-
   useEffect(() => {
     let active = true
 
@@ -215,36 +204,6 @@ export function AppShell() {
                     <span>{messages.shell.actions.openSettings}</span>
                   </button>
                 )}
-                <div className="my-2 h-px bg-slate-200 dark:bg-slate-800" />
-                <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                  {messages.shell.themePicker.label}
-                </div>
-                <div className="grid gap-1">
-                  {themes.map((option) => {
-                    const active = option.name === theme
-                    return (
-                      <button
-                        key={option.name}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={active}
-                        onClick={() => {
-                          setTheme(option.name)
-                          setMobileActionsOpen(false)
-                        }}
-                        className={`flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors ${
-                          active
-                            ? "bg-slate-100 text-slate-950 dark:bg-slate-900 dark:text-slate-50"
-                            : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
-                        }`}
-                      >
-                        <span className="h-3 w-3 shrink-0 rounded-full border border-slate-300 dark:border-slate-700" style={{ backgroundColor: option.accent }} aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">{getThemeLabel(option, messages.shell.themePicker)}</span>
-                        {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden />}
-                      </button>
-                    )
-                  })}
-                </div>
               </div>
             )}
           </div>
@@ -275,37 +234,6 @@ export function AppShell() {
             >
               {labelForLanguageToggle}
             </Button>
-            <Select value={theme} onValueChange={selectTheme}>
-              <SelectTrigger
-                aria-label={messages.shell.themePicker.label}
-                title={currentThemeLabel}
-                className="h-11 w-[3.25rem] border-border bg-card px-2 text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-ring sm:h-9 sm:w-36 sm:px-3"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <Palette className="h-4 w-4 shrink-0" aria-hidden />
-                  <span
-                    className="hidden h-2.5 w-2.5 shrink-0 rounded-full border border-border sm:inline-block"
-                    style={{ backgroundColor: currentTheme.accent }}
-                    aria-hidden
-                  />
-                  <span className="hidden truncate sm:inline">{currentThemeLabel}</span>
-                </span>
-              </SelectTrigger>
-              <SelectContent align="end">
-                {themes.map((option) => (
-                  <SelectItem key={option.name} value={option.name}>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full border border-border"
-                        style={{ backgroundColor: option.accent }}
-                        aria-hidden
-                      />
-                      {getThemeLabel(option, messages.shell.themePicker)}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button
               type="button"
               variant="outline"

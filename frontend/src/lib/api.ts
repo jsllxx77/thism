@@ -316,19 +316,17 @@ export type DashboardSettings = {
   show_memory_pressure: boolean
 }
 
-export type ThemePluginSettingsRecord = {
-  version: string
-  values: Record<string, boolean | number | string>
-}
-
 export type ThemeSettings = {
   theme: AppThemeName
   custom_themes: AppThemePackage[]
-  plugin_settings?: Record<string, ThemePluginSettingsRecord>
   configured: boolean
 }
 
 export type ThemeSettingsUpdate = Omit<ThemeSettings, "configured">
+
+export type ThemeArchiveImportResponse = {
+  theme: AppThemePackage
+}
 
 export type PublicURLSettings = {
   public_url: string
@@ -390,32 +388,6 @@ export type DispatcherRuntimeStats = {
   enqueued: number
   processed: number
   dropped: number
-}
-
-export type FrontendSkinSource = "built-in" | "custom"
-
-export type FrontendSkin = {
-  id: string
-  name: string
-  description?: string
-  source: FrontendSkinSource
-  entry: string
-  api_version: string
-  preview?: string
-}
-
-export type FrontendSkinsResponse = {
-  active_skin_id: string
-  skins: FrontendSkin[]
-}
-
-export type FrontendSkinInstallResponse = {
-  active_skin_id: string
-  skin: FrontendSkin
-}
-
-export type FrontendSkinSelectResponse = {
-  active_skin_id: string
 }
 
 export type AvailabilityReportRange = {
@@ -564,6 +536,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
+  importThemeArchive: (name: string, data: string) =>
+    req<ThemeArchiveImportResponse>("/api/settings/theme/import", {
+      method: "POST",
+      body: JSON.stringify({ name, data }),
+    }),
   publicURLSettings: () => req<PublicURLSettings>("/api/settings/public-url"),
   updatePublicURLSettings: (settings: PublicURLSettings) =>
     req<PublicURLSettings>("/api/settings/public-url", {
@@ -580,26 +557,6 @@ export const api = {
     req<TestNotificationResponse>("/api/settings/notifications/test", {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
-  frontendSkins: () => req<FrontendSkinsResponse>("/api/frontend-skins"),
-  installFrontendSkinArchive: (name: string, data: string) =>
-    req<FrontendSkinInstallResponse>("/api/frontend-skins/install", {
-      method: "POST",
-      body: JSON.stringify({ source: "archive", name, data }),
-    }),
-  installFrontendSkinFromGitHub: (url: string) =>
-    req<FrontendSkinInstallResponse>("/api/frontend-skins/install", {
-      method: "POST",
-      body: JSON.stringify({ source: "github", url }),
-    }),
-  selectFrontendSkin: (id: string) =>
-    req<FrontendSkinSelectResponse>("/api/frontend-skins/select", {
-      method: "POST",
-      body: JSON.stringify({ id }),
-    }),
-  deleteFrontendSkin: (id: string) =>
-    req<{ ok: boolean; active_skin_id: string }>(`/api/frontend-skins/${encodeURIComponent(id)}`, {
-      method: "DELETE",
     }),
   versionMeta: () => req<VersionMeta>("/api/meta/version"),
   dispatcherRuntimeStats: () => req<DispatcherRuntimeStats>("/api/meta/dispatcher"),

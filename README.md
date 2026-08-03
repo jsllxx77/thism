@@ -36,7 +36,7 @@ Lightweight self-hosted server monitoring. One binary, zero external dependencie
 - Built-in ICMP, TCP, and HTTP latency monitoring from selected nodes
 - Node detail diagnostics for load, CPU steal/I/O wait, pressure, swap/OOM, and embedded NVMe/ATA SMART disk health without extra node packages
 - Configurable metrics retention, defaulting to 30 days with longer reporting options
-- Runtime shadcn/ui theme packages and full frontend skin packages installable from GitHub
+- Supports importing custom theme packages from a GitHub release archive or a local zip file
 - Prebuilt GHCR image plus Docker Compose deployment path
 - Offline GeoIP country codes (IP2Location / MaxMind) managed from Settings or fetched separately, not vendored in git
 
@@ -201,161 +201,37 @@ To change retention:
 
 Changes apply immediately and prune metric rows older than the selected period. Reports and long-range node detail charts depend on this retained history.
 
-## Themes and Frontend Skins
+## Themes
 
-The current ThisM appearance system has three layers:
+The ThisM appearance system keeps `Classic` as the only built-in theme and stable recovery baseline. Custom themes use the bundled React frontend and replace its semantic shadcn/ui tokens and supported appearance values.
 
-- Built-in themes are `Classic`, `Ocean`, and `Graphite`. They share the same dashboard layout and card geometry while keeping different color, density, and control treatments.
-- Runtime theme packages keep the built-in React frontend and replace its shadcn/ui semantic tokens, card/panel radius, density, typography, surfaces, navigation treatment, and shadows.
-- Frontend skin packages install a complete alternative frontend as a zip archive with its own `index.html`, CSS, and JavaScript.
-
-Install them from the web UI:
-
-1. Open `Settings`.
-2. Open `Appearance`.
-3. Use `Theme System` for theme JSON files or GitHub theme repositories.
-4. Use `Frontend Skins` for skin zip files or GitHub skin repositories.
-
-Runtime theme packages are stored in the browser's local storage. They are best for changing how the bundled shadcn/ui dashboard looks without replacing the application. Frontend skins are stored by the server and are the right option when you need a fully custom UI.
-
-Example runtime theme repository:
-
-```text
-https://github.com/jsllxx77/thism-shadcn-operations-theme
-```
-
-Paste that URL into `Settings` -> `Appearance` -> `Theme System` -> `GitHub theme repository` to install the Shadcn Operations theme. ThisM loads the latest release theme asset when one exists, otherwise it falls back to a recognized theme JSON file in the repository.
+The `Settings` -> `Appearance` page shows the current theme and theme list. A theme can only be changed by importing a GitHub repository's latest release archive or uploading a local theme zip package.
 
 ### Build a Theme Package
 
-A theme package is a JSON file with `type: "thism-theme"` and `version: 1`. The `id` must use lowercase letters, numbers, and hyphens after normalization, and cannot be `classic`, `ocean`, or `graphite`.
+A theme package is a `.zip` archive with `thism-theme.json` at the archive root. The manifest must use `type: "thism-theme"` and `version: 1`; its normalized ID cannot be `classic`. Archives are limited to 32 MiB compressed, 96 MiB extracted, and 2048 files.
 
-The GitHub importer accepts a direct raw/blob/release URL, or a repository URL. Repository imports look for the latest release asset first, then these repository paths: `thism-theme.json`, `.thism-theme.json`, `theme.json`, `themes/thism-theme.json`, and `themes/theme.json`. Release assets are accepted when named `thism-theme.json`, `theme.json`, or `*.thism-theme.json`.
+The manifest contains light and dark semantic tokens. The required core tokens are `background`, `foreground`, `card`, `card-foreground`, `primary`, `primary-foreground`, `border`, `input`, and `ring`. Optional tokens include `secondary`, `muted`, `accent`, `destructive`, `popover`, `chart-1` through `chart-5`, and `sidebar-*`.
 
-Minimal package:
+The optional `appearance` object supports radius and padding lengths, safe font-family strings, shadows, density (`compact`, `comfortable`, or `spacious`), surface (`solid`, `glass`, or `command`), background (`solid`, `grid`, or `mesh`), and navigation (`solid`, `floating`, or `transparent`).
 
-```json
-{
-  "type": "thism-theme",
-  "version": 1,
-  "id": "shadcn-operations",
-  "name": "Shadcn Operations",
-  "description": "Neutral shadcn/ui operations dashboard theme.",
-  "accent": "#18181b",
-  "tokens": {
-    "light": {
-      "background": "240 6% 96%",
-      "foreground": "240 10% 3.9%",
-      "card": "240 6% 99%",
-      "card-foreground": "240 10% 3.9%",
-      "primary": "240 5.9% 10%",
-      "primary-foreground": "0 0% 98%",
-      "border": "240 6% 84%",
-      "input": "240 6% 84%",
-      "ring": "240 5.9% 10%"
-    },
-    "dark": {
-      "background": "240 10% 3.9%",
-      "foreground": "0 0% 98%",
-      "card": "240 7% 7%",
-      "card-foreground": "0 0% 98%",
-      "primary": "0 0% 98%",
-      "primary-foreground": "240 5.9% 10%",
-      "border": "240 3.7% 15.9%",
-      "input": "240 3.7% 15.9%",
-      "ring": "240 4.9% 83.9%"
-    }
-  },
-  "appearance": {
-    "radius": "0.625rem",
-    "cardRadius": "0.75rem",
-    "panelRadius": "0.75rem",
-    "controlRadius": "0.5rem",
-    "density": "compact",
-    "surface": "solid",
-    "background": "solid",
-    "navigation": "solid",
-    "cardPadding": "0.875rem",
-    "panelPadding": "1rem",
-    "fontFamily": "\"Inter\", \"Fira Sans\", \"Segoe UI\", sans-serif",
-    "monoFontFamily": "\"JetBrains Mono\", \"Fira Code\", \"SFMono-Regular\", monospace",
-    "shadow": "none"
-  }
-}
+Minimal archive layout:
+
+```text
+thism-theme.json
 ```
 
-The validator requires the core light and dark tokens shown above. Full shadcn/ui-compatible themes can also include optional tokens such as `secondary`, `muted`, `accent`, `destructive`, `popover`, `chart-1` through `chart-5`, and `sidebar-*`.
-
-`appearance` supports these runtime fields:
-
-- `radius`, `cardRadius`, `panelRadius`, `controlRadius`, `cardPadding`, and `panelPadding` as CSS lengths such as `0.75rem`.
-- `fontFamily` and `monoFontFamily` as safe font-family strings.
-- `shadow` as a safe CSS shadow string.
-- `density`: `compact`, `comfortable`, or `spacious`.
-- `surface`: `solid`, `glass`, or `command`.
-- `background`: `solid`, `grid`, or `mesh`.
-- `navigation`: `solid`, `floating`, or `transparent`.
-
-To publish one from a repository:
+Package and publish it as a GitHub release asset:
 
 ```bash
 mkdir thism-theme
 cd thism-theme
 $EDITOR thism-theme.json
-git init
-git add thism-theme.json
-git commit -m "Add thisM theme"
-gh repo create <owner>/<repo> --public --source . --remote origin --push
-gh release create v1.0.0 thism-theme.json --title v1.0.0 --notes "Initial thisM theme"
+zip -r example.thism-theme.zip thism-theme.json
+gh release create v1.0.0 example.thism-theme.zip --title v1.0.0 --notes "Initial thisM theme"
 ```
 
-For a complete repository example, see `https://github.com/jsllxx77/thism-shadcn-operations-theme`. It includes:
-
-- `thism-theme.json` for direct ThisM import
-- `registry-item.json` for shadcn registry-compatible distribution
-- `styles/shadcn-theme.css` and `styles/shadcn-v4.css` for shadcn projects
-- release assets that ThisM can discover from the repository URL
-
-### Build a Frontend Skin Package
-
-A frontend skin package is a `.zip` archive with `thism-frontend-skin.json` at the archive root. The skin ID must use lowercase letters, numbers, and hyphens, and cannot be `classic`. The entry file must be HTML. Archives are limited to 32 MiB compressed, 96 MiB extracted, and 2048 files.
-
-Manifest example:
-
-```json
-{
-  "type": "thism-frontend-skin",
-  "version": 1,
-  "id": "ops-console",
-  "name": "Ops Console",
-  "description": "Custom thisM frontend skin.",
-  "entry": "index.html",
-  "apiVersion": "thism.v1",
-  "assets": ["assets/app.css", "assets/app.js"],
-  "preview": "preview.png"
-}
-```
-
-Recommended archive layout:
-
-```text
-thism-frontend-skin.json
-index.html
-assets/app.css
-assets/app.js
-preview.png
-```
-
-Package and publish:
-
-```bash
-zip -r ops-console.thism-frontend-skin.zip thism-frontend-skin.json index.html assets preview.png
-gh release create v1.0.0 ops-console.thism-frontend-skin.zip --title v1.0.0 --notes "Initial thisM frontend skin"
-```
-
-The GitHub importer accepts a direct raw/release URL, or a repository URL. Repository imports look for the latest release asset first, then `thism-frontend-skin.zip`, `frontend-skin.zip`, and `skins/thism-frontend-skin.zip`. Release assets are accepted when named `thism-frontend-skin.zip` or `*.thism-frontend-skin.zip`.
-
-Installed skins are stored in the server's frontend skin directory. By default this is `frontend-skins` beside the database path, or `./frontend-skins` when the database path is empty or `:memory:`. Override it with `THISM_FRONTEND_SKINS_DIR` or `thism-server --frontend-skins-dir`.
+The GitHub importer accepts a repository URL, loads its latest release, selects a `.zip` release asset, and validates `thism-theme.json` from the archive. The local upload uses the same archive validation path.
 
 ## Releases and Update Integrity
 

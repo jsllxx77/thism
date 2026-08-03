@@ -24,23 +24,6 @@ describe("classic theme CSS", () => {
     expect(blockFor(".enterprise-accent-button")).toContain("background: #2859ad")
   })
 
-  it("defines complete theme personalities beyond color tokens", () => {
-    expect(blockFor(':root[data-theme="ocean"]')).toContain("--theme-card-radius: 0.75rem")
-    expect(blockFor(':root[data-theme="ocean"]')).toContain("--theme-panel-radius: 0.75rem")
-    expect(blockFor(':root[data-theme="ocean"]')).toContain("--theme-density-scale: 1.08")
-    expect(blockFor(':root[data-theme="graphite"]')).toContain("--theme-card-radius: 0.75rem")
-    expect(blockFor(':root[data-theme="graphite"]')).toContain("--theme-panel-radius: 0.75rem")
-    expect(blockFor(':root[data-theme="graphite"]')).toContain("--theme-density-scale: 0.88")
-    expect(css).toContain('[data-theme="ocean"] .theme-dashboard-card')
-    expect(css).toContain('[data-theme="graphite"] .theme-dashboard-card')
-    expect(css).toContain('[data-theme="ocean"] .theme-filter-panel')
-    expect(css).toContain('[data-theme="graphite"] .theme-filter-panel')
-    expect(css).toContain('[data-theme="ocean"] .theme-dashboard-grid')
-    expect(css).toContain('[data-theme="graphite"] .theme-dashboard-grid')
-    expect(css).toContain("calc(1rem * var(--theme-density-scale))")
-    expect(css).toContain('[data-theme="graphite"] .motion-table-row:hover > td')
-  })
-
   it("reserves space between table accent bars and first-column content", () => {
     expect(blockFor(".motion-table-row > td:first-child")).toContain("padding-left: var(--motion-table-accent-gutter, 1rem);")
   })

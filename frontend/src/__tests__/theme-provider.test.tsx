@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import App from "../App"
 import { AppThemeProvider } from "../theme/theme"
@@ -40,16 +39,9 @@ function Probe() {
 }
 
 function ThemeProbe() {
-  const { theme, setTheme } = useAppTheme()
+  const { theme } = useAppTheme()
 
-  return (
-    <>
-      <span data-testid="theme-name">{theme}</span>
-      <button type="button" onClick={() => setTheme("ocean")}>
-        Set ocean theme
-      </button>
-    </>
-  )
+  return <span data-testid="theme-name">{theme}</span>
 }
 
 const themeTokens = {
@@ -110,8 +102,7 @@ describe("theme provider", () => {
     expect(screen.getByTestId("theme-probe")).toHaveTextContent("theme-probe")
   })
 
-  it("applies and persists the selected runtime theme", async () => {
-    const user = userEvent.setup()
+  it("applies and persists the classic runtime theme", () => {
 
     render(
       <ThemeModeProvider>
@@ -124,11 +115,7 @@ describe("theme provider", () => {
     expect(screen.getByTestId("theme-name")).toHaveTextContent("classic")
     expect(document.documentElement.dataset.theme).toBe("classic")
 
-    await user.click(screen.getByRole("button", { name: "Set ocean theme" }))
-
-    expect(screen.getByTestId("theme-name")).toHaveTextContent("ocean")
-    expect(document.documentElement.dataset.theme).toBe("ocean")
-    expect(localStorage.getItem("thism-color-theme")).toBe("ocean")
+    expect(localStorage.getItem("thism-color-theme")).toBe("classic")
   })
 
   it("applies app surface class at shell root", () => {
@@ -163,7 +150,7 @@ describe("theme provider", () => {
     await waitFor(() => {
       expect(screen.getByTestId("theme-name")).toHaveTextContent("custom:server-command")
     })
-    expect(document.documentElement.dataset.theme).toBe("custom:server-command")
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("custom:server-command"))
     expect(localStorage.getItem("thism-custom-themes")).toContain("Server Command")
   })
 

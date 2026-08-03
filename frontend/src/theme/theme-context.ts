@@ -1,7 +1,6 @@
 import { createContext, useContext } from "react"
-import type { ThemePluginSettingsRecord } from "@thism/theme-sdk"
 
-export type BuiltInThemeName = "classic" | "ocean" | "graphite"
+export type BuiltInThemeName = "classic"
 export type AppThemeName = BuiltInThemeName | `custom:${string}`
 export type ThemeModeName = "light" | "dark"
 export type ThemeSource = "built-in" | "custom"
@@ -53,8 +52,6 @@ export type AppThemeDefinition = BuiltInThemeDefinition | ImportedThemeDefinitio
 
 export const appThemes = [
   { name: "classic", label: "Classic", labelKey: "classic", accent: "#2859ad", source: "built-in" },
-  { name: "ocean", label: "Ocean", labelKey: "ocean", accent: "#0f766e", source: "built-in" },
-  { name: "graphite", label: "Graphite", labelKey: "graphite", accent: "#334155", source: "built-in" },
 ] as const satisfies readonly BuiltInThemeDefinition[]
 
 const DEFAULT_THEME: BuiltInThemeName = "classic"
@@ -98,6 +95,7 @@ const THEME_TOKEN_NAMES = [
 ] as const
 
 const CORE_TOKEN_NAMES = ["background", "foreground", "card", "card-foreground", "primary", "primary-foreground", "border", "input", "ring"] as const
+const REMOVED_THEME_IDS = new Set(["shadcn-operations"])
 
 const THEME_APPEARANCE_VARIABLES = [
   { name: "radius", variable: "--radius", kind: "length" },
@@ -141,12 +139,8 @@ const SAFE_SHADOW_PATTERN = /^[\w\s().,#%/-]+$/
 
 export type AppThemeContextValue = {
   theme: AppThemeName
-  setTheme: (theme: AppThemeName) => void
   themes: readonly AppThemeDefinition[]
   importThemePackage: (source: string) => ImportedThemeDefinition
-  removeTheme: (theme: AppThemeName) => void
-  pluginSettings: Record<string, ThemePluginSettingsRecord>
-  setPluginSettings: (pluginID: string, record: ThemePluginSettingsRecord) => void
 }
 
 export const AppThemeContext = createContext<AppThemeContextValue | undefined>(undefined)
@@ -249,7 +243,7 @@ function normalizeThemePackage(value: unknown): AppThemePackage {
 
   const rawId = readRequiredString(value, "id", 48)
   const id = sanitizeThemeId(rawId)
-  invariant(id.length >= 2 && !BUILT_IN_THEME_NAMES.has(id))
+  invariant(id.length >= 2 && !BUILT_IN_THEME_NAMES.has(id) && !REMOVED_THEME_IDS.has(id))
 
   const name = readRequiredString(value, "name", 64)
   const description = readOptionalString(value, "description", 180)
@@ -311,7 +305,13 @@ export function getInitialCustomThemes(): ImportedThemeDefinition[] {
   try {
     const parsed = JSON.parse(stored)
     invariant(Array.isArray(parsed))
-    return parsed.map((item) => definitionFromPackage(normalizeThemePackage(item)))
+    return parsed.flatMap((item) => {
+      try {
+        return [definitionFromPackage(normalizeThemePackage(item))]
+      } catch {
+        return []
+      }
+    })
   } catch {
     return []
   }

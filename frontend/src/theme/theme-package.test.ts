@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { applyThemeDefinition, parseThemePackage } from "./theme-context"
+import { applyThemeDefinition, getInitialCustomThemes, parseThemePackage } from "./theme-context"
 
 const auroraThemePackage = {
   type: "thism-theme",
@@ -88,6 +88,7 @@ describe("theme packages", () => {
     document.documentElement.removeAttribute("data-theme-background")
     document.documentElement.removeAttribute("data-theme-navigation")
     document.documentElement.removeAttribute("style")
+    localStorage.clear()
   })
 
   it("parses a thism theme package into a custom shadcn theme definition", () => {
@@ -115,6 +116,15 @@ describe("theme packages", () => {
     expect(document.documentElement.style.getPropertyValue("--theme-card-radius")).toBe("1.5rem")
     expect(document.documentElement.style.getPropertyValue("--theme-panel-radius")).toBe("0.75rem")
     expect(document.documentElement.style.getPropertyValue("--app-font-family")).toContain("Fira Sans")
+  })
+
+  it("drops retired theme packages without hiding other imported themes", () => {
+    localStorage.setItem("thism-custom-themes", JSON.stringify([
+      { type: "thism-theme", version: 1, id: "shadcn-operations", name: "Shadcn Operations" },
+      auroraThemePackage,
+    ]))
+
+    expect(getInitialCustomThemes().map((theme) => theme.name)).toEqual(["custom:aurora-command"])
   })
 
   it("rejects theme files that are not thism theme packages", () => {

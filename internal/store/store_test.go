@@ -1011,25 +1011,30 @@ func TestStoreThemeSettingsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStoreThemePluginSettingsRoundTrip(t *testing.T) {
+func TestStoreThemeSettingsRemovesRetiredShadcnTheme(t *testing.T) {
 	s, err := store.New(":memory:")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer s.Close()
-	settings := models.ThemeSettings{Theme: "classic", PluginSettings: map[string]models.ThemePluginSettings{
-		"default-shadcn": {Version: "1.0.0", Values: map[string]json.RawMessage{"compact": json.RawMessage(`true`), "contentWidth": json.RawMessage(`1320`)}},
-	}}
+
+	settings := models.ThemeSettings{
+		Theme: "custom:shadcn-operations",
+		CustomThemes: []json.RawMessage{
+			json.RawMessage(`{"type":"thism-theme","version":1,"id":"shadcn-operations","name":"Shadcn Operations"}`),
+			json.RawMessage(`{"type":"thism-theme","version":1,"id":"kept-theme","name":"Kept Theme"}`),
+		},
+	}
 	if err := s.UpsertThemeSettings(settings); err != nil {
 		t.Fatalf("UpsertThemeSettings: %v", err)
 	}
+
 	stored, err := s.GetThemeSettings()
 	if err != nil {
 		t.Fatalf("GetThemeSettings: %v", err)
 	}
-	record := stored.PluginSettings["default-shadcn"]
-	if record.Version != "1.0.0" || string(record.Values["compact"]) != "true" || string(record.Values["contentWidth"]) != "1320" {
-		t.Fatalf("unexpected plugin settings: %#v", stored.PluginSettings)
+	if stored.Theme != store.DefaultThemeName || len(stored.CustomThemes) != 1 || !strings.Contains(string(stored.CustomThemes[0]), "kept-theme") {
+		t.Fatalf("unexpected retired theme migration: %#v", stored)
 	}
 }
 

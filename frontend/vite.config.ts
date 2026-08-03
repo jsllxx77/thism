@@ -8,8 +8,6 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@thism/theme-sdk/testing': path.resolve(__dirname, './src/theme-sdk/testing.ts'),
-      '@thism/theme-sdk': path.resolve(__dirname, './src/theme-sdk/index.ts'),
       '@': path.resolve(__dirname, './src'),
     },
   },

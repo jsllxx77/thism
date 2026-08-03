@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import type { ThemePluginSettingsRecord } from "@thism/theme-sdk"
 import { api, type ThemeSettings } from "../lib/api"
 import {
   AppThemeContext, appThemes, applyThemeDefinition, definitionFromThemePackage,
@@ -14,7 +13,6 @@ type Props = { children: React.ReactNode }
 type NormalizedThemeSettings = {
   theme: AppThemeName
   customThemes: ImportedThemeDefinition[]
-  pluginSettings: Record<string, ThemePluginSettingsRecord>
 }
 
 function normalizeServerThemeSettings(settings: ThemeSettings): NormalizedThemeSettings {
@@ -25,7 +23,6 @@ function normalizeServerThemeSettings(settings: ThemeSettings): NormalizedThemeS
   return {
     theme: isAppThemeName(settings.theme, themes) ? settings.theme : "classic",
     customThemes,
-    pluginSettings: settings.plugin_settings ?? {},
   }
 }
 
@@ -33,20 +30,20 @@ function hasLocalThemePreference(theme: AppThemeName, customThemes: readonly Imp
   return theme !== "classic" || customThemes.length > 0
 }
 
-function serializeThemeSettings(theme: AppThemeName, customThemes: readonly ImportedThemeDefinition[], pluginSettings: Record<string, ThemePluginSettingsRecord>) {
-  return JSON.stringify({ theme, custom_themes: customThemes.map((option) => option.package), plugin_settings: pluginSettings })
+function serializeThemeSettings(theme: AppThemeName, customThemes: readonly ImportedThemeDefinition[]) {
+  return JSON.stringify({ theme, custom_themes: customThemes.map((option) => option.package) })
 }
 
 export function AppThemeProvider({ children }: Props) {
   const { mode } = useThemeMode()
   const [customThemes, setCustomThemes] = useState<ImportedThemeDefinition[]>(getInitialCustomThemes)
   const themes = useMemo<readonly AppThemeDefinition[]>(() => [...appThemes, ...customThemes], [customThemes])
-  const [theme, setTheme] = useState<AppThemeName>(() => getInitialTheme(themes))
-  const [pluginSettings, setAllPluginSettings] = useState<Record<string, ThemePluginSettingsRecord>>({})
+  const [theme, setThemeState] = useState<AppThemeName>(() => getInitialTheme(themes))
   const [serverSyncReady, setServerSyncReady] = useState(false)
   const [serverSyncEnabled, setServerSyncEnabled] = useState(true)
   const initialTheme = useRef(theme)
   const initialCustomThemes = useRef(customThemes)
+  const localThemeChanged = useRef(false)
   const lastSyncedSettings = useRef<string | null>(null)
   const effectiveTheme = themes.some((option) => option.name === theme) ? theme : "classic"
 
@@ -58,12 +55,11 @@ export function AppThemeProvider({ children }: Props) {
         const settings = await api.themeSettings()
         if (cancelled) return
         const remote = normalizeServerThemeSettings(settings)
-        setAllPluginSettings(remote.pluginSettings)
-        if (settings.configured || !hasLocalThemePreference(initialTheme.current, initialCustomThemes.current)) {
+        if (settings.configured || (!localThemeChanged.current && !hasLocalThemePreference(initialTheme.current, initialCustomThemes.current))) {
           setCustomThemes(remote.customThemes)
-          setTheme(remote.theme)
+          setThemeState(remote.theme)
         }
-        lastSyncedSettings.current = serializeThemeSettings(remote.theme, remote.customThemes, remote.pluginSettings)
+        lastSyncedSettings.current = serializeThemeSettings(remote.theme, remote.customThemes)
         setServerSyncReady(true)
       } catch { if (!cancelled) setServerSyncEnabled(false) }
     }
@@ -79,30 +75,23 @@ export function AppThemeProvider({ children }: Props) {
   useEffect(() => { persistCustomThemes(customThemes) }, [customThemes])
   useEffect(() => {
     if (!serverSyncEnabled || !serverSyncReady) return
-    const serialized = serializeThemeSettings(effectiveTheme, customThemes, pluginSettings)
+    const serialized = serializeThemeSettings(effectiveTheme, customThemes)
     if (serialized === lastSyncedSettings.current) return
     lastSyncedSettings.current = serialized
     api.updateThemeSettings({
       theme: effectiveTheme,
       custom_themes: customThemes.map((option) => option.package),
-      ...(Object.keys(pluginSettings).length > 0 ? { plugin_settings: pluginSettings } : {}),
     }).catch(() => { lastSyncedSettings.current = null })
-  }, [customThemes, effectiveTheme, pluginSettings, serverSyncEnabled, serverSyncReady])
+  }, [customThemes, effectiveTheme, serverSyncEnabled, serverSyncReady])
 
   const importThemePackage = useCallback((source: string) => {
     const imported = parseThemePackage(source)
+    localThemeChanged.current = true
     setCustomThemes((current) => [...current.filter((option) => option.name !== imported.name), imported])
-    setTheme(imported.name)
+    setThemeState(imported.name)
     return imported
   }, [])
-  const removeTheme = useCallback((themeName: AppThemeName) => {
-    setCustomThemes((current) => current.filter((option) => option.name !== themeName))
-    if (themeName === effectiveTheme) setTheme("classic")
-  }, [effectiveTheme])
-  const setPluginSettings = useCallback((pluginID: string, record: ThemePluginSettingsRecord) => {
-    setAllPluginSettings((current) => ({ ...current, [pluginID]: record }))
-  }, [])
-  const value = useMemo(() => ({ theme: effectiveTheme, setTheme, themes, importThemePackage, removeTheme, pluginSettings, setPluginSettings }),
-    [effectiveTheme, importThemePackage, pluginSettings, removeTheme, setPluginSettings, themes])
+  const value = useMemo(() => ({ theme: effectiveTheme, themes, importThemePackage }),
+    [effectiveTheme, importThemePackage, themes])
   return <AppThemeContext.Provider value={value}>{children}</AppThemeContext.Provider>
 }

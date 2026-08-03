@@ -10,14 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/thism-dev/thism/frontend"
 	"github.com/thism-dev/thism/internal/api"
-	frontendSkins "github.com/thism-dev/thism/internal/frontend/skins"
 	"github.com/thism-dev/thism/internal/geo"
 	"github.com/thism-dev/thism/internal/hub"
 	"github.com/thism-dev/thism/internal/store"
@@ -118,14 +116,6 @@ func mustEnvOrFile(envName, fileEnvName, fallback string) string {
 	return v
 }
 
-func defaultFrontendSkinsDir(dbPath string) string {
-	dbPath = strings.TrimSpace(dbPath)
-	if dbPath == "" || dbPath == ":memory:" {
-		return "./frontend-skins"
-	}
-	return filepath.Join(filepath.Dir(dbPath), "frontend-skins")
-}
-
 func main() {
 	port := flag.String("port", envOr("THISM_PORT", "12026"), "HTTP port")
 	dbPath := flag.String("db", envOr("THISM_DB", "./thism.db"), "SQLite database path")
@@ -135,7 +125,6 @@ func main() {
 	geoIPDir := flag.String("geoip-dir", envOr("THISM_GEOIP_DIR", geo.DefaultDir), "Directory for offline GeoIP databases")
 	geoIPDBPath := flag.String("geoip-db", os.Getenv("THISM_GEOIP_DB"), "Legacy single GeoIP database path override. Empty = use settings-managed provider")
 	geoIPDBFallback := flag.String("geoip-db-fallback", os.Getenv("THISM_GEOIP_DB_FALLBACK"), "Optional legacy fallback GeoIP database path")
-	frontendSkinsDir := flag.String("frontend-skins-dir", os.Getenv("THISM_FRONTEND_SKINS_DIR"), "Directory for installed frontend skin packages (env: THISM_FRONTEND_SKINS_DIR)")
 	flag.Parse()
 
 	if *adminToken == "" {
@@ -157,15 +146,6 @@ func main() {
 	h := hub.New(s)
 	go h.Run()
 
-	skinDir := strings.TrimSpace(*frontendSkinsDir)
-	if skinDir == "" {
-		skinDir = defaultFrontendSkinsDir(*dbPath)
-	}
-	skinManager, err := frontendSkins.NewManager(skinDir)
-	if err != nil {
-		log.Fatalf("failed to open frontend skin manager: %v", err)
-	}
-
 	var countryResolver geo.CountryResolver
 	var geoManager *geo.Manager
 	if strings.TrimSpace(*geoIPDBPath) != "" || strings.TrimSpace(*geoIPDBFallback) != "" {
@@ -179,12 +159,12 @@ func main() {
 		countryResolver = geoManager
 	}
 
-	frontendHandler := frontend.HandlerWithSkins(frontend.Handler(), skinManager, s)
-	router := api.NewRouterWithAuthGeoManagerAndFrontendSkins(s, h, api.AuthConfig{
+	frontendHandler := frontend.Handler()
+	router := api.NewRouterWithAuthGeoManager(s, h, api.AuthConfig{
 		AdminToken: *adminToken,
 		Username:   *adminUser,
 		Password:   *adminPass,
-	}, frontendHandler, countryResolver, geoManager, skinManager)
+	}, frontendHandler, countryResolver, geoManager)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

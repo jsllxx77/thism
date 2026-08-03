@@ -47,11 +47,9 @@ const latencyRollupGraceSeconds = 120
 const metricsRetentionSettingKey = "metrics_retention_days"
 const dashboardSettingsKey = "dashboard_settings"
 const notificationSettingsKey = "notification_settings"
-const frontendSkinSettingKey = "frontend_skin_id"
 const themeSettingsKey = "theme_settings"
 const publicURLSettingKey = "public_url"
 const geoIPSettingsKey = "geoip_settings"
-const DefaultFrontendSkinID = "classic"
 const DefaultThemeName = "classic"
 const adminSessionTTL = 30 * 24 * time.Hour
 const sqliteBusyTimeout = 5000
@@ -581,53 +579,34 @@ ON CONFLICT(key) DO UPDATE SET
 	return err
 }
 
-func (s *Store) GetFrontendSkinID() (string, error) {
-	var raw string
-	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, frontendSkinSettingKey).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return DefaultFrontendSkinID, nil
+func isRemovedThemePackage(raw json.RawMessage) bool {
+	var descriptor struct {
+		ID string `json:"id"`
 	}
-	if err != nil {
-		return "", err
+	if err := json.Unmarshal(raw, &descriptor); err != nil {
+		return false
 	}
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return DefaultFrontendSkinID, nil
-	}
-	return value, nil
-}
-
-func (s *Store) SetFrontendSkinID(id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return fmt.Errorf("frontend skin id is required")
-	}
-	_, err := s.db.Exec(`
-INSERT INTO app_settings (key, value, updated_at)
-VALUES (?, ?, ?)
-ON CONFLICT(key) DO UPDATE SET
-	value = excluded.value,
-	updated_at = excluded.updated_at
-`, frontendSkinSettingKey, id, time.Now().Unix())
-	return err
+	return strings.EqualFold(strings.TrimSpace(descriptor.ID), "shadcn-operations")
 }
 
 func normalizeThemeSettings(settings models.ThemeSettings) models.ThemeSettings {
 	settings.Theme = strings.TrimSpace(settings.Theme)
+	if strings.EqualFold(settings.Theme, "custom:shadcn-operations") {
+		settings.Theme = DefaultThemeName
+	}
 	if settings.Theme == "" {
 		settings.Theme = DefaultThemeName
 	}
 	if settings.CustomThemes == nil {
 		settings.CustomThemes = []json.RawMessage{}
-	}
-	if settings.PluginSettings == nil {
-		settings.PluginSettings = map[string]models.ThemePluginSettings{}
-	}
-	for pluginID, record := range settings.PluginSettings {
-		if record.Values == nil {
-			record.Values = map[string]json.RawMessage{}
-			settings.PluginSettings[pluginID] = record
+	} else {
+		filtered := make([]json.RawMessage, 0, len(settings.CustomThemes))
+		for _, themePackage := range settings.CustomThemes {
+			if !isRemovedThemePackage(themePackage) {
+				filtered = append(filtered, themePackage)
+			}
 		}
+		settings.CustomThemes = filtered
 	}
 	return settings
 }
@@ -637,10 +616,9 @@ func (s *Store) GetThemeSettings() (models.ThemeSettingsView, error) {
 	err := s.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, themeSettingsKey).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return models.ThemeSettingsView{
-			Theme:          DefaultThemeName,
-			CustomThemes:   []json.RawMessage{},
-			PluginSettings: map[string]models.ThemePluginSettings{},
-			Configured:     false,
+			Theme:        DefaultThemeName,
+			CustomThemes: []json.RawMessage{},
+			Configured:   false,
 		}, nil
 	}
 	if err != nil {
@@ -650,18 +628,21 @@ func (s *Store) GetThemeSettings() (models.ThemeSettingsView, error) {
 	var settings models.ThemeSettings
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
 		return models.ThemeSettingsView{
-			Theme:          DefaultThemeName,
-			CustomThemes:   []json.RawMessage{},
-			PluginSettings: map[string]models.ThemePluginSettings{},
-			Configured:     false,
+			Theme:        DefaultThemeName,
+			CustomThemes: []json.RawMessage{},
+			Configured:   false,
 		}, nil
 	}
 	settings = normalizeThemeSettings(settings)
+	if normalized, marshalErr := json.Marshal(settings); marshalErr == nil && string(normalized) != raw {
+		if err := s.UpsertThemeSettings(settings); err != nil {
+			return models.ThemeSettingsView{}, err
+		}
+	}
 	return models.ThemeSettingsView{
-		Theme:          settings.Theme,
-		CustomThemes:   settings.CustomThemes,
-		PluginSettings: settings.PluginSettings,
-		Configured:     true,
+		Theme:        settings.Theme,
+		CustomThemes: settings.CustomThemes,
+		Configured:   true,
 	}, nil
 }
 

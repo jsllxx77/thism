@@ -36,7 +36,7 @@
 - 支持由选定节点执行 ICMP、TCP、HTTP 延迟监测
 - 节点详情支持负载、CPU steal/I/O wait、pressure、swap/OOM，以及内置 NVMe/ATA SMART 硬盘健康检测；节点无需额外安装组件
 - 可配置指标保留时长，默认 30 天，并支持更长报告窗口
-- 支持从 GitHub 安装运行时 shadcn/ui 主题包和完整前端皮肤包
+- 支持从 GitHub Release 压缩包或本地 zip 文件导入自定义主题
 - 提供预构建 GHCR 镜像与 Docker Compose 部署方式
 - 支持离线 GeoIP 国家码（IP2Location / MaxMind），可在设置页管理或单独下载，不把数据库提交进 Git
 
@@ -201,161 +201,37 @@ ThisM 支持由 agent 主动执行延迟探测，并在节点详情页展示延�
 
 保存后会立即生效，并清理早于所选周期的指标行。报告和节点详情中的长时间范围图表都依赖这些被保留的历史数据。
 
-## 主题与前端皮肤
+## 主题系统
 
-当前 ThisM 外观系统分为三层：
+当前 ThisM 外观系统保留 `经典` 作为唯一内置主题和稳定的恢复基线。自定义主题沿用内置 React 前端，只替换 shadcn/ui 语义 token 和支持的外观参数。
 
-- 内置主题包括 `经典`、`海岸`、`石墨`。它们共享同一套仪表盘布局和卡片几何结构，同时保留不同的配色、密度和控件处理。
-- 运行时主题包会保留内置 React 前端，并替换它的 shadcn/ui 语义 token、卡片/面板圆角、密度、字体、界面表面、导航处理和阴影。
-- 前端皮肤包会安装一个完整替代前端，格式是包含 `index.html`、CSS 和 JavaScript 的 zip 压缩包。
-
-在 Web 界面中安装：
-
-1. 进入 `设置`。
-2. 打开 `外观`。
-3. 使用 `主题系统` 导入主题 JSON 文件或 GitHub 主题仓库。
-4. 使用 `前端皮肤` 导入皮肤 zip 文件或 GitHub 皮肤仓库。
-
-运行时主题包保存在浏览器 localStorage 中，适合在不替换应用的前提下调整内置 shadcn/ui 仪表盘观感。前端皮肤保存在服务端，适合需要完整自定义 UI 的场景。
-
-运行时主题示例仓库：
-
-```text
-https://github.com/jsllxx77/thism-shadcn-operations-theme
-```
-
-把这个 URL 粘贴到 `设置` -> `外观` -> `主题系统` -> `GitHub 主题仓库`，即可安装 Shadcn Operations 主题。ThisM 会优先读取最新 release 中的主题资产；如果没有可用资产，则回退查找仓库内约定位置的主题 JSON 文件。
+`设置` -> `外观` 页面只展示当前主题和主题列表，并提供两个导入入口：GitHub 主题仓库的最新 Release 压缩包，以及本地主题压缩包。主题只能通过这两种导入方式更改。
 
 ### 自建主题包
 
-主题包是一个 JSON 文件，必须包含 `type: "thism-theme"` 和 `version: 1`。`id` 规范化后只能包含小写字母、数字和连字符，并且不能使用 `classic`、`ocean`、`graphite`。
+主题包是 `.zip` 压缩包，根目录必须包含 `thism-theme.json`。Manifest 必须包含 `type: "thism-theme"` 和 `version: 1`，规范化后的 `id` 不能使用 `classic`。压缩包限制为压缩后 32 MiB、解压后 96 MiB、最多 2048 个文件。
 
-GitHub 导入器支持直接填写 raw/blob/release URL，也支持填写仓库 URL。仓库导入会先查找最新 release 资产，再查找仓库内的 `thism-theme.json`、`.thism-theme.json`、`theme.json`、`themes/thism-theme.json`、`themes/theme.json`。Release 资产文件名必须是 `thism-theme.json`、`theme.json` 或 `*.thism-theme.json`。
+Manifest 需要提供 light 和 dark 两套语义 token。核心 token 包括 `background`、`foreground`、`card`、`card-foreground`、`primary`、`primary-foreground`、`border`、`input` 和 `ring`；也可以提供 `secondary`、`muted`、`accent`、`destructive`、`popover`、`chart-1` 到 `chart-5`、`sidebar-*` 等可选 token。
 
-最小示例：
+`appearance` 可以定义圆角与 padding、字体族、阴影、密度（`compact`、`comfortable`、`spacious`）、表面（`solid`、`glass`、`command`）、背景（`solid`、`grid`、`mesh`）和导航（`solid`、`floating`、`transparent`）。
 
-```json
-{
-  "type": "thism-theme",
-  "version": 1,
-  "id": "shadcn-operations",
-  "name": "Shadcn Operations",
-  "description": "Neutral shadcn/ui operations dashboard theme.",
-  "accent": "#18181b",
-  "tokens": {
-    "light": {
-      "background": "240 6% 96%",
-      "foreground": "240 10% 3.9%",
-      "card": "240 6% 99%",
-      "card-foreground": "240 10% 3.9%",
-      "primary": "240 5.9% 10%",
-      "primary-foreground": "0 0% 98%",
-      "border": "240 6% 84%",
-      "input": "240 6% 84%",
-      "ring": "240 5.9% 10%"
-    },
-    "dark": {
-      "background": "240 10% 3.9%",
-      "foreground": "0 0% 98%",
-      "card": "240 7% 7%",
-      "card-foreground": "0 0% 98%",
-      "primary": "0 0% 98%",
-      "primary-foreground": "240 5.9% 10%",
-      "border": "240 3.7% 15.9%",
-      "input": "240 3.7% 15.9%",
-      "ring": "240 4.9% 83.9%"
-    }
-  },
-  "appearance": {
-    "radius": "0.625rem",
-    "cardRadius": "0.75rem",
-    "panelRadius": "0.75rem",
-    "controlRadius": "0.5rem",
-    "density": "compact",
-    "surface": "solid",
-    "background": "solid",
-    "navigation": "solid",
-    "cardPadding": "0.875rem",
-    "panelPadding": "1rem",
-    "fontFamily": "\"Inter\", \"Fira Sans\", \"Segoe UI\", sans-serif",
-    "monoFontFamily": "\"JetBrains Mono\", \"Fira Code\", \"SFMono-Regular\", monospace",
-    "shadow": "none"
-  }
-}
+最小压缩包结构：
+
+```text
+thism-theme.json
 ```
 
-校验器要求同时提供上面示例中的 light/dark 核心 token。完整 shadcn/ui 兼容主题也可以继续提供 `secondary`、`muted`、`accent`、`destructive`、`popover`、`chart-1` 到 `chart-5`、`sidebar-*` 等可选 token。
-
-`appearance` 支持这些运行时字段：
-
-- `radius`、`cardRadius`、`panelRadius`、`controlRadius`、`cardPadding`、`panelPadding`：CSS 长度，例如 `0.75rem`。
-- `fontFamily` 和 `monoFontFamily`：安全的字体族字符串。
-- `shadow`：安全的 CSS 阴影字符串。
-- `density`：`compact`、`comfortable`、`spacious`。
-- `surface`：`solid`、`glass`、`command`。
-- `background`：`solid`、`grid`、`mesh`。
-- `navigation`：`solid`、`floating`、`transparent`。
-
-发布到 GitHub 仓库：
+打包并发布为 GitHub Release 资产：
 
 ```bash
 mkdir thism-theme
 cd thism-theme
 $EDITOR thism-theme.json
-git init
-git add thism-theme.json
-git commit -m "Add thisM theme"
-gh repo create <owner>/<repo> --public --source . --remote origin --push
-gh release create v1.0.0 thism-theme.json --title v1.0.0 --notes "Initial thisM theme"
+zip -r example.thism-theme.zip thism-theme.json
+gh release create v1.0.0 example.thism-theme.zip --title v1.0.0 --notes "Initial thisM theme"
 ```
 
-完整仓库示例见 `https://github.com/jsllxx77/thism-shadcn-operations-theme`。它包含：
-
-- `thism-theme.json`，可直接导入 ThisM
-- `registry-item.json`，可用于 shadcn registry 兼容分发
-- `styles/shadcn-theme.css` 和 `styles/shadcn-v4.css`，可用于 shadcn 项目
-- ThisM 可通过仓库 URL 自动发现的 release 资产
-
-### 自建前端皮肤包
-
-前端皮肤包是 `.zip` 压缩包，压缩包根目录必须包含 `thism-frontend-skin.json`。皮肤 ID 只能使用小写字母、数字和连字符，并且不能使用保留 ID `classic`。入口文件必须是 HTML。压缩包限制为压缩后 32 MiB、解压后 96 MiB、最多 2048 个文件。
-
-Manifest 示例：
-
-```json
-{
-  "type": "thism-frontend-skin",
-  "version": 1,
-  "id": "ops-console",
-  "name": "Ops Console",
-  "description": "Custom thisM frontend skin.",
-  "entry": "index.html",
-  "apiVersion": "thism.v1",
-  "assets": ["assets/app.css", "assets/app.js"],
-  "preview": "preview.png"
-}
-```
-
-推荐压缩包结构：
-
-```text
-thism-frontend-skin.json
-index.html
-assets/app.css
-assets/app.js
-preview.png
-```
-
-打包并发布：
-
-```bash
-zip -r ops-console.thism-frontend-skin.zip thism-frontend-skin.json index.html assets preview.png
-gh release create v1.0.0 ops-console.thism-frontend-skin.zip --title v1.0.0 --notes "Initial thisM frontend skin"
-```
-
-GitHub 导入器支持直接填写 raw/release URL，也支持填写仓库 URL。仓库导入会先查找最新 release 资产，再查找仓库内的 `thism-frontend-skin.zip`、`frontend-skin.zip`、`skins/thism-frontend-skin.zip`。Release 资产文件名必须是 `thism-frontend-skin.zip` 或 `*.thism-frontend-skin.zip`。
-
-已安装皮肤会保存到服务端的前端皮肤目录。默认目录是数据库路径旁边的 `frontend-skins`；如果数据库路径为空或为 `:memory:`，则使用 `./frontend-skins`。可通过 `THISM_FRONTEND_SKINS_DIR` 或 `thism-server --frontend-skins-dir` 覆盖。
+GitHub 导入器只接受仓库 URL，会读取该仓库的最新 Release，选择其中的 `.zip` 资产，并校验压缩包中的 `thism-theme.json`。本地上传使用同一套压缩包校验逻辑。
 
 ## 发布与更新完整性
 

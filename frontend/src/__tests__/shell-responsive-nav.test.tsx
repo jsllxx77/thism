@@ -67,20 +67,8 @@ describe("responsive shell nav", () => {
     expect((await screen.findAllByRole("button", { name: "Refresh data" })).length).toBeGreaterThan(0)
     expect(await screen.findByRole("button", { name: "Actions" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Toggle dark mode" })).toBeInTheDocument()
-    expect(await screen.findByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open reports" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Open settings" })).toBeInTheDocument()
-  })
-
-  it("switches the runtime theme from the header", async () => {
-    const user = userEvent.setup()
-    renderApp("/")
-
-    await user.click(await screen.findByRole("combobox", { name: "Theme" }))
-    await user.click(await screen.findByRole("option", { name: "Ocean" }))
-
-    expect(document.documentElement.dataset.theme).toBe("ocean")
-    expect(localStorage.getItem("thism-color-theme")).toBe("ocean")
   })
 
   it("shows a guest mode badge linking back to login", async () => {
@@ -125,7 +113,6 @@ describe("responsive shell nav", () => {
     expect(screen.getByRole("menuitem", { name: "中文" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Toggle dark mode" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Open settings" })).toBeInTheDocument()
-    expect(screen.getByRole("menuitemradio", { name: "Classic" })).toHaveAttribute("aria-checked", "true")
   })
 
   it("closes compact mobile actions when a menu navigation item is selected", async () => {

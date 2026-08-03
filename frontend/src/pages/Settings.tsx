@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type FormEve
 import { Plus } from "lucide-react"
 import { AgentAutoUpdateCard } from "../components/settings/AgentAutoUpdateCard"
 import { DashboardVisibilityCard } from "../components/settings/DashboardVisibilityCard"
-import { FrontendSkinSystemCard } from "../components/settings/FrontendSkinSystemCard"
 import { LatencyMonitorsCard } from "../components/settings/LatencyMonitorsCard"
 import { MetricsRetentionCard } from "../components/settings/MetricsRetentionCard"
 import { GeoIPCard } from "../components/settings/GeoIPCard"
@@ -10,7 +9,6 @@ import { NodesTable } from "../components/settings/NodesTable"
 import { NotificationsCard } from "../components/settings/NotificationsCard"
 import { PublicURLCard } from "../components/settings/PublicURLCard"
 import { ThemeSystemCard } from "../components/settings/ThemeSystemCard"
-import { ThemePluginSettingsCard } from "../components/settings/ThemePluginSettingsCard"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
@@ -353,8 +351,6 @@ export function Settings({ refreshNonce = 0 }: Props) {
 
         <TabsContent value="appearance" {...getTabsContentProps("appearance")} hidden={activeSection !== "appearance"} className="space-y-6">
           <ThemeSystemCard />
-          <ThemePluginSettingsCard />
-          <FrontendSkinSystemCard />
         </TabsContent>
 
         <TabsContent value="alerts" {...getTabsContentProps("alerts")} hidden={activeSection !== "alerts"} className="space-y-6">
