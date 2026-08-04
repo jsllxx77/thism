@@ -126,7 +126,20 @@ func (d *Dispatcher) Close() {
 		d.cond.Broadcast()
 		capacity := d.queueCapacity
 		d.mu.Unlock()
-		d.wg.Wait()
+		// Wait for the queue worker and any in-flight drop-alert sends, but
+		// bound the wait so a slow network send can never stall shutdown.
+		done := make(chan struct{})
+		go func() {
+			d.wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			if d.logf != nil {
+				d.logf("alert dispatcher: shutdown timed out waiting for workers")
+			}
+		}
 		recordDispatcherClosed(capacity)
 	})
 }
@@ -175,13 +188,20 @@ func (d *Dispatcher) enqueue(job dispatchJob) bool {
 		shouldSendDropAlert := shouldLog && config.notifyDispatcherDrops && !d.dropAlertInFlight
 		if shouldSendDropAlert {
 			d.dropAlertInFlight = true
+			// Register the goroutine while holding the lock so Close can never
+			// start Wait while a drop alert is about to be added (no WaitGroup
+			// misuse).
+			d.wg.Add(1)
 		}
 		d.mu.Unlock()
 		if shouldLog && logf != nil {
 			logf("alert dispatcher: dropping queued jobs due to full queue (dropped_since_last_log=%d total_dropped=%d queue_depth=%d capacity=%d)", droppedSinceLastLog, totalDropped, queueDepth, capacity)
 		}
 		if shouldSendDropAlert {
-			go d.sendDropAlert(config.settings, totalDropped, queueDepth, capacity)
+			go func(settings models.NotificationSettings, totalDropped uint64, queueDepth, capacity int) {
+				defer d.wg.Done()
+				d.sendDropAlert(settings, totalDropped, queueDepth, capacity)
+			}(config.settings, totalDropped, queueDepth, capacity)
 		}
 		return false
 	}

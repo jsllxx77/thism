@@ -39,7 +39,7 @@ func TestSelfUpdateDownloadDoesNotFollowRedirects(t *testing.T) {
 	defer server.Close()
 
 	httpClient = newSelfUpdateHTTPClient()
-	c := NewWithInterval(server.URL, "token", "node", "", DefaultReportInterval)
+	c := newTestCollector(t, server.URL, "token", "node", "", DefaultReportInterval)
 	err := c.runSelfUpdate(models.AgentCommandPayload{
 		DownloadURL: server.URL,
 		SHA256:      "unused",
@@ -100,7 +100,7 @@ func decodeStatuses(t *testing.T, writes [][]byte) []models.AgentCommandStatusPa
 }
 
 func TestDispatchAgentCommandRunsSelfUpdateFlow(t *testing.T) {
-	collector := NewWithInterval("ws://localhost:12026", "token", "node", "", DefaultReportInterval)
+	collector := newTestCollector(t, "ws://localhost:12026", "token", "node", "", DefaultReportInterval)
 	collector.agentVersion = "1.0.0"
 	collector.selfUpdateFunc = func(cmd models.AgentCommandPayload, report func(models.UpdateJobTargetStatus, string, string) error) error {
 		if err := report(models.UpdateJobTargetStatusDownloading, "downloading", ""); err != nil {
@@ -143,7 +143,7 @@ func TestDispatchAgentCommandRunsSelfUpdateFlow(t *testing.T) {
 }
 
 func TestDispatchAgentCommandRejectsConcurrentUpdates(t *testing.T) {
-	collector := NewWithInterval("ws://localhost:12026", "token", "node", "", DefaultReportInterval)
+	collector := newTestCollector(t, "ws://localhost:12026", "token", "node", "", DefaultReportInterval)
 	block := make(chan struct{})
 	collector.selfUpdateFunc = func(cmd models.AgentCommandPayload, report func(models.UpdateJobTargetStatus, string, string) error) error {
 		<-block
@@ -156,6 +156,7 @@ func TestDispatchAgentCommandRejectsConcurrentUpdates(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	collector.dispatchAgentCommand(models.AgentCommandPayload{JobID: "job-2", Kind: models.AgentCommandKindSelfUpdate}, conn, &writeMu)
 	close(block)
+	collector.WaitForTasks()
 
 	statuses := decodeStatuses(t, conn.snapshotWrites())
 	foundRejected := false

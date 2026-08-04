@@ -203,8 +203,13 @@ type Collector struct {
 	heavySnapshotSent     bool
 	now                   func() time.Time
 	selfUpdateFunc        func(models.AgentCommandPayload, func(models.UpdateJobTargetStatus, string, string) error) error
-	updateMu              sync.Mutex
-	updateInProgress      bool
+	statePath             string
+	state                 *agentState
+	stateMu               sync.Mutex
+	taskCancel            context.CancelFunc
+	taskCtx               context.Context
+	taskMu                sync.Mutex
+	taskWG                sync.WaitGroup
 	autoUpdateInterval    time.Duration
 	cpuSampleMu           sync.Mutex
 	cpuSampleReady        bool
@@ -256,6 +261,7 @@ func NewWithInterval(serverURL, token, name, nodeIP string, reportInterval time.
 	c.selfUpdateFunc = c.runSelfUpdate
 	c.SetAgentVersion(c.agentVersion)
 	c.primeCPUSample()
+	c.loadAgentState()
 	return c
 }
 
@@ -448,7 +454,19 @@ func (c *Collector) maybeApplyRelease(manifest agentReleaseManifest, currentChec
 		SHA256:        manifest.SHA256,
 		Signature:     manifest.Signature,
 	}
-	return c.selfUpdateFunc(cmd, func(models.UpdateJobTargetStatus, string, string) error { return nil })
+	// Auto-update goes through the same durable executor and the same global
+	// serialization as remote commands: they are mutually exclusive.
+	ok, replay, rejectCode, rejectMsg := c.beginUpdateTask(cmd)
+	if !ok {
+		if replay != nil {
+			return fmt.Errorf("auto update already processed: %s", replay.Status)
+		}
+		if rejectCode != "" {
+			return fmt.Errorf("auto update rejected: %s %s", rejectCode, rejectMsg)
+		}
+		return fmt.Errorf("auto update rejected: %s", rejectMsg)
+	}
+	return c.runUpdateTask(cmd, func(models.UpdateJobTargetStatus, string, string) error { return nil })
 }
 
 func (c *Collector) checkForAutoUpdate() error {
@@ -1828,6 +1846,14 @@ func (c *Collector) connect() error {
 	c.heavySnapshotSent = false
 	c.lastHeavySnapshotAt = time.Time{}
 
+	var writeMu sync.Mutex
+
+	// Send the stream/watermark handshake before anything else. The server
+	// withholds control commands until it has reconciled this state.
+	if err := c.sendHandshake(conn, &writeMu); err != nil {
+		log.Printf("collector: handshake send failed: %v", err)
+	}
+
 	ticker := time.NewTicker(c.reportInterval)
 	defer ticker.Stop()
 	latencyTicker := time.NewTicker(time.Second)
@@ -1857,7 +1883,6 @@ func (c *Collector) connect() error {
 		}()
 	}
 
-	var writeMu sync.Mutex
 	readErrCh := make(chan error, 1)
 	go func() {
 		readErrCh <- c.readAgentCommands(conn, &writeMu)
@@ -1918,6 +1943,16 @@ func (c *Collector) connect() error {
 	}
 }
 
+func (c *Collector) sendHandshake(conn websocketConn, writeMu *sync.Mutex) error {
+	raw, err := json.Marshal(models.WSMessage{Type: models.WSMessageTypeAgentHandshake, Payload: c.handshakePayload()})
+	if err != nil {
+		return err
+	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, raw)
+}
+
 func (c *Collector) readAgentCommands(conn websocketConn, writeMu *sync.Mutex) error {
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -1931,21 +1966,72 @@ func (c *Collector) readAgentCommands(conn websocketConn, writeMu *sync.Mutex) e
 		if err := json.Unmarshal(raw, &envelope); err != nil {
 			continue
 		}
-		if envelope.Type != "agent_command" {
-			if envelope.Type == "latency_monitor_config" {
-				var payload models.LatencyMonitorConfigPayload
-				if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-					continue
-				}
-				c.applyLatencyMonitorConfig(payload.Monitors)
+		switch envelope.Type {
+		case models.WSMessageTypeAgentCommand:
+			var payload models.AgentCommandPayload
+			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+				continue
 			}
-			continue
+			c.dispatchAgentCommand(payload, conn, writeMu)
+		case models.WSMessageTypeAgentHandshakeAck:
+			var payload models.AgentHandshakeAckPayload
+			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+				continue
+			}
+			c.applyHandshakeAck(payload)
+			if payload.ControlState == models.ControlStateNone {
+				log.Printf("collector: handshake complete (stream %s, watermark %d)", payload.StreamID, payload.RetiredWatermark)
+			}
+		case models.WSMessageTypeAgentCommandCancel:
+			var payload models.AgentCommandCancelPayload
+			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+				continue
+			}
+			c.handleCancelRequest(payload, conn, writeMu)
+		case "latency_monitor_config":
+			var payload models.LatencyMonitorConfigPayload
+			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+				continue
+			}
+			c.applyLatencyMonitorConfig(payload.Monitors)
 		}
-		var payload models.AgentCommandPayload
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			continue
-		}
-		c.dispatchAgentCommand(payload, conn, writeMu)
+	}
+}
+
+// handleCancelRequest applies a persistent cancel intent. Before the rename
+// commit point the task is cancelled, the temp file removed and the sequence
+// retired with a cancelled tombstone. After the commit point cancellation is
+// refused: the committed binary must be Exec'd or reconciled by SHA256.
+func (c *Collector) handleCancelRequest(payload models.AgentCommandCancelPayload, conn websocketConn, writeMu *sync.Mutex) {
+	c.stateMu.Lock()
+	inProgress := c.state.InProgress
+	c.stateMu.Unlock()
+	if inProgress == nil || (payload.Seq > 0 && inProgress.Seq != payload.Seq) || (payload.JobID != "" && inProgress.JobID != payload.JobID) {
+		_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{
+			JobID: payload.JobID, Seq: payload.Seq, StreamID: c.stateStreamID(), RetiredWatermark: c.stateWatermark(), RejectCode: models.CommandRejectAlreadyProcessed, Message: "no matching in-progress task",
+		})
+		return
+	}
+	if inProgress.CommitPoint {
+		_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{
+			JobID: payload.JobID, Seq: payload.Seq, StreamID: c.stateStreamID(), RetiredWatermark: c.stateWatermark(), Status: models.UpdateJobTargetStatusRestarting,
+			Message: "cancel refused: rename already committed; update continues",
+		})
+		return
+	}
+	c.stateMu.Lock()
+	if c.state.InProgress != nil && c.state.InProgress.Key == inProgress.Key {
+		c.state.InProgress.CancelIntent = true
+		_ = c.saveAgentState()
+	}
+	c.stateMu.Unlock()
+	if c.cancelTask(payload.Seq, payload.JobID) {
+		// The task reports the durable cancelled status when it observes the
+		// cancellation; acknowledge promptly on the current socket as well.
+		_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{
+			JobID: payload.JobID, Seq: payload.Seq, StreamID: c.stateStreamID(), RetiredWatermark: c.stateWatermark(), Status: models.UpdateJobTargetStatusCancelled,
+			Message: "cancel intent applied",
+		})
 	}
 }
 
@@ -1954,31 +2040,95 @@ func (c *Collector) dispatchAgentCommand(cmd models.AgentCommandPayload, conn we
 		_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{JobID: cmd.JobID, Status: models.UpdateJobTargetStatusFailed, Message: "unsupported agent command"})
 		return
 	}
-	c.updateMu.Lock()
-	if c.updateInProgress {
-		c.updateMu.Unlock()
-		_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{JobID: cmd.JobID, Status: models.UpdateJobTargetStatusFailed, Message: "another self update is already in progress"})
-		return
-	}
-	c.updateInProgress = true
-	c.updateMu.Unlock()
-
-	go func() {
-		defer func() {
-			c.updateMu.Lock()
-			c.updateInProgress = false
-			c.updateMu.Unlock()
-		}()
-		report := func(status models.UpdateJobTargetStatus, message, version string) error {
-			return c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{JobID: cmd.JobID, Status: status, Message: message, ReportedVersion: version})
-		}
-		if err := report(models.UpdateJobTargetStatusAccepted, "accepted", c.agentVersion); err != nil {
+	ok, replay, rejectCode, rejectMsg := c.beginUpdateTask(cmd)
+	if !ok {
+		if replay != nil {
+			// Exact replay of a persisted state (dedup, in-progress duplicate,
+			// retired sequence). No download, rename or exec side effect.
+			_ = c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{
+				JobID: replay.JobID, Status: replay.Status, Message: replay.Message,
+				ReportedVersion: replay.ReportedVersion, StreamID: c.stateStreamID(), Seq: replay.Seq,
+				RetiredWatermark: c.stateWatermark(),
+			})
 			return
 		}
-		if err := c.selfUpdateFunc(cmd, report); err != nil {
-			_ = report(models.UpdateJobTargetStatusFailed, err.Error(), c.agentVersion)
+		payload := models.AgentCommandStatusPayload{
+			JobID: cmd.JobID, StreamID: c.stateStreamID(), Seq: cmd.Seq,
+			RetiredWatermark: c.stateWatermark(), Message: rejectMsg,
 		}
+		if rejectCode != "" {
+			payload.RejectCode = rejectCode
+		} else {
+			payload.Status = models.UpdateJobTargetStatusFailed
+		}
+		_ = c.sendAgentCommandStatus(conn, writeMu, payload)
+		return
+	}
+
+	c.taskWG.Add(1)
+	go func() {
+		defer c.taskWG.Done()
+		report := func(status models.UpdateJobTargetStatus, message, version string) error {
+			return c.sendAgentCommandStatus(conn, writeMu, models.AgentCommandStatusPayload{
+				JobID: cmd.JobID, Status: status, Message: message,
+				ReportedVersion: version, StreamID: c.stateStreamID(), Seq: cmd.Seq,
+			})
+		}
+		if err := report(models.UpdateJobTargetStatusAccepted, "accepted", c.agentVersion); err != nil {
+			// This socket is gone; revert the durable admission so the command
+			// is redelivered after reconnect instead of being stuck.
+			c.abortUpdateTask(cmd)
+			return
+		}
+		_ = c.runUpdateTask(cmd, report)
 	}()
+}
+
+func (c *Collector) stateStreamID() string {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.state.StreamID
+}
+
+// WaitForTasks blocks until all in-flight update tasks have finalized their
+// durable state. Intended for tests and orderly agent shutdown.
+func (c *Collector) WaitForTasks() {
+	c.taskWG.Wait()
+}
+
+func (c *Collector) stateWatermark() int64 {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.state.RetiredWatermark
+}
+
+func (c *Collector) currentTaskContext() context.Context {
+	c.taskMu.Lock()
+	defer c.taskMu.Unlock()
+	if c.taskCtx != nil {
+		return c.taskCtx
+	}
+	return context.Background()
+}
+
+// abortUpdateTask reverts the durable accepted/in-progress admission when the
+// task cannot even report its acceptance on the current socket.
+func (c *Collector) abortUpdateTask(cmd models.AgentCommandPayload) {
+	key := commandDedupKey(cmd)
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.state.InProgress == nil || c.state.InProgress.Key != key {
+		return
+	}
+	c.state.InProgress = nil
+	kept := c.state.Records[:0]
+	for _, record := range c.state.Records {
+		if record.Key != key {
+			kept = append(kept, record)
+		}
+	}
+	c.state.Records = kept
+	_ = c.saveAgentState()
 }
 
 func (c *Collector) sendAgentCommandStatus(conn websocketConn, writeMu *sync.Mutex, payload models.AgentCommandStatusPayload) error {
@@ -2019,15 +2169,30 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 	if err := validateSelfUpdateSource(c.serverURL, cmd.DownloadURL); err != nil {
 		return err
 	}
+
+	// The task context carries the persistent cancel intent; the download
+	// stage lease bounds the network read.
+	taskCtx := c.currentTaskContext()
+
 	if err := report(models.UpdateJobTargetStatusDownloading, "downloading replacement binary", c.agentVersion); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, cmd.DownloadURL, nil)
+	c.updateTaskProgress(models.UpdateJobTargetStatusDownloading, "downloading replacement binary")
+
+	downloadCtx, cancelDownload := context.WithTimeout(taskCtx, leaseDownload)
+	defer cancelDownload()
+	req, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, cmd.DownloadURL, nil)
 	if err != nil {
 		return err
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errSelfUpdateCancelled
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("download stage lease expired: %w", err)
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -2036,11 +2201,28 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 	}
 	binaryData, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errSelfUpdateCancelled
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("download stage lease expired: %w", err)
+		}
 		return err
 	}
+
 	if err := report(models.UpdateJobTargetStatusVerifying, "verifying binary checksum", c.agentVersion); err != nil {
 		return err
 	}
+	c.updateTaskProgress(models.UpdateJobTargetStatusVerifying, "verifying binary checksum")
+	verifyCtx, cancelVerify := context.WithTimeout(taskCtx, leaseVerify)
+	defer cancelVerify()
+	if err := verifyCtx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errSelfUpdateCancelled
+		}
+		return fmt.Errorf("verify stage lease expired: %w", err)
+	}
+
 	digest := sha256.Sum256(binaryData)
 	actualChecksum := strings.ToLower(hex.EncodeToString(digest[:]))
 	if strings.ToLower(strings.TrimSpace(cmd.SHA256)) != actualChecksum {
@@ -2049,6 +2231,13 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 	if err := release.VerifyBinary(binaryData, cmd.Signature); err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
+	if err := verifyCtx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errSelfUpdateCancelled
+		}
+		return fmt.Errorf("verify stage lease expired: %w", err)
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		return err
@@ -2062,23 +2251,79 @@ func (c *Collector) runSelfUpdate(cmd models.AgentCommandPayload, report func(mo
 		return err
 	}
 	tmpPath := filepath.Join(filepath.Dir(exePath), ".thism-agent-update.tmp")
-	if err := os.WriteFile(tmpPath, binaryData, fileInfo.Mode()); err != nil {
+	if err := writeSyncedFile(tmpPath, binaryData, fileInfo.Mode().Perm()); err != nil {
 		return err
 	}
 	defer os.Remove(tmpPath)
-	if err := os.Rename(tmpPath, exePath); err != nil {
+
+	if err := taskCtx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return errSelfUpdateCancelled
+		}
 		return err
 	}
-	versionPath := persistedAgentVersionPath()
-	if versionPath != "" {
-		if err := os.WriteFile(versionPath, []byte(strings.TrimSpace(cmd.TargetVersion)+"\n"), 0644); err != nil {
-			return err
-		}
+
+	// Commit point: os.Rename is the irreversible substitution. From here on
+	// cancellation is refused and every failure is a conservative post-commit
+	// recovery (SHA256 reconciliation), never a clean "did not execute".
+	if err := c.markCommitPoint(); err != nil {
+		return err
 	}
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		return c.postCommitFailure(cmd, report, fmt.Errorf("rename failed after commit point: %w", err))
+	}
+
+	restartCtx, cancelRestart := context.WithTimeout(context.Background(), leaseRestart)
+	defer cancelRestart()
+	if err := restartCtx.Err(); err != nil {
+		return c.postCommitFailure(cmd, report, fmt.Errorf("restart stage lease expired: %w", err))
+	}
+
 	if err := report(models.UpdateJobTargetStatusRestarting, "restarting agent", cmd.TargetVersion); err != nil {
 		log.Printf("collector: failed to report self-update restart status: %v", err)
 	}
-	return syscall.Exec(exePath, os.Args, os.Environ())
+	c.updateTaskProgress(models.UpdateJobTargetStatusRestarting, "restarting agent")
+
+	versionPath := persistedAgentVersionPath()
+	if versionPath != "" {
+		if err := writeSyncedFile(versionPath, []byte(strings.TrimSpace(cmd.TargetVersion)+"\n"), 0644); err != nil {
+			return c.postCommitFailure(cmd, report, fmt.Errorf("version file write failed after commit point: %w", err))
+		}
+	}
+	if err := restartCtx.Err(); err != nil {
+		return c.postCommitFailure(cmd, report, fmt.Errorf("restart stage lease expired: %w", err))
+	}
+
+	if err := syscall.Exec(exePath, os.Args, os.Environ()); err != nil {
+		return c.postCommitFailure(cmd, report, fmt.Errorf("exec failed after commit point: %w", err))
+	}
+	return nil
+}
+
+// postCommitFailure records an unknown execution state and blocks the node's
+// control plane: the binary was replaced but the outcome cannot be proven.
+// Recovery happens through SHA256 evidence (startup recovery or operator
+// disposition).
+func (c *Collector) postCommitFailure(cmd models.AgentCommandPayload, report func(models.UpdateJobTargetStatus, string, string) error, err error) error {
+	c.finishUpdateTask(models.UpdateJobTargetStatusUnknown, "post-commit failure: "+err.Error())
+	_ = report(models.UpdateJobTargetStatusUnknown, "post-commit failure: "+err.Error(), cmd.TargetVersion)
+	return err
+}
+
+func writeSyncedFile(path string, data []byte, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func validateSelfUpdateSource(serverURL, downloadURL string) error {

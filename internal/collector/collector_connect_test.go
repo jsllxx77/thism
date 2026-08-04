@@ -132,7 +132,7 @@ func TestCollectorConnectSendsMetricsWhileLatencyProbeIsInFlight(t *testing.T) {
 		remoteAddr:  &net.TCPAddr{IP: net.ParseIP("104.21.89.105"), Port: 443},
 	}
 
-	c := NewWithInterval("wss://example.com", "token", "node", "", 1200*time.Millisecond)
+	c := newTestCollector(t, "wss://example.com", "token", "node", "", 1200*time.Millisecond)
 	c.dialWebsocket = func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error) {
 		return conn, nil
 	}
@@ -203,7 +203,7 @@ func TestCollectorConnectSendsMetricsWhileAutoUpdateCheckIsInFlight(t *testing.T
 		remoteAddr:  &net.TCPAddr{IP: net.ParseIP("104.21.89.105"), Port: 443},
 	}
 
-	c := NewWithInterval("wss://example.com", "token", "node", "", 200*time.Millisecond)
+	c := newTestCollector(t, "wss://example.com", "token", "node", "", 200*time.Millisecond)
 	c.dialWebsocket = func(mode dialMode, targetURL string, headers http.Header) (websocketConn, error) {
 		return conn, nil
 	}

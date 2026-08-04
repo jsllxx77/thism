@@ -436,6 +436,45 @@ CREATE TABLE IF NOT EXISTS recovery_states (
     last_observed_at      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (node_id, metric)
 );
+
+CREATE TABLE IF NOT EXISTS node_command_streams (
+    node_id           TEXT PRIMARY KEY,
+    stream_id         TEXT NOT NULL,
+    next_seq          INTEGER NOT NULL DEFAULT 0,
+    retired_watermark INTEGER NOT NULL DEFAULT 0,
+    control_state     TEXT NOT NULL DEFAULT '',
+    control_reason    TEXT NOT NULL DEFAULT '',
+    updated_at        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS update_cancel_tombstones (
+    node_id    TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    job_id     TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (node_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS update_sequence_retirements (
+    node_id    TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    job_id     TEXT NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (node_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS control_audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id    TEXT NOT NULL,
+    event      TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_control_audit_node_created ON control_audit_log(node_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_cancel_tombstones_node_seq ON update_cancel_tombstones(node_id, seq);
+CREATE INDEX IF NOT EXISTS idx_sequence_retirements_node_seq ON update_sequence_retirements(node_id, seq);
 `)
 	if err != nil {
 		return err
@@ -515,6 +554,31 @@ CREATE TABLE IF NOT EXISTS recovery_states (
 		return err
 	}
 	if err := s.ensureColumn("update_jobs", "updated_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	for _, column := range []struct {
+		table      string
+		name       string
+		definition string
+	}{
+		{"update_job_targets", "seq", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "stream_id", "TEXT NOT NULL DEFAULT ''"},
+		{"update_job_targets", "delivery_state", "TEXT NOT NULL DEFAULT 'pending'"},
+		{"update_job_targets", "delivery_error", "TEXT NOT NULL DEFAULT ''"},
+		{"update_job_targets", "delivery_attempts", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "delivery_attempted_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "delivery_generation", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "target_sha256", "TEXT NOT NULL DEFAULT ''"},
+		{"update_job_targets", "observation", "TEXT NOT NULL DEFAULT ''"},
+		{"update_job_targets", "cancel_intent_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "cancelled_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"update_job_targets", "last_progress_at", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := s.ensureColumn(column.table, column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	if err := s.ensureColumn("node_command_streams", "retired_watermark", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return s.ensureColumn("update_jobs", "signature", "TEXT NOT NULL DEFAULT ''")
@@ -2127,7 +2191,10 @@ FROM update_jobs WHERE id = ?
 
 func (s *Store) ListUpdateJobTargets(jobID string) ([]*models.UpdateJobTarget, error) {
 	rows, err := s.db.Query(`
-SELECT job_id, node_id, status, message, updated_at, reported_version
+SELECT job_id, node_id, status, message, updated_at, reported_version,
+       seq, stream_id, delivery_state, delivery_error, delivery_attempts,
+       delivery_attempted_at, delivery_generation, target_sha256, observation,
+       cancel_intent_at, cancelled_at, last_progress_at
 FROM update_job_targets WHERE job_id = ? ORDER BY node_id
 `, jobID)
 	if err != nil {
@@ -2138,7 +2205,10 @@ FROM update_job_targets WHERE job_id = ? ORDER BY node_id
 	var targets []*models.UpdateJobTarget
 	for rows.Next() {
 		var target models.UpdateJobTarget
-		if err := rows.Scan(&target.JobID, &target.NodeID, &target.Status, &target.Message, &target.UpdatedAt, &target.ReportedVersion); err != nil {
+		if err := rows.Scan(&target.JobID, &target.NodeID, &target.Status, &target.Message, &target.UpdatedAt, &target.ReportedVersion,
+			&target.Seq, &target.StreamID, &target.DeliveryState, &target.DeliveryError, &target.DeliveryAttempts,
+			&target.DeliveryAttemptedAt, &target.DeliveryGeneration, &target.TargetSHA256, &target.Observation,
+			&target.CancelIntentAt, &target.CancelledAt, &target.LastProgressAt); err != nil {
 			return nil, err
 		}
 		targets = append(targets, &target)
@@ -2186,40 +2256,60 @@ WHERE t.node_id = ?
 }
 
 func (s *Store) UpdateUpdateJobTargetStatus(jobID, nodeID string, status models.UpdateJobTargetStatus, message, reportedVersion string) error {
-	updatedAt := time.Now().Unix()
-	_, err := s.db.Exec(`
-UPDATE update_job_targets
-SET status = ?,
-    message = ?,
-    reported_version = CASE WHEN ? != '' THEN ? ELSE reported_version END,
-    updated_at = ?
-WHERE job_id = ? AND node_id = ?
-`, status, message, reportedVersion, reportedVersion, updatedAt, jobID, nodeID)
+	// Legacy setter: routed through the same CAS/legal-transition machinery so
+	// no caller can silently regress or overwrite a sticky terminal state.
+	_, err := s.ApplyExecutionTransition(jobID, nodeID, status, message, reportedVersion)
+	return err
+}
+
+func recomputeUpdateJobStatusTx(tx *sql.Tx, jobID string) error {
+	rows, err := tx.Query(`SELECT job_id, node_id, status, message, updated_at, reported_version,
+       seq, stream_id, delivery_state, delivery_error, delivery_attempts,
+       delivery_attempted_at, delivery_generation, target_sha256, observation,
+       cancel_intent_at, cancelled_at, last_progress_at
+FROM update_job_targets WHERE job_id = ?`, jobID)
 	if err != nil {
 		return err
 	}
-	_, err = s.RecomputeUpdateJobStatus(jobID)
+	var targets []*models.UpdateJobTarget
+	for rows.Next() {
+		var target models.UpdateJobTarget
+		if err := rows.Scan(&target.JobID, &target.NodeID, &target.Status, &target.Message, &target.UpdatedAt, &target.ReportedVersion,
+			&target.Seq, &target.StreamID, &target.DeliveryState, &target.DeliveryError, &target.DeliveryAttempts,
+			&target.DeliveryAttemptedAt, &target.DeliveryGeneration, &target.TargetSHA256, &target.Observation,
+			&target.CancelIntentAt, &target.CancelledAt, &target.LastProgressAt); err != nil {
+			rows.Close()
+			return err
+		}
+		targets = append(targets, &target)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	jobStatus := aggregateUpdateJobStatus(targets)
+	_, err = tx.Exec(`UPDATE update_jobs SET status = ?, updated_at = ? WHERE id = ?`, jobStatus, time.Now().Unix(), jobID)
 	return err
 }
 
 func (s *Store) RecomputeUpdateJobStatus(jobID string) (*models.UpdateJob, error) {
-	targets, err := s.ListUpdateJobTargets(jobID)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+
+	if err := recomputeUpdateJobStatusTx(tx, jobID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
 	job, err := s.GetUpdateJob(jobID)
 	if err != nil || job == nil {
 		return job, err
-	}
-	if len(targets) == 0 {
-		return job, nil
-	}
-
-	job.Status = aggregateUpdateJobStatus(targets)
-	job.UpdatedAt = time.Now().Unix()
-	_, err = s.db.Exec(`UPDATE update_jobs SET status = ?, updated_at = ? WHERE id = ?`, job.Status, job.UpdatedAt, job.ID)
-	if err != nil {
-		return nil, err
 	}
 	return job, nil
 }

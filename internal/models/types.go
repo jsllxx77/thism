@@ -344,8 +344,52 @@ const (
 	UpdateJobTargetStatusRestarting     UpdateJobTargetStatus = "restarting"
 	UpdateJobTargetStatusSucceeded      UpdateJobTargetStatus = "succeeded"
 	UpdateJobTargetStatusFailed         UpdateJobTargetStatus = "failed"
+	UpdateJobTargetStatusUnknown        UpdateJobTargetStatus = "unknown"
 	UpdateJobTargetStatusTimeout        UpdateJobTargetStatus = "timeout"
 	UpdateJobTargetStatusOfflineSkipped UpdateJobTargetStatus = "offline_skipped"
+	UpdateJobTargetStatusCancelled      UpdateJobTargetStatus = "cancelled"
+)
+
+// DeliveryState is the server-owned delivery dimension for a command sent to
+// an agent. It is tracked separately from the agent-owned execution status and
+// never overwrites it.
+type DeliveryState string
+
+const (
+	DeliveryStatePending    DeliveryState = "pending"
+	DeliveryStateSending    DeliveryState = "sending"
+	DeliveryStateSent       DeliveryState = "sent"
+	DeliveryStateSendFailed DeliveryState = "send_failed"
+)
+
+// ObservationState carries server-side observations about a target that do not
+// alter the agent-owned execution status.
+type ObservationState string
+
+const (
+	ObservationNone    ObservationState = ""
+	ObservationStalled ObservationState = "stalled"
+)
+
+// ControlState describes the control-plane availability of a node.
+type ControlState string
+
+const (
+	ControlStateNone        ControlState = ""
+	ControlStateQuarantined ControlState = "control-quarantined"
+	ControlStateBlocked     ControlState = "control-blocked"
+)
+
+// CommandRejectCode is the wire-level rejection reason an agent returns when it
+// refuses a command before execution.
+type CommandRejectCode string
+
+const (
+	CommandRejectSequenceGap        CommandRejectCode = "sequence_gap"
+	CommandRejectExpired            CommandRejectCode = "expired"
+	CommandRejectAlreadyProcessed   CommandRejectCode = "already_processed"
+	CommandRejectControlQuarantined CommandRejectCode = "control-quarantined"
+	CommandRejectControlBlocked     CommandRejectCode = "control-blocked"
 )
 
 type AgentCommand struct {
@@ -355,6 +399,8 @@ type AgentCommand struct {
 	DownloadURL   string           `json:"download_url"`
 	SHA256        string           `json:"sha256"`
 	Signature     string           `json:"signature,omitempty"`
+	StreamID      string           `json:"stream_id,omitempty"`
+	Seq           int64            `json:"seq,omitempty"`
 }
 
 type AgentCommandStatus struct {
@@ -378,12 +424,46 @@ type UpdateJob struct {
 }
 
 type UpdateJobTarget struct {
-	JobID           string                `json:"job_id"`
-	NodeID          string                `json:"node_id"`
-	Status          UpdateJobTargetStatus `json:"status"`
-	Message         string                `json:"message,omitempty"`
-	UpdatedAt       int64                 `json:"updated_at"`
-	ReportedVersion string                `json:"reported_version,omitempty"`
+	JobID               string                `json:"job_id"`
+	NodeID              string                `json:"node_id"`
+	Status              UpdateJobTargetStatus `json:"status"`
+	Message             string                `json:"message,omitempty"`
+	UpdatedAt           int64                 `json:"updated_at"`
+	ReportedVersion     string                `json:"reported_version,omitempty"`
+	Seq                 int64                 `json:"seq,omitempty"`
+	StreamID            string                `json:"stream_id,omitempty"`
+	DeliveryState       DeliveryState         `json:"delivery_state,omitempty"`
+	DeliveryError       string                `json:"delivery_error,omitempty"`
+	DeliveryAttempts    int                   `json:"delivery_attempts,omitempty"`
+	DeliveryAttemptedAt int64                 `json:"delivery_attempted_at,omitempty"`
+	DeliveryGeneration  int64                 `json:"delivery_generation,omitempty"`
+	TargetSHA256        string                `json:"target_sha256,omitempty"`
+	Observation         ObservationState      `json:"observation,omitempty"`
+	CancelIntentAt      int64                 `json:"cancel_intent_at,omitempty"`
+	CancelledAt         int64                 `json:"cancelled_at,omitempty"`
+	LastProgressAt      int64                 `json:"last_progress_at,omitempty"`
+}
+
+// CommandStream is the per-node persistent command sequence state owned by the
+// server. The agent mirrors StreamID and its own retired watermark locally.
+type CommandStream struct {
+	NodeID           string       `json:"node_id"`
+	StreamID         string       `json:"stream_id"`
+	NextSeq          int64        `json:"next_seq"`
+	RetiredWatermark int64        `json:"retired_watermark"`
+	ControlState     ControlState `json:"control_state"`
+	ControlReason    string       `json:"control_reason,omitempty"`
+	UpdatedAt        int64        `json:"updated_at"`
+}
+
+// AuditEvent is a control-plane audit record (stream binding, rollback
+// reconciliation, unknown disposition, quarantine/block events).
+type AuditEvent struct {
+	ID        int64  `json:"id"`
+	NodeID    string `json:"node_id"`
+	Event     string `json:"event"`
+	Detail    string `json:"detail,omitempty"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type AgentCommandPayload struct {
@@ -393,13 +473,68 @@ type AgentCommandPayload struct {
 	DownloadURL   string           `json:"download_url"`
 	SHA256        string           `json:"sha256"`
 	Signature     string           `json:"signature,omitempty"`
+	StreamID      string           `json:"stream_id,omitempty"`
+	Seq           int64            `json:"seq,omitempty"`
 }
 
 type AgentCommandStatusPayload struct {
+	JobID            string                `json:"job_id"`
+	Status           UpdateJobTargetStatus `json:"status"`
+	Message          string                `json:"message,omitempty"`
+	ReportedVersion  string                `json:"reported_version,omitempty"`
+	StreamID         string                `json:"stream_id,omitempty"`
+	Seq              int64                 `json:"seq,omitempty"`
+	RetiredWatermark int64                 `json:"retired_watermark,omitempty"`
+	RejectCode       CommandRejectCode     `json:"reject_code,omitempty"`
+}
+
+// AgentHandshakePayload is sent by the agent immediately after the WebSocket
+// connects, before the server may send control commands.
+type AgentHandshakePayload struct {
+	StreamID         string                 `json:"stream_id,omitempty"`
+	RetiredWatermark int64                  `json:"retired_watermark"`
+	ControlState     ControlState           `json:"control_state,omitempty"`
+	ControlReason    string                 `json:"control_reason,omitempty"`
+	InProgress       *AgentInProgressState  `json:"in_progress,omitempty"`
+	Records          []AgentExecutionRecord `json:"records,omitempty"`
+}
+
+type AgentInProgressState struct {
+	JobID          string                `json:"job_id"`
+	Seq            int64                 `json:"seq"`
+	Stage          UpdateJobTargetStatus `json:"stage"`
+	TargetVersion  string                `json:"target_version,omitempty"`
+	TargetSHA256   string                `json:"target_sha256,omitempty"`
+	LastProgressAt int64                 `json:"last_progress_at"`
+	CommitPoint    bool                  `json:"commit_point"`
+	CancelIntent   bool                  `json:"cancel_intent,omitempty"`
+}
+
+type AgentExecutionRecord struct {
+	Seq             int64                 `json:"seq"`
 	JobID           string                `json:"job_id"`
 	Status          UpdateJobTargetStatus `json:"status"`
 	Message         string                `json:"message,omitempty"`
 	ReportedVersion string                `json:"reported_version,omitempty"`
+	TargetSHA256    string                `json:"target_sha256,omitempty"`
+	UpdatedAt       int64                 `json:"updated_at"`
+}
+
+// AgentHandshakeAckPayload is the server's reply to the agent handshake. The
+// agent must adopt RetiredWatermark (it can only move forward) and must not
+// accept commands with Seq beyond NextSeq-1.
+type AgentHandshakeAckPayload struct {
+	StreamID         string       `json:"stream_id"`
+	NextSeq          int64        `json:"next_seq"`
+	RetiredWatermark int64        `json:"retired_watermark"`
+	ControlState     ControlState `json:"control_state"`
+	Message          string       `json:"message,omitempty"`
+}
+
+// AgentCommandCancelPayload requests cancellation of an in-flight command.
+type AgentCommandCancelPayload struct {
+	JobID string `json:"job_id"`
+	Seq   int64  `json:"seq"`
 }
 
 // WSMessage wraps any WebSocket message with a type discriminator.
@@ -407,3 +542,13 @@ type WSMessage struct {
 	Type    string `json:"type"`
 	Payload any    `json:"payload,omitempty"`
 }
+
+// Well-known WebSocket message types for the agent control plane.
+const (
+	WSMessageTypeAgentHandshake     = "agent_handshake"
+	WSMessageTypeAgentHandshakeAck  = "agent_handshake_ack"
+	WSMessageTypeAgentCommand       = "agent_command"
+	WSMessageTypeAgentCommandStatus = "agent_command_status"
+	WSMessageTypeAgentCommandCancel = "agent_command_cancel"
+	WSMessageTypeAgentUpdateStatus  = "agent_update_status"
+)

@@ -138,10 +138,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open store: %v", err)
 	}
-	defer s.Close()
 
-	startMetricsRetentionPruner(s)
-	startMetricsRolluper(s)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Background loops are bound to the main lifecycle and stopped before the
+	// store closes (plan §8.2 shutdown ordering).
+	pruneDone := startMetricsRetentionPruner(s, ctx)
+	rollupDone := startMetricsRolluper(s, ctx)
 
 	h := hub.New(s)
 	go h.Run()
@@ -166,13 +170,30 @@ func main() {
 		Password:   *adminPass,
 	}, frontendHandler, countryResolver, geoManager)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	server := newHTTPServer(":"+*port, router)
 	log.Printf("ThisM server listening on :%s", *port)
-	if err := serveHTTPServer(ctx, server, nil); err != nil {
-		log.Fatal(err)
+	serveErr := serveHTTPServer(ctx, server, nil)
+
+	// Orderly shutdown: stop receiving new control work (HTTP is down), fence
+	// hub intake, wait for background workers, then close the store last.
+	h.Close()
+	waitForBackgroundLoop("metrics retention pruner", pruneDone)
+	waitForBackgroundLoop("metrics rollup", rollupDone)
+	if err := s.Close(); err != nil {
+		log.Printf("store close: %v", err)
+	}
+	if serveErr != nil {
+		log.Fatal(serveErr)
+	}
+}
+
+// waitForBackgroundLoop waits up to the shutdown deadline for a background
+// loop to exit; overdue loops are logged instead of hanging shutdown.
+func waitForBackgroundLoop(name string, done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		log.Printf("shutdown: %s did not stop within deadline", name)
 	}
 }
 
@@ -240,15 +261,44 @@ func serveHTTPServer(ctx context.Context, server *http.Server, listener net.List
 	}
 }
 
-func startMetricsRetentionPruner(s *store.Store) {
+func startMetricsRetentionPruner(s *store.Store, ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		pruneMetrics(s)
+		pruneUpdateDetail(s)
 		ticker := time.NewTicker(metricsRetentionPruneInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			pruneMetrics(s)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pruneMetrics(s)
+				pruneUpdateDetail(s)
+			}
 		}
 	}()
+	return done
+}
+
+func pruneUpdateDetail(s *store.Store) {
+	pruned, err := s.PruneUpdateDetail()
+	if err != nil {
+		log.Printf("update detail retention: failed to prune: %v", err)
+		return
+	}
+	if pruned > 0 {
+		log.Printf("update detail retention: pruned %d rows", pruned)
+	}
+	stalled, err := s.MarkStalledUpdateObservations(30 * time.Minute)
+	if err != nil {
+		log.Printf("update observation: stalled sweep failed: %v", err)
+		return
+	}
+	if stalled > 0 {
+		log.Printf("update observation: marked %d in-progress targets stalled", stalled)
+	}
 }
 
 func pruneMetrics(s *store.Store) {
@@ -266,18 +316,32 @@ func pruneMetrics(s *store.Store) {
 	}
 }
 
-func startMetricsRolluper(s *store.Store) {
+func startMetricsRolluper(s *store.Store, ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(metricsRollupInterval)
 		defer ticker.Stop()
 
 		// Give the server a moment to finish booting.
-		time.Sleep(2 * time.Second)
-		rollupMetrics(s)
-		for range ticker.C {
+		bootTimer := time.NewTimer(2 * time.Second)
+		defer bootTimer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-bootTimer.C:
 			rollupMetrics(s)
 		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rollupMetrics(s)
+			}
+		}
 	}()
+	return done
 }
 
 func rollupMetrics(s *store.Store) {

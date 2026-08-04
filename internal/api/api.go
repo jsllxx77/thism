@@ -640,6 +640,18 @@ func NewRouterWithAuthGeoManager(s *store.Store, h *hub.Hub, auth AuthConfig, fr
 		r.Get("/api/agent-updates/{id}", func(w http.ResponseWriter, req *http.Request) {
 			handleGetAgentUpdateJob(w, req, s)
 		})
+
+		r.Post("/api/agent-updates/{id}/cancel", func(w http.ResponseWriter, req *http.Request) {
+			handleCancelAgentUpdateJob(w, req, s, h)
+		})
+
+		r.Post("/api/agent-updates/{id}/resolve-unknown", func(w http.ResponseWriter, req *http.Request) {
+			handleResolveUnknownAgentUpdate(w, req, s)
+		})
+
+		r.Get("/api/nodes/{id}/command-stream", func(w http.ResponseWriter, req *http.Request) {
+			handleGetNodeCommandStream(w, req, s)
+		})
 	})
 
 	// ---------------------------------------------------------------
@@ -2578,6 +2590,9 @@ func handleRegisterNode(w http.ResponseWriter, r *http.Request, s *store.Store, 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := s.AuditNodeEvent(node.ID, "node-registered", "new node registered by operator"); err != nil {
+		log.Printf("node register: audit event failed: %v", err)
+	}
 	syncLatencyMonitorsForOnlineNodes(s, h)
 
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -2745,17 +2760,98 @@ func handleAgentCommandStatus(nodeID string, payload models.AgentCommandStatusPa
 	if s == nil || strings.TrimSpace(payload.JobID) == "" {
 		return
 	}
-	_ = s.UpdateUpdateJobTargetStatus(payload.JobID, nodeID, payload.Status, payload.Message, payload.ReportedVersion)
+
+	// Rejections (sequence_gap, expired, already_processed, control-blocked)
+	// carry no execution transition; they are informational for the server's
+	// delivery bookkeeping.
+	if payload.RejectCode != "" {
+		switch payload.RejectCode {
+		case models.CommandRejectSequenceGap:
+			log.Printf("agent command: node %s reported sequence_gap for job %s (seq %d); pending deliveries will be resent in order", nodeID, payload.JobID, payload.Seq)
+		case models.CommandRejectExpired, models.CommandRejectAlreadyProcessed:
+			// Idempotent replay of a retired sequence; nothing to do.
+		}
+		return
+	}
+
+	// Sequence identity check: a status that carries a seq must match the
+	// target's assigned seq, otherwise it is a late or foreign report.
+	if payload.Seq > 0 {
+		target, err := s.GetUpdateJobTarget(payload.JobID, nodeID)
+		if err != nil {
+			log.Printf("agent command status: load target %s/%s failed: %v", payload.JobID, nodeID, err)
+			return
+		}
+		if target == nil || target.Seq != payload.Seq || strings.TrimSpace(payload.StreamID) == "" || target.StreamID != payload.StreamID {
+			log.Printf("agent command status: rejected status for job %s node %s: stream/seq mismatch (target=%d/%s reported=%d/%s)", payload.JobID, nodeID, seqOf(target), streamOf(target), payload.Seq, payload.StreamID)
+			return
+		}
+	}
+
+	// CAS/legal transition inside one transaction; broadcast only the
+	// committed, normalized state.
+	applied, err := s.ApplyExecutionTransition(payload.JobID, nodeID, payload.Status, payload.Message, payload.ReportedVersion)
+	if err != nil {
+		log.Printf("agent command status: persist transition for job %s node %s failed: %v", payload.JobID, nodeID, err)
+		return
+	}
+	if !applied {
+		log.Printf("agent command status: rejected illegal transition for job %s node %s: %s", payload.JobID, nodeID, payload.Status)
+		return
+	}
+	target, err := s.GetUpdateJobTarget(payload.JobID, nodeID)
+	if err != nil {
+		log.Printf("agent command status: reload target after commit failed: %v", err)
+		return
+	}
+	if target == nil {
+		return
+	}
 	h.Broadcast(models.WSMessage{
 		Type: "agent_update_status",
 		Payload: map[string]any{
-			"job_id":           payload.JobID,
-			"node_id":          nodeID,
-			"status":           payload.Status,
-			"message":          payload.Message,
-			"reported_version": payload.ReportedVersion,
+			"job_id":           target.JobID,
+			"node_id":          target.NodeID,
+			"status":           target.Status,
+			"message":          target.Message,
+			"reported_version": target.ReportedVersion,
+			"seq":              target.Seq,
+			"stream_id":        target.StreamID,
+			"delivery_state":   target.DeliveryState,
+			"observation":      target.Observation,
 		},
 	})
+}
+
+func seqOf(target *models.UpdateJobTarget) int64 {
+	if target == nil {
+		return 0
+	}
+	return target.Seq
+}
+
+func normalizeNodeIDs(nodeIDs []string) []string {
+	normalized := make([]string, 0, len(nodeIDs))
+	seen := make(map[string]struct{}, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		normalized = append(normalized, nodeID)
+	}
+	return normalized
+}
+
+func streamOf(target *models.UpdateJobTarget) string {
+	if target == nil {
+		return ""
+	}
+	return target.StreamID
 }
 
 func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
@@ -2763,11 +2859,12 @@ func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
-	if s == nil || len(req.NodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
+	nodeIDs := normalizeNodeIDs(req.NodeIDs)
+	if s == nil || h == nil || len(nodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uiMessage(resolveUILanguage(r), "invalidRequestBody")})
 		return
 	}
-	for _, nodeID := range req.NodeIDs {
+	for _, nodeID := range nodeIDs {
 		node, err := s.GetNodeByID(nodeID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -2796,44 +2893,25 @@ func handleCreateAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store
 		CreatedBy:     "admin",
 		Status:        models.UpdateJobStatusPending,
 	}
-	if err := s.CreateUpdateJob(job); err != nil {
+	// Job, targets, streams and per-node sequences are created in one
+	// transaction; an allocation can never be orphaned.
+	targets, err := s.CreateUpdateJobWithTargets(job, nodeIDs)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.CreateUpdateJobTargets(job.ID, req.NodeIDs); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	for _, nodeID := range req.NodeIDs {
-		if !h.IsOnline(nodeID) {
-			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, "agent offline", "")
-			continue
-		}
-		cmd := models.AgentCommandPayload{
-			JobID:         job.ID,
-			Kind:          models.AgentCommandKindSelfUpdate,
-			TargetVersion: req.TargetVersion,
-			DownloadURL:   req.DownloadURL,
-			SHA256:        req.SHA256,
-			Signature:     job.Signature,
-		}
-		if err := h.SendToAgent(nodeID, models.WSMessage{Type: "agent_command", Payload: cmd}); err != nil {
-			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusFailed, err.Error(), "")
-			continue
-		}
-		_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusDispatched, "command dispatched", "")
-	}
+	deliverTargets(w, r, s, h, job, targets)
 	storedJob, err := s.GetUpdateJob(job.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	targets, err := s.ListUpdateJobTargets(job.ID)
+	storedTargets, err := s.ListUpdateJobTargets(job.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, updateJobResponse{Job: storedJob, Targets: targets})
+	writeJSON(w, http.StatusOK, updateJobResponse{Job: storedJob, Targets: storedTargets})
 }
 
 func handleGetAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store) {
@@ -2887,6 +2965,17 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	for _, nodeID := range nodeIDs {
+		node, err := s.GetNodeByID(nodeID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
+			return
+		}
+	}
 	jobID, err := generateHex()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -2894,34 +2983,127 @@ func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.S
 	}
 	now := time.Now().Unix()
 	job := &models.UpdateJob{ID: jobID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: strings.TrimSpace(req.TargetVersion), DownloadURL: strings.TrimSpace(req.DownloadURL), SHA256: strings.TrimSpace(req.SHA256), Signature: strings.TrimSpace(req.Signature), CreatedAt: now, UpdatedAt: now, CreatedBy: "admin", Status: models.UpdateJobStatusPending}
-	if err := s.CreateUpdateJob(job); err != nil {
+	// Job, targets, streams and sequences are created in one transaction.
+	targets, err := s.CreateUpdateJobWithTargets(job, nodeIDs)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.CreateUpdateJobTargets(job.ID, nodeIDs); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	deliverTargets(w, r, s, h, job, targets)
+	storedJob, _ := s.GetUpdateJob(job.ID)
+	storedTargets, _ := s.ListUpdateJobTargets(job.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"job": storedJob, "targets": storedTargets})
+}
+
+// deliverTargets attempts delivery of a freshly created job to each target.
+// The online check is only a first-pass filter: delivery correctness comes
+// from the linearized SendToAgent result, which is recorded as a server-owned
+// delivery fact. Targets that could not be sent (offline, handshake pending,
+// send failure) keep delivery_state=send_failed with status untouched so they
+// can be retried after the next handshake.
+func deliverTargets(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub, job *models.UpdateJob, targets []models.UpdateJobTarget) {
+	if s == nil || h == nil {
 		return
 	}
-	for _, nodeID := range nodeIDs {
-		node, err := s.GetNodeByID(nodeID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	for i := range targets {
+		target := targets[i]
+		if !h.IsOnline(target.NodeID) {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "agent offline at creation", 0)
+			_, _ = s.ApplyExecutionTransition(target.JobID, target.NodeID, models.UpdateJobTargetStatusOfflineSkipped, "agent offline", "")
+			continue
+		}
+		if !h.HandshakeReady(target.NodeID) {
+			// The node is connected but has not completed the stream/watermark
+			// handshake; commands are withheld and delivery is retried after
+			// the handshake completes.
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "agent handshake pending", 0)
+			continue
+		}
+		stream, err := s.GetCommandStream(target.NodeID)
+		if err != nil || stream == nil {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "command stream unavailable", 0)
+			continue
+		}
+		if stream.ControlState != models.ControlStateNone {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "node control state: "+string(stream.ControlState), 0)
+			continue
+		}
+		cmd := models.AgentCommandPayload{
+			JobID:         target.JobID,
+			Kind:          models.AgentCommandKindSelfUpdate,
+			TargetVersion: job.TargetVersion,
+			DownloadURL:   job.DownloadURL,
+			SHA256:        job.SHA256,
+			Signature:     job.Signature,
+			StreamID:      target.StreamID,
+			Seq:           target.Seq,
+		}
+		generation := h.CurrentGeneration(target.NodeID)
+		if generation == 0 {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "agent generation unavailable", 0)
+			continue
+		}
+		_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSending, "", int64(generation))
+		if err := h.SendToAgent(target.NodeID, models.WSMessage{Type: models.WSMessageTypeAgentCommand, Payload: cmd}); err != nil {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, err.Error(), int64(generation))
+			continue
+		}
+		_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSent, "", int64(generation))
+		// Legacy display marker; execution state remains agent-owned.
+		_, _ = s.ApplyExecutionTransition(target.JobID, target.NodeID, models.UpdateJobTargetStatusDispatched, "command dispatched", "")
+	}
+}
+
+// resendPendingDeliveries delivers all pending commands for a node whose
+// sequence is beyond the agent's retired watermark, strictly in sequence
+// order. Called after the handshake reconciles the stream.
+func resendPendingDeliveries(nodeID string, s *store.Store, h *hub.Hub, generation uint64) {
+	if s == nil || h == nil || !h.IsCurrent(nodeID, generation) {
+		return
+	}
+	stream, err := s.GetCommandStream(nodeID)
+	if err != nil || stream == nil {
+		return
+	}
+	if stream.ControlState != models.ControlStateNone {
+		return
+	}
+	watermark := stream.RetiredWatermark
+	if watermark < 0 {
+		watermark = 0
+	}
+	pending, err := s.PendingDeliveriesForNode(nodeID, watermark, 64)
+	if err != nil {
+		log.Printf("agent command: list pending deliveries for node %s failed: %v", nodeID, err)
+		return
+	}
+	for _, target := range pending {
+		if !h.IsCurrent(nodeID, generation) || !h.HandshakeReady(nodeID) {
 			return
 		}
-		if node == nil || !h.IsOnline(nodeID) {
-			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, "node offline", "")
+		job, err := s.GetUpdateJob(target.JobID)
+		if err != nil || job == nil {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, "job record missing", 0)
 			continue
 		}
-		msg := models.WSMessage{Type: "agent_command", Payload: models.AgentCommandPayload{JobID: job.ID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: job.TargetVersion, DownloadURL: job.DownloadURL, SHA256: job.SHA256, Signature: job.Signature}}
-		if err := h.SendToAgent(nodeID, msg); err != nil {
-			_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusOfflineSkipped, err.Error(), "")
-			continue
+		cmd := models.AgentCommandPayload{
+			JobID:         target.JobID,
+			Kind:          job.Kind,
+			TargetVersion: job.TargetVersion,
+			DownloadURL:   job.DownloadURL,
+			SHA256:        job.SHA256,
+			Signature:     job.Signature,
+			StreamID:      target.StreamID,
+			Seq:           target.Seq,
 		}
-		_ = s.UpdateUpdateJobTargetStatus(job.ID, nodeID, models.UpdateJobTargetStatusDispatched, "sent", "")
+		_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSending, "", int64(generation))
+		if err := h.SendToAgent(nodeID, models.WSMessage{Type: models.WSMessageTypeAgentCommand, Payload: cmd}); err != nil {
+			_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSendFailed, err.Error(), int64(generation))
+			return
+		}
+		_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSent, "", int64(generation))
+		_, _ = s.ApplyExecutionTransition(target.JobID, target.NodeID, models.UpdateJobTargetStatusDispatched, "command dispatched", "")
 	}
-	storedJob, _ := s.GetUpdateJob(job.ID)
-	targets, _ := s.ListUpdateJobTargets(job.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"job": storedJob, "targets": targets})
 }
 
 func handleGetAgentUpdate(w http.ResponseWriter, r *http.Request, s *store.Store) {
@@ -2941,6 +3123,123 @@ func handleGetAgentUpdate(w http.ResponseWriter, r *http.Request, s *store.Store
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"job": job, "targets": targets})
+}
+
+// handleCancelAgentUpdateJob records a persistent cancel tombstone for the
+// assigned sequences and forwards a cancel intent to any currently connected
+// agents. Assigned jobs can never be deleted; the tombstone closes the
+// sequence.
+func handleCancelAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
+	jobID := chi.URLParam(r, "id")
+	if s == nil || h == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	job, err := s.GetUpdateJob(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if job == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+	var req struct {
+		NodeIDs []string `json:"node_ids"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	targets, err := s.ListUpdateJobTargets(jobID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	selected := make(map[string]struct{}, len(req.NodeIDs))
+	for _, nodeID := range req.NodeIDs {
+		selected[nodeID] = struct{}{}
+	}
+	for _, target := range targets {
+		if len(selected) > 0 {
+			if _, ok := selected[target.NodeID]; !ok {
+				continue
+			}
+		}
+		if target.Seq > 0 {
+			if err := s.CreateCancelTombstone(target.JobID, target.NodeID, target.Seq); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		if h.HandshakeReady(target.NodeID) {
+			cancel := models.AgentCommandCancelPayload{JobID: target.JobID, Seq: target.Seq}
+			if err := h.SendToAgent(target.NodeID, models.WSMessage{Type: models.WSMessageTypeAgentCommandCancel, Payload: cancel}); err != nil {
+				log.Printf("agent command cancel: send to node %s failed: %v", target.NodeID, err)
+			}
+		}
+	}
+	storedTargets, _ := s.ListUpdateJobTargets(jobID)
+	writeJSON(w, http.StatusOK, map[string]any{"job": job, "targets": storedTargets})
+}
+
+// handleResolveUnknownAgentUpdate is the audited operator disposition of an
+// unknown execution state. Resolution requires evidence or a reason and only
+// terminal resolutions are accepted.
+func handleResolveUnknownAgentUpdate(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	jobID := chi.URLParam(r, "id")
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	var req struct {
+		NodeID   string                       `json:"node_id"`
+		Status   models.UpdateJobTargetStatus `json:"status"`
+		Evidence string                       `json:"evidence"`
+		Reason   string                       `json:"reason"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.NodeID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node_id is required"})
+		return
+	}
+	applied, err := s.ResolveUnknownTarget(jobID, req.NodeID, req.Status, req.Evidence, req.Reason)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !applied {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "target is not in unknown state"})
+		return
+	}
+	targets, _ := s.ListUpdateJobTargets(jobID)
+	writeJSON(w, http.StatusOK, map[string]any{"targets": targets})
+}
+
+// handleGetNodeCommandStream exposes the node's stream state, control state
+// and recent control-plane audit events for operators.
+func handleGetNodeCommandStream(w http.ResponseWriter, r *http.Request, s *store.Store) {
+	nodeID := chi.URLParam(r, "id")
+	if s == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
+		return
+	}
+	stream, err := s.GetCommandStream(nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	audit, err := s.ListControlAudit(nodeID, 50)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if audit == nil {
+		audit = []models.AuditEvent{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stream": stream, "audit": audit})
 }
 
 func handleGetMetrics(w http.ResponseWriter, r *http.Request, s *store.Store) {
@@ -3470,16 +3769,30 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 	}
 	configureWebsocketRead(conn)
 
+	// Registering replaces any older connection for this node and fences it;
+	// the returned generation identifies this connection for the rest of its
+	// life. Only the current generation may submit status, metrics, heartbeats
+	// or latency results.
+	generation := h.Register(node.ID, conn)
+	if generation == 0 {
+		// Hub is closed.
+		conn.Close()
+		return
+	}
+
 	writeLatencyMonitorConfigToConn(conn, s, node.ID)
-	h.Register(node.ID, conn)
 	stopKeepalive := startAgentWebsocketKeepalive(h, node.ID)
-	alertDispatcher.EnqueueHeartbeat(node, true, time.Now().Unix())
+	if h.IsCurrent(node.ID, generation) {
+		alertDispatcher.EnqueueHeartbeat(node, true, time.Now().Unix())
+	}
 	defer func() {
 		stopKeepalive()
-		alertDispatcher.EnqueueHeartbeat(node, false, time.Now().Unix())
+		if h.IsCurrent(node.ID, generation) {
+			alertDispatcher.EnqueueHeartbeat(node, false, time.Now().Unix())
+		}
 		alertDispatcher.Close()
 		conn.Close()
-		h.Unregister(node.ID, conn)
+		h.UnregisterGeneration(node.ID, generation)
 	}()
 
 	// Read loop: parse incoming agent messages and persist them.
@@ -3497,12 +3810,32 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 			continue
 		}
 
-		if envelope.Type == "agent_command_status" {
+		// Stale generations must not submit control-plane state: their
+		// events are ignored entirely.
+		if !h.IsCurrent(node.ID, generation) {
+			break
+		}
+
+		if envelope.Type == models.WSMessageTypeAgentHandshake {
+			handshakePayload, err := decodeWSPayload[models.AgentHandshakePayload](envelope.Payload)
+			if err != nil {
+				continue
+			}
+			handleAgentHandshake(node.ID, handshakePayload, generation, s, h)
+			continue
+		}
+
+		if envelope.Type == models.WSMessageTypeAgentCommandStatus {
 			statusPayload, err := decodeWSPayload[models.AgentCommandStatusPayload](envelope.Payload)
 			if err != nil {
 				continue
 			}
 			handleAgentCommandStatus(node.ID, statusPayload, s, h)
+			if statusPayload.RejectCode == models.CommandRejectSequenceGap && strings.TrimSpace(statusPayload.StreamID) != "" {
+				if _, reconcileErr := s.ReconcileCommandStream(node.ID, statusPayload.StreamID, statusPayload.RetiredWatermark); reconcileErr == nil {
+					resendPendingDeliveries(node.ID, s, h, generation)
+				}
+			}
 			continue
 		}
 
@@ -3560,6 +3893,64 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 				"data":      dashboardMetricsDataFromPayload(&payload),
 			},
 		})
+	}
+}
+
+// handleAgentHandshake reconciles the agent's command stream and watermark
+// with the server, replies with the handshake ack and resends any pending
+// deliveries in sequence order. Control commands are withheld until this
+// completes.
+func handleAgentHandshake(nodeID string, payload models.AgentHandshakePayload, generation uint64, s *store.Store, h *hub.Hub) {
+	if s == nil || h == nil {
+		return
+	}
+	if payload.ControlState == models.ControlStateQuarantined {
+		// Preserve a local quarantine report before reconciliation. A
+		// damaged local state must never be replaced by a fresh server state.
+		if _, err := s.EnsureCommandStream(nodeID); err != nil {
+			log.Printf("agent handshake: create stream for isolated node %s failed: %v", nodeID, err)
+			return
+		}
+		if err := s.SetNodeControlState(nodeID, payload.ControlState, payload.ControlReason); err != nil {
+			log.Printf("agent handshake: persist local control state for node %s failed: %v", nodeID, err)
+			return
+		}
+	}
+	stream, err := s.ReconcileCommandStream(nodeID, strings.TrimSpace(payload.StreamID), payload.RetiredWatermark)
+	if err != nil {
+		log.Printf("agent handshake: reconcile stream for node %s failed: %v", nodeID, err)
+		return
+	}
+
+	// Apply agent-verified execution facts (monotonic, seq-matched only).
+	if err := s.ApplyHandshakeBackfill(nodeID, payload.InProgress, payload.Records); err != nil {
+		log.Printf("agent handshake: backfill facts for node %s failed: %v", nodeID, err)
+	}
+	// Backfill may discover an undisposed unknown and transition the node to
+	// control-blocked, so reload the stream before constructing the ack.
+	if refreshed, refreshErr := s.GetCommandStream(nodeID); refreshErr == nil && refreshed != nil {
+		stream = refreshed
+	}
+	ack := models.AgentHandshakeAckPayload{
+		StreamID:         stream.StreamID,
+		NextSeq:          stream.NextSeq,
+		RetiredWatermark: stream.RetiredWatermark,
+		ControlState:     stream.ControlState,
+	}
+	switch stream.ControlState {
+	case models.ControlStateQuarantined:
+		ack.Message = "node quarantined: stream mismatch or local state corruption; operator action required"
+	case models.ControlStateBlocked:
+		ack.Message = "node control-blocked: undisposed unknown execution state"
+	}
+
+	if !h.CompleteHandshake(nodeID, generation) {
+		return
+	}
+	_ = h.SendToAgent(nodeID, models.WSMessage{Type: models.WSMessageTypeAgentHandshakeAck, Payload: ack})
+
+	if stream.ControlState == models.ControlStateNone {
+		resendPendingDeliveries(nodeID, s, h, generation)
 	}
 }
 
@@ -3881,6 +4272,8 @@ func handleDashboardWS(w http.ResponseWriter, r *http.Request, s *store.Store, h
 	defer ticker.Stop()
 	for {
 		select {
+		case <-h.Done():
+			return
 		case <-done:
 			return
 		case <-ticker.C:

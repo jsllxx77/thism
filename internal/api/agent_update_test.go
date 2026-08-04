@@ -49,6 +49,20 @@ func readNextAgentMessageOfType[T any](t *testing.T, conn *websocket.Conn, wantT
 	}
 }
 
+// completeAgentHandshake performs the stream/watermark handshake that gates
+// control commands under the new protocol: the server must not send commands
+// before the agent's stream state is reconciled.
+func completeAgentHandshake(t *testing.T, conn *websocket.Conn) models.AgentHandshakeAckPayload {
+	t.Helper()
+	if err := conn.WriteJSON(models.WSMessage{
+		Type:    models.WSMessageTypeAgentHandshake,
+		Payload: models.AgentHandshakePayload{},
+	}); err != nil {
+		t.Fatalf("send agent handshake: %v", err)
+	}
+	return readNextAgentMessageOfType[models.AgentHandshakeAckPayload](t, conn, models.WSMessageTypeAgentHandshakeAck)
+}
+
 func TestAgentReceivesLatencyMonitorConfigOnConnect(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()
@@ -203,6 +217,7 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 	}
 	defer agentConn.Close()
 	waitForOnline(t, h, "node-1")
+	completeAgentHandshake(t, agentConn)
 
 	requestBody := map[string]any{
 		"node_ids":       []string{"node-1"},
@@ -229,6 +244,9 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 	if payload.TargetVersion != "1.2.3" {
 		t.Fatalf("expected target version 1.2.3, got %q", payload.TargetVersion)
 	}
+	if payload.Seq != 1 || payload.StreamID == "" {
+		t.Fatalf("expected first sequenced command with stream id, got seq=%d stream=%q", payload.Seq, payload.StreamID)
+	}
 
 	var body struct {
 		Job     models.UpdateJob         `json:"job"`
@@ -242,6 +260,9 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 	}
 	if len(body.Targets) != 1 || body.Targets[0].Status != models.UpdateJobTargetStatusDispatched {
 		t.Fatalf("expected dispatched target, got %#v", body.Targets)
+	}
+	if body.Targets[0].DeliveryState != models.DeliveryStateSent || body.Targets[0].Seq != 1 || body.Targets[0].DeliveryAttempts < 1 {
+		t.Fatalf("expected committed sequenced delivery, got %#v", body.Targets[0])
 	}
 }
 
