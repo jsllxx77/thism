@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { BarChart3, FileText, Languages, LogIn, Moon, MoreHorizontal, RefreshCw, Settings2, Sun } from "lucide-react"
-import { api, type AccessMode } from "../lib/api"
+import { BarChart3, FileText, Github, Languages, LogIn, Moon, MoreHorizontal, RefreshCw, Settings2, Sun } from "lucide-react"
+import { api, type AccessMode, type VersionMeta } from "../lib/api"
 import { Button } from "../components/ui/button"
 import { RouteContainer } from "./RouteContainer"
 import { useThemeMode } from "../theme/mode"
@@ -25,6 +25,7 @@ export function AppShell() {
   const [accessMode, setAccessMode] = useState<AccessMode | null>(null)
   const [dashboardCache, setDashboardCache] = useState<DashboardCache | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
+  const [serverVersion, setServerVersion] = useState<string | null>(null)
   const mobileActionsRef = useRef<HTMLDivElement | null>(null)
   const showBack = location.pathname !== "/"
   const onSettingsPage = location.pathname.startsWith("/settings")
@@ -78,6 +79,26 @@ export function AppShell() {
       document.removeEventListener("keydown", onKeyDown)
     }
   }, [mobileActionsOpen])
+
+  useEffect(() => {
+    let active = true
+    const versionMetaRequest = (api as { versionMeta?: () => Promise<VersionMeta> }).versionMeta
+    if (!versionMetaRequest) {
+      return
+    }
+    void versionMetaRequest()
+      .then((meta) => {
+        if (active) {
+          setServerVersion(meta.version)
+        }
+      })
+      .catch(() => {
+        // Footer version is cosmetic; keep the footer visible without it.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   return (
     <div className="min-h-screen app-surface-bg text-slate-900 dark:text-slate-100">
@@ -280,6 +301,25 @@ export function AppShell() {
           {accessMode === null ? <ShellLoadingState /> : <Outlet context={{ refreshNonce, accessMode, dashboardCache, setDashboardCache }} />}
         </RouteContainer>
       </main>
+
+      <footer className="border-t border-slate-200/80 bg-white/90 backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/80">
+        <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-2 px-4 py-3 md:px-6 lg:px-8">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {messages.shell.footer.serverLabel}
+            {serverVersion ? ` ${serverVersion}` : ""}
+          </p>
+          <a
+            href="https://github.com/jsllxx77/thism"
+            target="_blank"
+            rel="noreferrer"
+            aria-label={messages.shell.footer.sourceCode}
+            title={messages.shell.footer.sourceCode}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-500 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+          >
+            <Github className="h-4 w-4" aria-hidden />
+          </a>
+        </div>
+      </footer>
     </div>
   )
 }

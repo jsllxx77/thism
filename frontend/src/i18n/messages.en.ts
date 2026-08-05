@@ -64,6 +64,10 @@ export const messagesEn = {
       themeLabels: {
         classic: "Classic",
       },
+      footer: {
+        serverLabel: "ThisM server",
+        sourceCode: "View source code on GitHub",
+      },
     },
     navigation: {
       openNavigation: "Open navigation",

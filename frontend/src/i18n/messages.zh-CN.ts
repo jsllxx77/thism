@@ -64,6 +64,10 @@ export const messagesZhCN = {
       themeLabels: {
         classic: "经典",
       },
+      footer: {
+        serverLabel: "ThisM 服务端",
+        sourceCode: "在 GitHub 查看源码",
+      },
     },
     navigation: {
       openNavigation: "打开导航",
