@@ -300,26 +300,21 @@ export function AppShell() {
         <RouteContainer showBack={showBack} onBack={() => navigate("/")}>
           {accessMode === null ? <ShellLoadingState /> : <Outlet context={{ refreshNonce, accessMode, dashboardCache, setDashboardCache }} />}
         </RouteContainer>
-      </main>
-
-      <footer className="border-t border-slate-200/80 bg-white/90 backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/80">
-        <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-2 px-4 py-3 md:px-6 lg:px-8">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {messages.shell.footer.serverLabel}
-            {serverVersion ? ` ${serverVersion}` : ""}
-          </p>
+        <p className="mt-8 flex items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+          {messages.shell.footer.serverLabel}
+          {serverVersion ? ` ${serverVersion}` : ""}
           <a
             href="https://github.com/jsllxx77/thism"
             target="_blank"
             rel="noreferrer"
             aria-label={messages.shell.footer.sourceCode}
             title={messages.shell.footer.sourceCode}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-500 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+            className="inline-flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-900 dark:hover:text-slate-300"
           >
-            <Github className="h-4 w-4" aria-hidden />
+            <Github className="h-3.5 w-3.5" aria-hidden />
           </a>
-        </div>
-      </footer>
+        </p>
+      </main>
     </div>
   )
 }
