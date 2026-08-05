@@ -3056,7 +3056,13 @@ func deliverTargets(w http.ResponseWriter, r *http.Request, s *store.Store, h *h
 
 // resendPendingDeliveries delivers all pending commands for a node whose
 // sequence is beyond the agent's retired watermark, strictly in sequence
-// order. Called after the handshake reconciles the stream.
+// order. Called after the handshake reconciles the stream, after a
+// sequence-gap rejection, and once per connection after the handshake grace
+// period (see hub.HandshakeGracePeriod) so agents that never handshake still
+// receive their pending commands. Idempotent: already-delivered commands
+// (delivery_state sent/sending) with no retirement are re-sent for the agent
+// to deduplicate or reject, and nothing is sent twice after the agent retires
+// a sequence.
 func resendPendingDeliveries(nodeID string, s *store.Store, h *hub.Hub, generation uint64) {
 	if s == nil || h == nil || !h.IsCurrent(nodeID, generation) {
 		return
@@ -3779,6 +3785,18 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request, s *store.Store, h *hu
 		conn.Close()
 		return
 	}
+
+	// Legacy-agent fallback: agents that predate the stream/watermark
+	// handshake never send one, so the handshake-triggered resend never fires
+	// and their pending commands would stay stuck forever (server withholds
+	// commands until HandshakeReady, which only the grace-period fallback
+	// opens for them). Schedule a delivery sweep after the handshake grace
+	// period; it no-ops when the connection was replaced, the node is
+	// quarantined/blocked, or there is nothing pending (deliveries are
+	// idempotent and filtered by seq > retired watermark).
+	time.AfterFunc(hub.HandshakeGracePeriod, func() {
+		resendPendingDeliveries(node.ID, s, h, generation)
+	})
 
 	writeLatencyMonitorConfigToConn(conn, s, node.ID)
 	stopKeepalive := startAgentWebsocketKeepalive(h, node.ID)

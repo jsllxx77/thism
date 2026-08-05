@@ -266,6 +266,112 @@ func TestCreateBatchSelfUpdateDispatchesToOnlineAgent(t *testing.T) {
 	}
 }
 
+// TestLegacyAgentWithoutHandshakeReceivesUpdateAfterGrace reproduces the
+// deadlock where a server running the stream/watermark handshake protocol
+// withholds commands from an older agent that never sends a handshake: the
+// update command must still be delivered after the handshake grace period via
+// the connection-time delivery sweep.
+func TestLegacyAgentWithoutHandshakeReceivesUpdateAfterGrace(t *testing.T) {
+	oldGrace := hub.HandshakeGracePeriod
+	hub.HandshakeGracePeriod = 500 * time.Millisecond
+	defer func() { hub.HandshakeGracePeriod = oldGrace }()
+
+	s, _ := store.New(":memory:")
+	defer s.Close()
+	h := hub.New(s)
+	go h.Run()
+
+	router := api.NewRouter(s, h, "admin-token", nil)
+	server := newIPv4TestServer(router)
+	defer server.Close()
+
+	err := s.UpsertNode(&models.Node{ID: "node-1", Name: "agent-node", Token: "agent-token-1", CreatedAt: time.Now().Unix()})
+	if err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	agentURL := *baseURL
+	agentURL.Scheme = "ws"
+	agentURL.Path = "/ws/agent"
+	agentQuery := agentURL.Query()
+	agentQuery.Set("token", "agent-token-1")
+	agentURL.RawQuery = agentQuery.Encode()
+
+	// Legacy agent: connects and reports metrics but never sends the
+	// stream/watermark handshake.
+	agentConn, _, err := websocket.DefaultDialer.Dial(agentURL.String(), http.Header{})
+	if err != nil {
+		t.Fatalf("dial agent websocket: %v", err)
+	}
+	defer agentConn.Close()
+	waitForOnline(t, h, "node-1")
+
+	requestBody := map[string]any{
+		"node_ids":       []string{"node-1"},
+		"target_version": "1.2.3",
+		"download_url":   "https://updates.example/thism-agent",
+		"sha256":         "abc123",
+		"signature":      "deadbeef",
+	}
+	raw, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-updates", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 when creating update job, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	// Inside the grace period the command must be withheld (delivery pending),
+	// then the sweep delivers it after the deadline.
+	var body struct {
+		Job     models.UpdateJob         `json:"job"`
+		Targets []models.UpdateJobTarget `json:"targets"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Targets[0].DeliveryState != models.DeliveryStateSendFailed {
+		t.Fatalf("expected withheld delivery inside grace period, got %#v", body.Targets[0])
+	}
+
+	payload := readNextAgentMessageOfType[models.AgentCommandPayload](t, agentConn, "agent_command")
+	if payload.Kind != models.AgentCommandKindSelfUpdate {
+		t.Fatalf("expected self_update kind, got %q", payload.Kind)
+	}
+	if payload.TargetVersion != "1.2.3" {
+		t.Fatalf("expected target version 1.2.3, got %q", payload.TargetVersion)
+	}
+	if payload.Seq != 1 || payload.StreamID == "" {
+		t.Fatalf("expected first sequenced command with stream id, got seq=%d stream=%q", payload.Seq, payload.StreamID)
+	}
+
+	// The delivery must now be recorded as sent with the execution still
+	// pending (the legacy agent has not reported any status yet). The sweep
+	// commits the DB facts after the network write, so poll briefly.
+	var target *models.UpdateJobTarget
+	pollDeadline := time.Now().Add(2 * time.Second)
+	for {
+		target, err = s.GetUpdateJobTarget(body.Job.ID, "node-1")
+		if err != nil {
+			t.Fatalf("reload target: %v", err)
+		}
+		if target.DeliveryState == models.DeliveryStateSent && target.Status == models.UpdateJobTargetStatusDispatched {
+			break
+		}
+		if time.Now().After(pollDeadline) {
+			t.Fatalf("expected sent delivery with dispatched target after grace sweep, got delivery=%s status=%s", target.DeliveryState, target.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestCreateBatchSelfUpdateMarksOfflineNodesSkipped(t *testing.T) {
 	s, _ := store.New(":memory:")
 	defer s.Close()

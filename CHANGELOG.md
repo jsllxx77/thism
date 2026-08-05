@@ -6,6 +6,10 @@ This file tracks release-facing changes for tagged versions and the upcoming `Un
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent updates no longer deadlock when a server running the stream/watermark handshake protocol targets agents that predate the handshake (or any agent that never completes it). Control commands are now delivered after a handshake grace period (`hub.HandshakeGracePeriod`, 30s) instead of being withheld forever, and each agent connection schedules a pending-delivery sweep after the grace period. Previously such jobs stayed `pending` with `delivery_error = "agent handshake pending"` and never progressed; the only workaround was manually reinstalling the agent.
+
 ## [0.6.3] - 2026-05-21
 
 ### Added

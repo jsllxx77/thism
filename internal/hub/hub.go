@@ -29,13 +29,27 @@ type writeDeadlineSetter interface {
 	SetWriteDeadline(t time.Time) error
 }
 
+// HandshakeGracePeriod is how long the server waits for the stream/watermark
+// handshake before treating the connection as deliverable anyway. Agents that
+// implement the handshake protocol send it immediately on connect (well under
+// a second), so the grace period only expires for connections that will never
+// handshake: legacy agents running a protocol older than the handshake,
+// unknown/rolled-back builds, or future protocol mismatches. Failing open
+// after the grace period keeps agent update commands flowing to those agents
+// instead of leaving them stuck in pending forever; every agent version either
+// executes "agent_command" messages (legacy agents) or ignores unknown message
+// types, so delivery is safe in both directions. Exported as a var so tests
+// can shorten it.
+var HandshakeGracePeriod = 30 * time.Second
+
 type agentConn struct {
-	nodeID        string
-	generation    uint64
-	conn          agentSocket
-	writeMu       sync.Mutex
-	fenced        bool
-	handshakeDone bool
+	nodeID            string
+	generation        uint64
+	conn              agentSocket
+	writeMu           sync.Mutex
+	fenced            bool
+	handshakeDone     bool
+	handshakeDeadline time.Time
 }
 
 type unregisterRequest struct {
@@ -176,9 +190,10 @@ func (h *Hub) Register(nodeID string, conn agentSocket) uint64 {
 	}
 	h.nextGen++
 	entry := &agentConn{
-		nodeID:     nodeID,
-		generation: h.nextGen,
-		conn:       conn,
+		nodeID:            nodeID,
+		generation:        h.nextGen,
+		conn:              conn,
+		handshakeDeadline: time.Now().Add(HandshakeGracePeriod),
 	}
 	old := h.agents[nodeID]
 	if old != nil {
@@ -289,8 +304,16 @@ func (h *Hub) CompleteHandshake(nodeID string, generation uint64) bool {
 }
 
 // HandshakeReady reports whether the current connection of a node has
-// completed the stream/watermark handshake. Control commands must only be sent
-// through SendToAgent when this is true (and the store control state is OK).
+// completed the stream/watermark handshake, or whether the handshake grace
+// period has expired. Control commands must only be sent through SendToAgent
+// when this is true (and the store control state is OK).
+//
+// The grace-period fallback is deliberate: agents running a protocol older
+// than the handshake never send one, and without this fallback the server
+// would withhold their agent-update commands forever (they can only be
+// upgraded by receiving exactly that command). New-protocol agents handshake
+// immediately on connect, so they are unaffected; handshake gating still
+// applies for the full grace period.
 func (h *Hub) HandshakeReady(nodeID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -298,7 +321,13 @@ func (h *Hub) HandshakeReady(nodeID string) bool {
 		return false
 	}
 	current := h.agents[nodeID]
-	return current != nil && !current.fenced && current.handshakeDone
+	if current == nil || current.fenced {
+		return false
+	}
+	if current.handshakeDone {
+		return true
+	}
+	return time.Now().After(current.handshakeDeadline)
 }
 
 // CurrentGeneration returns the generation of the current node connection, or

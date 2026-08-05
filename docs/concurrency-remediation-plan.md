@@ -206,6 +206,13 @@ API 创建自更新任务
 2. 使用临时文件、同步、原子替换和损坏检测，避免部分写入被当成有效水位。
 3. Agent 启动时校验本地状态；已有 node 凭据但状态缺失、损坏或无法原子恢复时进入 `control-quarantined`。
 4. 新 WebSocket 连接先完成 stream/watermark handshake，再允许控制命令；握手期间仍可上报基础监控。
+
+**兼容性兜底（已在 v0.6.32 之后实现）：** 握手不是硬性前提——`hub.HandshakeGracePeriod`（默认 30 秒）内未完成握手的连接会被视为旧协议 agent，命令照常投递：
+
+- 新协议 agent 连接后立即发握手（远小于宽限期），不受影响；宽限期内命令仍被扣留。
+- 旧协议 agent（早于握手协议的版本、未知/回滚构建、未来协议不匹配）永远不会握手，宽限期后服务端放行投递，且每次连接后 30 秒触发一次待投递清扫（`resendPendingDeliveries`，幂等，按 `seq > retired watermark` 过滤）。
+- 旧 agent 收到 `agent_command` 会正常执行自更新；更新完成后以新协议重连并握手，stream 通过握手对账。
+- 验收：宽限期内不握手不投递；宽限期后不握手也必须收到待投递命令（`TestLegacyAgentWithoutHandshakeReceivesUpdateAfterGrace`）。
 5. 新连接建立后重放窗口内详细状态和当前隔离状态，不依赖旧 socket。
 
 **验收标准：**

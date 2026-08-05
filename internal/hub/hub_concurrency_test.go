@@ -173,6 +173,39 @@ func TestHubHandshakeGating(t *testing.T) {
 	}
 }
 
+// TestHubHandshakeGraceFallback verifies that a connection which never
+// completes the handshake (a legacy agent running a protocol older than the
+// stream/watermark handshake) becomes deliverable after HandshakeGracePeriod
+// instead of being gated forever.
+func TestHubHandshakeGraceFallback(t *testing.T) {
+	oldGrace := hub.HandshakeGracePeriod
+	hub.HandshakeGracePeriod = 50 * time.Millisecond
+	defer func() { hub.HandshakeGracePeriod = oldGrace }()
+
+	h := hub.New(nil)
+	go h.Run()
+	defer h.Close()
+	time.Sleep(10 * time.Millisecond)
+
+	conn := &stubAgentSocket{}
+	gen := h.Register("node-1", conn)
+	time.Sleep(10 * time.Millisecond)
+
+	if h.HandshakeReady("node-1") {
+		t.Fatal("expected handshake to be pending inside the grace period")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !h.HandshakeReady("node-1") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !h.HandshakeReady("node-1") {
+		t.Fatal("expected handshake to be bypassed after the grace period without a handshake")
+	}
+	if !h.CompleteHandshake("node-1", gen) {
+		t.Fatal("expected handshake completion to still succeed after the grace period")
+	}
+}
+
 // TestHubCloseLifecycle verifies that every entry point returns quickly after
 // Close and the event loop exits.
 func TestHubCloseLifecycle(t *testing.T) {
