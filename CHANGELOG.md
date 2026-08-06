@@ -4,11 +4,15 @@ All notable changes to this project will be documented in this file.
 
 This file tracks release-facing changes for tagged versions and the upcoming `Unreleased` section.
 
-## [Unreleased]
+## [0.6.35] - 2026-08-06
 
 ### Added
 
-- The app shell now shows a global footer with the server version (`/api/meta/version`) and a GitHub icon linking to https://github.com/jsllxx77/thism.
+- The app shell now shows the server version (`/api/meta/version`) and a GitHub icon linking to https://github.com/jsllxx77/thism as a subtle right-aligned row at the bottom of the page content (no separate footer bar).
+
+### Fixed
+
+- Dialogs (edit/new latency monitor, batch upgrade, node rename/tags, add node, notifications) are now scrollable when their content exceeds the viewport height — previously on mobile screens tall dialogs were clipped top and bottom with no way to reach the overflow, because Radix Dialog locks body scroll.
 
 ## [0.6.33] - 2026-08-05
 
