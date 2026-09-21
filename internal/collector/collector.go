@@ -363,11 +363,6 @@ func (c *Collector) sampleCPUStats() (cpuDeltaStats, bool) {
 	return stats, true
 }
 
-func (c *Collector) sampleCPUPercent() (float64, bool) {
-	stats, ok := c.sampleCPUStats()
-	return stats.UsagePercent, ok
-}
-
 func (c *Collector) SetAgentVersion(version string) {
 	trimmed := strings.TrimSpace(version)
 	if trimmed != "" && trimmed != "dev" {
@@ -489,16 +484,6 @@ func isLoopbackInterfaceName(name string) bool {
 	return normalized == "lo" || strings.HasPrefix(normalized, "lo")
 }
 
-func isTunnelInterfaceName(name string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{"tun", "tap", "wg", "tailscale", "zt", "ppp", "ipsec", "utun"} {
-		if strings.HasPrefix(normalized, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func parseIPv4DefaultRouteInterfaceNames(raw []byte) map[string]struct{} {
 	names := map[string]struct{}{}
 	for index, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
@@ -548,31 +533,6 @@ func parseIPv6DefaultRouteInterfaceNames(raw []byte) map[string]struct{} {
 	return names
 }
 
-func defaultRouteInterfaceNames() map[string]struct{} {
-	if runtime.GOOS != "linux" {
-		return nil
-	}
-
-	names := map[string]struct{}{}
-	for _, routeFile := range []struct {
-		path  string
-		parse func([]byte) map[string]struct{}
-	}{
-		{path: ipv4DefaultRoutePath, parse: parseIPv4DefaultRouteInterfaceNames},
-		{path: ipv6DefaultRoutePath, parse: parseIPv6DefaultRouteInterfaceNames},
-	} {
-		raw, err := readFileFunc(routeFile.path)
-		if err != nil || len(raw) == 0 {
-			continue
-		}
-		for interfaceName := range routeFile.parse(raw) {
-			names[interfaceName] = struct{}{}
-		}
-	}
-
-	return names
-}
-
 func nonLoopbackInterfaceNames() map[string]struct{} {
 	names := map[string]struct{}{}
 	interfaces, err := netInterfacesFunc()
@@ -586,30 +546,6 @@ func nonLoopbackInterfaceNames() map[string]struct{} {
 		}
 		names[interfaceName] = struct{}{}
 	}
-	return names
-}
-
-func supplementalLinuxInterfaceNames() map[string]struct{} {
-	names := map[string]struct{}{}
-	if runtime.GOOS != "linux" {
-		return names
-	}
-
-	interfaces, err := netInterfacesFunc()
-	if err != nil {
-		return names
-	}
-
-	for _, iface := range interfaces {
-		interfaceName := strings.TrimSpace(iface.Name)
-		if interfaceName == "" || iface.Flags&net.FlagLoopback != 0 || isLoopbackInterfaceName(interfaceName) {
-			continue
-		}
-		if iface.Flags&net.FlagPointToPoint != 0 || isTunnelInterfaceName(interfaceName) {
-			names[interfaceName] = struct{}{}
-		}
-	}
-
 	return names
 }
 
@@ -2495,11 +2431,6 @@ func selectTopProcesses(processes []models.Process, limit int) []models.Process 
 		sorted = sorted[:limit]
 	}
 	return sorted
-}
-
-func detectLocalIP() string {
-	ip, _ := detectLocalNetworkMetadata()
-	return ip
 }
 
 func detectLocalIPFromAddrs(addrs []net.Addr) string {

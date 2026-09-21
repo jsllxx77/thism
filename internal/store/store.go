@@ -952,12 +952,6 @@ func latencyMonitorFamily(monitor *models.LatencyMonitor) ipFamily {
 	return ipFamilyUnknown
 }
 
-func latencyMonitorAppliesToNodeIP(monitor *models.LatencyMonitor, nodeIP string) bool {
-	monitorFamily := latencyMonitorFamily(monitor)
-	nodeFamily := resolveIPFamily(nodeIP)
-	return monitorFamily == ipFamilyUnknown || nodeFamily == ipFamilyUnknown || monitorFamily == nodeFamily
-}
-
 func normalizeIPFamilies(families []string) []string {
 	seen := map[string]struct{}{}
 	normalized := make([]string, 0, len(families))
@@ -2137,21 +2131,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	return err
 }
 
-func (s *Store) CreateUpdateJobTarget(target *models.UpdateJobTarget) error {
-	if target == nil {
-		return fmt.Errorf("nil update job target")
-	}
-	updatedAt := target.UpdatedAt
-	if updatedAt <= 0 {
-		updatedAt = time.Now().Unix()
-	}
-	_, err := s.db.Exec(`
-INSERT INTO update_job_targets (job_id, node_id, status, message, updated_at, reported_version)
-VALUES (?, ?, ?, ?, ?, ?)
-`, target.JobID, target.NodeID, target.Status, target.Message, updatedAt, target.ReportedVersion)
-	return err
-}
-
 func (s *Store) CreateUpdateJobTargets(jobID string, nodeIDs []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -2312,33 +2291,6 @@ func (s *Store) RecomputeUpdateJobStatus(jobID string) (*models.UpdateJob, error
 		return job, err
 	}
 	return job, nil
-}
-
-func (s *Store) MarkRestartingUpdateJobTargetsSucceeded(nodeID, reportedVersion string) error {
-	rows, err := s.db.Query(`SELECT job_id FROM update_job_targets WHERE node_id = ? AND status = ?`, nodeID, models.UpdateJobTargetStatusRestarting)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var jobIDs []string
-	for rows.Next() {
-		var jobID string
-		if err := rows.Scan(&jobID); err != nil {
-			return err
-		}
-		jobIDs = append(jobIDs, jobID)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, jobID := range jobIDs {
-		if err := s.UpdateUpdateJobTargetStatus(jobID, nodeID, models.UpdateJobTargetStatusSucceeded, "agent reconnected after restart", reportedVersion); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // -------------------------------------------------------------------------

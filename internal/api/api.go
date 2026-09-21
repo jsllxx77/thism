@@ -95,15 +95,6 @@ func (c AuthConfig) PasswordLoginEnabled() bool {
 	return strings.TrimSpace(c.Username) != "" && c.Password != ""
 }
 
-func (c AuthConfig) ValidPasswordLogin(username, password string) bool {
-	if !c.PasswordLoginEnabled() {
-		return false
-	}
-	userMatch := constantTimeStringEqual(username, c.Username)
-	passMatch := security.VerifyPassword(password, c.Password)
-	return userMatch && passMatch
-}
-
 type authManager struct {
 	mu         sync.RWMutex
 	adminToken string
@@ -269,10 +260,6 @@ func (m *authManager) PasswordLoginEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.username != "" && m.password != ""
-}
-
-func (m *authManager) ValidPasswordLogin(username, password string) bool {
-	return m.AuthenticatePassword(username, password, nil)
 }
 
 func (m *authManager) AuthenticatePassword(username, password string, persistFn func(username, password string) error) bool {
@@ -2933,68 +2920,6 @@ func handleGetAgentUpdateJob(w http.ResponseWriter, r *http.Request, s *store.St
 	writeJSON(w, http.StatusOK, updateJobResponse{Job: job, Targets: targets})
 }
 
-func handleCreateAgentUpdates(w http.ResponseWriter, r *http.Request, s *store.Store, h *hub.Hub) {
-	if s == nil || h == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store unavailable"})
-		return
-	}
-	var req struct {
-		NodeIDs       []string `json:"node_ids"`
-		TargetVersion string   `json:"target_version"`
-		DownloadURL   string   `json:"download_url"`
-		SHA256        string   `json:"sha256"`
-		Signature     string   `json:"signature"`
-	}
-	if !decodeJSONBody(w, r, &req) {
-		return
-	}
-	nodeIDs := make([]string, 0, len(req.NodeIDs))
-	seen := map[string]struct{}{}
-	for _, nodeID := range req.NodeIDs {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
-			continue
-		}
-		seen[nodeID] = struct{}{}
-		nodeIDs = append(nodeIDs, nodeID)
-	}
-	if len(nodeIDs) == 0 || strings.TrimSpace(req.TargetVersion) == "" || strings.TrimSpace(req.DownloadURL) == "" || strings.TrimSpace(req.SHA256) == "" || strings.TrimSpace(req.Signature) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	for _, nodeID := range nodeIDs {
-		node, err := s.GetNodeByID(nodeID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if node == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "node not found"})
-			return
-		}
-	}
-	jobID, err := generateHex()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	now := time.Now().Unix()
-	job := &models.UpdateJob{ID: jobID, Kind: models.AgentCommandKindSelfUpdate, TargetVersion: strings.TrimSpace(req.TargetVersion), DownloadURL: strings.TrimSpace(req.DownloadURL), SHA256: strings.TrimSpace(req.SHA256), Signature: strings.TrimSpace(req.Signature), CreatedAt: now, UpdatedAt: now, CreatedBy: "admin", Status: models.UpdateJobStatusPending}
-	// Job, targets, streams and sequences are created in one transaction.
-	targets, err := s.CreateUpdateJobWithTargets(job, nodeIDs)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	deliverTargets(w, r, s, h, job, targets)
-	storedJob, _ := s.GetUpdateJob(job.ID)
-	storedTargets, _ := s.ListUpdateJobTargets(job.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"job": storedJob, "targets": storedTargets})
-}
-
 // deliverTargets attempts delivery of a freshly created job to each target.
 // The online check is only a first-pass filter: delivery correctness comes
 // from the linearized SendToAgent result, which is recorded as a server-owned
@@ -3110,25 +3035,6 @@ func resendPendingDeliveries(nodeID string, s *store.Store, h *hub.Hub, generati
 		_ = s.RecordDelivery(target.JobID, target.NodeID, models.DeliveryStateSent, "", int64(generation))
 		_, _ = s.ApplyExecutionTransition(target.JobID, target.NodeID, models.UpdateJobTargetStatusDispatched, "command dispatched", "")
 	}
-}
-
-func handleGetAgentUpdate(w http.ResponseWriter, r *http.Request, s *store.Store) {
-	jobID := chi.URLParam(r, "id")
-	job, err := s.GetUpdateJob(jobID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if job == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
-		return
-	}
-	targets, err := s.ListUpdateJobTargets(jobID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"job": job, "targets": targets})
 }
 
 // handleCancelAgentUpdateJob records a persistent cancel tombstone for the
@@ -4407,7 +4313,7 @@ func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]
 		return map[string]any{}
 	}
 
-	diskUsed, diskTotal := aggregatePayloadDiskTotals(payload.Disk)
+	diskUsed, diskTotal := models.AggregateDiskTotals(payload.Disk)
 	data := map[string]any{
 		"ts":             payload.TS,
 		"cpu":            payload.CPU,
@@ -4432,8 +4338,4 @@ func dashboardMetricsDataFromPayload(payload *models.MetricsPayload) map[string]
 	}
 
 	return data
-}
-
-func aggregatePayloadDiskTotals(disks []models.DiskStats) (uint64, uint64) {
-	return models.AggregateDiskTotals(disks)
 }

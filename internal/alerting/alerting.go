@@ -234,13 +234,6 @@ func clampPercent(value float64) float64 {
 	return math.Round(value*10) / 10
 }
 
-func (e *Evaluator) OfflineGrace(settings models.NotificationSettings) time.Duration {
-	if e != nil && e.OfflineThreshold > 0 {
-		return e.OfflineThreshold
-	}
-	return time.Duration(settings.NodeOfflineGraceMinutes) * time.Minute
-}
-
 func (e *Evaluator) now() time.Time {
 	if e != nil && e.Now != nil {
 		return e.Now()
