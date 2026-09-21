@@ -3,7 +3,6 @@ package geo
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -163,14 +162,6 @@ func DefaultCandidatePaths() []string {
 		DefaultMaxMindName,
 		DefaultIP2LocationName,
 	}
-}
-
-func MustNewResolver(dbPath string) *Resolver {
-	resolver, err := NewResolver(dbPath)
-	if err != nil {
-		log.Fatalf("geoip: failed to open database: %v", err)
-	}
-	return resolver
 }
 
 func (r *Resolver) Close() error {
